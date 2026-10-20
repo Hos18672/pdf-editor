@@ -4,7 +4,7 @@ import {
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
-import { readFontMetrics, FontMetrics } from './fonts';
+import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import type { ExportInput, EditorObject, FontFamily, TextEdit } from './types';
 
 const f = fmtNum;
@@ -103,6 +103,19 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       }
       return metrics.get(res);
     };
+    const uniMaps = new Map<string, Record<string, number>>();
+    const toUni = (res: string) => {
+      if (!uniMaps.has(res)) {
+        let map: Record<string, number> = {};
+        try {
+          const fd = fontDict?.lookupMaybe(PDFName.of(res), PDFDict);
+          const tu = fd?.lookup(PDFName.of('ToUnicode'));
+          if (tu instanceof PDFRawStream) map = parseToUnicode(decodePDFRawStream(tu).decode());
+        } catch { map = {}; }
+        uniMaps.set(res, map);
+      }
+      return uniMaps.get(res)!;
+    };
 
     const original = readContents(doc, leaf);
     const ops = tokenize(original);
@@ -126,22 +139,29 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         const count = new Map<string, number>();
         hits.forEach((g) => count.set(g.style.fontRes, (count.get(g.style.fontRes) ?? 0) + 1));
         const main = [...count.entries()].sort((a, b) => b[1] - a[1])[0][0];
-        const first = hits.filter((g) => g.style.fontRes === main)
+        // start where the line starts, whichever font its first glyph uses
+        const first = hits
           .reduce((a, b) => (b.origin[0] * ux + b.origin[1] * uy < a.origin[0] * ux + a.origin[1] * uy ? b : a));
         const st = first.style;
-        const fm = fonts(st.fontRes);
-        const fs = st.fontSize * e.sizeScale;
         const fb = await stdFont(e.fallback.family, e.fallback.bold, e.fallback.italic);
         const fbKey = leaf.newFontDictionary('FbE', fb.ref).asString();
-        const resKey = '/' + st.fontRes;
+        // Every font the line already uses can supply glyphs: the main one first, then the
+        // others (a line is often split across several subset / Type3 fonts, e.g. Chrome prints).
+        const sources: Source[] = [];
+        const order = [main, ...[...count.keys()].filter((k) => k !== main)];
+        for (const res of order) {
+          const g0 = hits.find((g) => g.style.fontRes === res)!;
+          const map = res === main && Object.keys(e.charMap).length ? e.charMap : toUni(res);
+          sources.push({ key: '/' + res, bpc: fonts(res)?.bytesPerCode ?? 1, map, fs: g0.style.fontSize * e.sizeScale });
+        }
         let s = 'q ' + st.ctm.map(f).join(' ') + ' cm BT ';
         s += `${f(st.Tc)} Tc ${f(st.Tw)} Tw ${f(st.Tz)} Tz ${f(st.Ts)} Ts ${st.Tr === 3 ? 0 : st.Tr} Tr `;
         s += e.color ? rgb(e.color, 'rg') + ' ' : st.fill.join(' ') + ' ';
         s += first.tm.map(f).join(' ') + ' Tm ';
-        const lead = fs * 1.2;
+        const lead = sources[0].fs * 1.2;
         lines.forEach((line, li) => {
           if (li > 0) s += `0 ${f(-lead)} Td `;
-          s += encodeMixed(line, e.charMap, fm?.bytesPerCode ?? 1, resKey, fbKey, fs, fb, safe);
+          s += encodeMixed(line.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe);
         });
         s += 'ET Q\n';
         add += s;
@@ -213,41 +233,43 @@ function whiteoutRegion(e: TextEdit): string {
   return `q ${rgb(e.bgColor, 'rg')} ${pts.map(([x, y], i) => `${f(x)} ${f(y)} ${i ? 'l' : 'm'}`).join(' ')} h f Q\n`;
 }
 
+interface Source { key: string; bpc: number; map: Record<string, number>; fs: number }
+
 function encodeMixed(
-  line: string, charMap: Record<string, number>, bpc: number, resKey: string, fbKey: string,
-  fs: number, fb: PDFFont, safe: (f: PDFFont, s: string) => string,
+  line: string, sources: Source[], fbKey: string, fbSize: number, fb: PDFFont, safe: (f: PDFFont, s: string) => string,
 ): string {
-  // split into runs: original-font glyphs vs fallback glyphs
+  // split into runs per font: the line's own fonts first, a standard font for anything else
   let out = '';
-  let cur: 'orig' | 'fb' | null = null;
+  let cur = -2; // source index, -1 = fallback
   let buf: number[] = [];
   let fbBuf = '';
   const flush = () => {
-    if (cur === 'orig' && buf.length) {
-      out += `${resKey} ${f(fs)} Tf [`;
+    if (cur >= 0 && buf.length) {
+      const src = sources[cur];
+      out += `${src.key} ${f(src.fs)} Tf [`;
       let bytes: number[] = [];
       const parts: string[] = [];
       for (const c of buf) {
-        if (c < 0) { // missing space
+        if (c < 0) { // a space the font doesn't have
           if (bytes.length) parts.push(toHex(Uint8Array.from(bytes)));
           bytes = [];
           parts.push('-260');
-        } else if (bpc === 2) bytes.push(c >> 8, c & 0xff);
+        } else if (src.bpc === 2) bytes.push(c >> 8, c & 0xff);
         else bytes.push(c & 0xff);
       }
       if (bytes.length) parts.push(toHex(Uint8Array.from(bytes)));
       out += parts.join(' ') + '] TJ ';
-    } else if (cur === 'fb' && fbBuf) {
-      out += `${fbKey} ${f(fs)} Tf ${fb.encodeText(safe(fb, fbBuf)).toString()} Tj `;
+    } else if (cur === -1 && fbBuf) {
+      out += `${fbKey} ${f(fbSize)} Tf ${fb.encodeText(safe(fb, fbBuf)).toString()} Tj `;
     }
     buf = [];
     fbBuf = '';
   };
   for (const ch of line) {
-    const code = charMap[ch];
-    const kind = code !== undefined || ch === ' ' ? 'orig' : 'fb';
-    if (kind !== cur) { flush(); cur = kind; }
-    if (kind === 'orig') buf.push(code !== undefined ? code : -1);
+    let idx = sources.findIndex((s) => s.map[ch] !== undefined);
+    if (idx < 0 && ch === ' ') idx = cur >= 0 ? cur : 0; // keep spaces in the current font (as a gap)
+    if (idx !== cur) { flush(); cur = idx; }
+    if (idx >= 0) buf.push(sources[idx].map[ch] ?? -1);
     else fbBuf += ch;
   }
   flush();

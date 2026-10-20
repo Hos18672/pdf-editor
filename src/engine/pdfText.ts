@@ -23,7 +23,10 @@ export interface TextRun {
   key: string;
   page: number;
   str: string;
+  /** main font of the run (most characters) */
   fontName: string;
+  /** characters per font, for runs that span several fonts */
+  fontChars?: Record<string, number>;
   /** PDF user space */
   region: { o: [number, number]; u: [number, number]; width: number; height: number };
 }
@@ -65,13 +68,21 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
   const charMap: Record<string, number> = {};
   const display: Record<string, string> = {};
   const gids: Record<string, number> = {};
-  if (font.isType3Font) return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids };
+  if (font.isType3Font) {
+    // Type3 glyphs are drawings, not a font file: every mapped code was drawn in this document
+    for (const [code, raw] of toUnicodeEntries(font.toUnicode)) {
+      const uni = raw?.normalize('NFC');
+      if (uni && [...uni].length === 1 && charMap[uni] === undefined) charMap[uni] = code;
+    }
+    return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids };
+  }
 
   let fk: any = null;
   if (font.data && !font.missingFile) {
     try { fk = fontkit.create(font.data as any); } catch { fk = null; }
   }
-  for (const [code, uni] of toUnicodeEntries(font.toUnicode)) {
+  for (const [code, raw] of toUnicodeEntries(font.toUnicode)) {
+    const uni = raw?.normalize('NFC');
     if (!uni || [...uni].length !== 1) continue;
     const fc = font.toFontChar?.[code] ?? code;
     let gid = 0;
@@ -110,10 +121,14 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       const gap = t - r.width;
       const sameLine = Math.abs(s) < r.height * 0.2 && Math.abs(height - r.height) < r.height * 0.15 &&
         Math.abs(u[0] - r.u[0]) < 0.01 && Math.abs(u[1] - r.u[1]) < 0.01;
-      if (sameLine && cur.fontName === it.fontName && gap > -r.height * 0.3 && gap < r.height * 0.7) {
+      // a line is one editable run even when the PDF splits it across fonts
+      const maxGap = cur.fontName === it.fontName ? 0.7 : 0.45;
+      if (sameLine && gap > -r.height * 0.3 && gap < r.height * maxGap) {
         if (gap > r.height * 0.12 && !cur.str.endsWith(' ') && !it.str.startsWith(' ')) cur.str += ' ';
         cur.str += it.str;
         r.width = t + it.width;
+        const fc = (cur.fontChars ??= { [cur.fontName]: [...cur.str].length - [...it.str].length });
+        fc[it.fontName] = (fc[it.fontName] ?? 0) + [...it.str].length;
         continue;
       }
       runs.push(cur);
@@ -121,6 +136,10 @@ export function buildRuns(items: any[], page: number): TextRun[] {
     cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: it.width, height } };
   }
   if (cur) runs.push(cur);
-  runs.forEach((r, i) => { r.key = `${page}:${i}`; r.str = r.str.replace(/\s+$/, ''); });
+  runs.forEach((r, i) => {
+    r.key = `${page}:${i}`;
+    r.str = r.str.replace(/\s+$/, '').normalize('NFC');
+    if (r.fontChars) r.fontName = Object.entries(r.fontChars).sort((a, b) => b[1] - a[1])[0][0];
+  });
   return runs;
 }

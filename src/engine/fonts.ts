@@ -124,3 +124,37 @@ export function readFontMetrics(ctx: PDFContext, fontDict: PDFDict): FontMetrics
   }
   return { bytesPerCode: 1, width: () => 0.5, isType3, baseFont };
 }
+
+/** Parse a ToUnicode CMap into unicode char (NFC) -> char code. Only single-character targets. */
+export function parseToUnicode(data: Uint8Array): Record<string, number> {
+  let s = '';
+  for (let i = 0; i < data.length; i++) s += String.fromCharCode(data[i]);
+  const out: Record<string, number> = {};
+  const uni = (hex: string) => {
+    const units: number[] = [];
+    for (let i = 0; i + 4 <= hex.length; i += 4) units.push(parseInt(hex.slice(i, i + 4), 16));
+    if (hex.length === 2) units.push(parseInt(hex, 16));
+    return String.fromCharCode(...units).normalize('NFC');
+  };
+  const put = (code: number, str: string) => {
+    if ([...str].length !== 1 || out[str] !== undefined) return;
+    out[str] = code;
+  };
+  for (const blk of s.matchAll(/beginbfchar([\s\S]*?)endbfchar/g)) {
+    for (const m of blk[1].matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]*)>/g)) put(parseInt(m[1], 16), uni(m[2]));
+  }
+  for (const blk of s.matchAll(/beginbfrange([\s\S]*?)endbfrange/g)) {
+    for (const m of blk[1].matchAll(/<([0-9a-fA-F]+)>\s*<([0-9a-fA-F]+)>\s*(<[0-9a-fA-F]*>|\[[^\]]*\])/g)) {
+      const lo = parseInt(m[1], 16), hi = Math.min(parseInt(m[2], 16), lo + 0xffff);
+      if (m[3].startsWith('[')) {
+        const items = [...m[3].matchAll(/<([0-9a-fA-F]*)>/g)].map((x) => x[1]);
+        items.forEach((h, i) => lo + i <= hi && put(lo + i, uni(h)));
+      } else {
+        const base = m[3].slice(1, -1);
+        const head = base.slice(0, -4), last = parseInt(base.slice(-4) || '0', 16);
+        for (let c = lo; c <= hi; c++) put(c, uni(head + (last + c - lo).toString(16).padStart(4, '0')));
+      }
+    }
+  }
+  return out;
+}

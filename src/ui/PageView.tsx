@@ -232,7 +232,8 @@ export function PageView(p: Props) {
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
               edit={p.edits[r.key]} editing={p.editing === r.key}
               onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
-              onCommit={(text) => {
+              onCommit={(raw) => {
+                const text = raw.normalize('NFC');
                 const prev = p.edits[r.key];
                 const next: RunEdit = { text, sizeScale: prev?.sizeScale ?? 1, color: prev?.color ?? null };
                 const unchanged = text === r.str && next.sizeScale === 1 && next.color === null;
@@ -331,7 +332,12 @@ function RunView({ run, vm, zoom, font, color, edit, editing, onStart, onCommit 
   const textStyle: React.CSSProperties = { fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop };
   return (
     <div className={`run edited${editing ? ' editing' : ''}`} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) onStart(); }}>
-      <div className="cover" style={{ background: bg }} />
+      <div className="cover" style={{
+        background: bg,
+        // hide the original glyphs completely, including accents and descenders
+        top: -(b.h * 0.16 * zoom) - 2, bottom: -2,
+        left: -Math.max(2, b.h * 0.06 * zoom), right: -Math.max(2, b.h * 0.06 * zoom),
+      }} />
       {editing ? (
         <textarea
           ref={taRef}
@@ -519,19 +525,19 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
       onPointerDown={start('move')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
       onDoubleClick={() => o.type === 'text' && onEditing(true)}>
       {inner}
-      {selected && !dragging && (
-        <div className="objbar" onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>
+      {selected && (
+        <div className={`objbar${by * zoom < 56 ? ' below' : ''}${dragging ? ' moving' : ''}`}
+          onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>
+          <button type="button" className="grip" aria-label="Move" title="Drag to move"
+            onPointerDown={start('grip')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+            <Icon name="move" size={18} />
+          </button>
+          <span className="sep" />
           {o.type === 'text' && !editing && (
-            <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="text" size={17} /></button>
+            <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="edit" size={18} /></button>
           )}
-          <button type="button" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate}><Icon name="copy" size={17} /></button>
-          <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={17} /></button>
-        </div>
-      )}
-      {selected && !isLine && (
-        <div className="grip" aria-label="Move" title="Drag to move" onMouseDown={keepFocus}
-          onPointerDown={start('grip')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-          <Icon name="move" size={15} />
+          <button type="button" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate}><Icon name="copy" size={18} /></button>
+          <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={18} /></button>
         </div>
       )}
       {selected && resizable && !editing && <div className="handle" onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} />}
