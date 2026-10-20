@@ -349,7 +349,7 @@ function Draft({ d, zoom, tool, style }: { d: { x0: number; y0: number; x1: numb
 // ---------------- existing text runs ----------------
 
 /** How far above / below its baseline each run can be covered without touching the neighbouring lines. */
-function lineRooms(runs: TextRun[]): Record<string, { up: number; down: number }> {
+export function lineRooms(runs: TextRun[]): Record<string, { up: number; down: number }> {
   const out: Record<string, { up: number; down: number }> = {};
   for (const r of runs) {
     const h = r.region.height;

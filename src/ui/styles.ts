@@ -122,12 +122,12 @@ button { cursor: pointer; }
 .check input:focus-visible + .box { outline: 2px solid var(--sel); outline-offset: 2px; }
 
 /* ---------- start ---------- */
-.start { height: 100%; overflow: auto; display: flex; flex-direction: column; container-type: inline-size; }
+.start { height: 100%; overflow: auto; background: var(--desk); color: var(--text); display: flex; flex-direction: column; container-type: inline-size; }
 .brandbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 16px clamp(20px, 4cqw, 64px); }
 .logo { width: 32px; height: 32px; border-radius: 9px; background: #1E2559; position: relative; overflow: hidden; flex: none; }
 .logo::before { content: ""; position: absolute; left: 9px; top: 7px; width: 14px; height: 18px; background: #fff; border-radius: 2px; }
 .logo::after { content: ""; position: absolute; left: 7px; right: 7px; top: 15px; height: 4px; background: #FFE14D; }
-.brand { font-weight: 700; font-size: 17px; letter-spacing: -.01em; }
+.brand { font-weight: 700; font-size: 17px; letter-spacing: -.01em; white-space: nowrap; }
 .brandbar .sp { flex: 1; }
 .brandbar .offline { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); margin-right: 6px; }
 .hero { flex: 1; display: flex; align-items: center; justify-content: center; padding: clamp(8px, 3cqw, 48px) clamp(20px, 4cqw, 64px) clamp(24px, 4cqw, 64px); }

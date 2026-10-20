@@ -14,7 +14,11 @@ export interface TextEdit {
   /** unicode char -> char code in the original font (only glyphs that exist in it) */
   charMap: Record<string, number>;
   fallback: { family: FontFamily; bold: boolean; italic: boolean };
-  bgColor: string; // used only when the text cannot be removed from the stream
+  bgColor: string; // used when the text cannot be removed from the stream, or sits on a scan
+  /** colour of the visible ink (for invisible OCR text over a scanned image) */
+  fgColor?: string;
+  /** free space above / below the baseline (user space) before the neighbouring lines */
+  room?: { up: number; down: number };
 }
 
 interface Base {

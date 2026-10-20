@@ -1,4 +1,4 @@
-import { Platform, StyleSheet, View } from 'react-native';
+import { Platform, StyleSheet, View, useColorScheme } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
@@ -25,15 +25,17 @@ async function savePdf(base64: string, name: string) {
 }
 
 export default function Index() {
+  const dark = useColorScheme() === 'dark';
   if (Platform.OS === 'web') {
+    // the page paints its own (themed) background
     return (
-      <View style={styles.fill}>
+      <View style={[styles.fill, { backgroundColor: 'transparent' }]}>
         <PdfEditorDom />
       </View>
     );
   }
   return (
-    <SafeAreaView style={styles.fill} edges={['top', 'bottom']}>
+    <SafeAreaView style={[styles.fill, dark && { backgroundColor: '#191C27' }]} edges={['top', 'bottom']}>
       <PdfEditorDom
         isNative
         pickPdf={pickPdf}

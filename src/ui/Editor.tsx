@@ -3,7 +3,7 @@ import { gesture } from './gesture';
 import { Icon } from './icons';
 import { openPdf } from './pdfjs';
 import { useHistory, uid, Tool, ToolStyle, RunEdit } from './store';
-import { PageView, PageInfo, PageData, FillMark } from './PageView';
+import { PageView, PageInfo, PageData, FillMark, lineRooms } from './PageView';
 import { SignatureModal, Stamp } from './SignatureModal';
 import { Organizer } from './Organizer';
 import { Loupe } from './Loupe';
@@ -133,7 +133,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     wrap.scrollLeft += r.left + a.fx * r.width - a.cx;
     wrap.scrollTop += r.top + a.fy * r.height - a.cy;
   };
+  // runs right before the anchor is applied, in the same frame as the new zoom (ends a pinch preview)
+  const beforeAnchor = useRef<(() => void) | null>(null);
   useLayoutEffect(() => {
+    beforeAnchor.current?.();
+    beforeAnchor.current = null;
     const a = pendingAnchor.current;
     pendingAnchor.current = null;
     if (a) applyAnchor(a);
@@ -156,11 +160,21 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     zoomTo(next);
   };
 
-  // two fingers: pinch to zoom and drag to pan; double-tap toggles fit width / 200%
+  // the gesture handlers are attached once; they read the current values through this ref
+  const live = useRef({ tool, fitZoom, zoomTo });
+  live.current = { tool, fitZoom, zoomTo };
+
+  // Two fingers: pinch to zoom and drag to pan; double-tap toggles fit width / 200%.
+  // While the fingers move, the pages are only scaled with a CSS transform (smooth, no re-layout);
+  // the real zoom is applied once when the pinch ends, keeping the same spot under the fingers.
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
-    let start: null | { d: number; z: number; anchor: Anchor } = null;
+    const content = () => el.querySelector<HTMLElement>('.pages');
+    let pinch: null | {
+      d0: number; z0: number; m0: { x: number; y: number }; m: { x: number; y: number }; k: number;
+      anchor: Anchor; ox: number; oy: number; sl: number; st: number; node: HTMLElement;
+    } = null;
     let frame = 0;
     let latest: TouchList | null = null;
     let lastTap: { t: number; x: number; y: number } | null = null;
@@ -168,15 +182,43 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const mid = (t: TouchList) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
     const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
     const begin = (t: TouchList) => {
+      const node = content();
       const m = mid(t);
       const anchor = anchorAt(m.x, m.y);
-      start = anchor ? { d: dist(t), z: zoomRef.current, anchor } : null;
+      if (!node || !anchor) { pinch = null; return; }
+      // the untransformed position of the pages (a previous pinch may still be on screen)
+      const wr = el.getBoundingClientRect();
+      const left = wr.left + el.clientLeft + node.offsetLeft - el.scrollLeft;
+      const top = wr.top + el.clientTop + node.offsetTop - el.scrollTop;
+      pinch = { d0: dist(t), z0: zoomRef.current, m0: m, m, k: 1, anchor, ox: m.x - left, oy: m.y - top, sl: el.scrollLeft, st: el.scrollTop, node };
+      node.style.transformOrigin = `${pinch.ox}px ${pinch.oy}px`;
+      node.style.willChange = 'transform';
+    };
+    const paint = () => {
+      if (!pinch) return;
+      // follow any native scrolling that happened meanwhile
+      const dx = pinch.m.x - pinch.m0.x + (el.scrollLeft - pinch.sl);
+      const dy = pinch.m.y - pinch.m0.y + (el.scrollTop - pinch.st);
+      pinch.node.style.transform = `translate(${dx}px, ${dy}px) scale(${pinch.k})`;
+    };
+    const finish = () => {
+      if (!pinch) return;
+      const p = pinch;
+      pinch = null;
+      const z = clampZ(p.z0 * p.k);
+      const clear = () => { p.node.style.transform = ''; p.node.style.transformOrigin = ''; p.node.style.willChange = ''; };
+      const a = { ...p.anchor, cx: p.m.x, cy: p.m.y };
+      if (Math.abs(z - zoomRef.current) < 1e-4) { clear(); applyAnchor(a); return; }
+      beforeAnchor.current = clear;
+      pendingAnchor.current = a;
+      setZoom(z);
     };
     const onStart = (e: TouchEvent) => {
       if (e.touches.length >= 2) {
         gesture.multi = true;
         tapStart = null;
         (document.activeElement as HTMLElement | null)?.blur?.();
+        finish();
         begin(e.touches);
         if (e.cancelable) e.preventDefault();
       } else if (e.touches.length === 1) {
@@ -185,47 +227,59 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     };
     const onMove = (e: TouchEvent) => {
       if (tapStart && e.touches.length === 1 && Math.hypot(e.touches[0].clientX - tapStart.x, e.touches[0].clientY - tapStart.y) > 10) tapStart = null;
-      if (e.touches.length < 2 || !start) return;
+      if (e.touches.length < 2 || !pinch) return;
       if (e.cancelable) e.preventDefault();
       latest = e.touches;
       if (frame) return;
       frame = requestAnimationFrame(() => {
         frame = 0;
-        if (!latest || latest.length < 2 || !start) return;
-        const m = mid(latest);
-        const z = clampZ(start.z * (dist(latest) / start.d));
-        const a = { ...start.anchor, cx: m.x, cy: m.y };
-        if (Math.abs(z - zoomRef.current) < 0.002) applyAnchor(a);
-        else { pendingAnchor.current = a; setZoom(z); }
+        if (!latest || latest.length < 2 || !pinch) return;
+        pinch.m = mid(latest);
+        pinch.k = clampZ(pinch.z0 * (dist(latest) / pinch.d0)) / pinch.z0;
+        paint();
       });
     };
     const onEnd = (e: TouchEvent) => {
-      if (e.touches.length >= 2) { begin(e.touches); return; }
-      start = null;
+      if (pinch) {
+        finish();
+        if (e.touches.length >= 2) { begin(e.touches); return; }
+      }
       latest = null;
       if (e.touches.length === 0) setTimeout(() => { gesture.multi = false; }, 0);
       // double tap on paper or desk (not on text, objects or fields)
       if (tapStart && e.touches.length === 0 && Date.now() - tapStart.t < 300) {
         const tgt = e.target as HTMLElement;
-        const free = !tgt.closest('.run, .obj, .ff, .ffbox, .ffsig, .objbar') && tool !== 'draw';
+        const free = !tgt.closest('.run, .obj, .ff, .ffbox, .ffsig, .objbar') && live.current.tool !== 'draw';
         const now = Date.now();
         if (free && lastTap && now - lastTap.t < 320 && Math.hypot(tapStart.x - lastTap.x, tapStart.y - lastTap.y) < 30) {
-          const fit = fitZoom();
-          zoomTo(Math.abs(zoomRef.current - fit) < 0.05 ? 2 : fit, tapStart.x, tapStart.y);
+          const fit = live.current.fitZoom();
+          live.current.zoomTo(Math.abs(zoomRef.current - fit) < 0.05 ? 2 : fit, tapStart.x, tapStart.y);
           lastTap = null;
           if (e.cancelable) e.preventDefault();
         } else lastTap = free ? { t: now, x: tapStart.x, y: tapStart.y } : null;
       }
       tapStart = null;
     };
+    const onScroll = () => { if (pinch) paint(); };
     el.addEventListener('touchstart', onStart, { passive: false });
     el.addEventListener('touchmove', onMove, { passive: false });
     el.addEventListener('touchend', onEnd, { passive: false });
     el.addEventListener('touchcancel', onEnd);
+    el.addEventListener('scroll', onScroll, { passive: true });
+    // trackpad pinch (ctrl + wheel): many small events, so batch them into one zoom per frame
+    let wheelK = 1, wheelAt = { x: 0, y: 0 }, wheelFrame = 0;
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      zoomTo(zoomRef.current * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
+      wheelK *= Math.exp(-e.deltaY * 0.01);
+      wheelAt = { x: e.clientX, y: e.clientY };
+      if (wheelFrame) return;
+      wheelFrame = requestAnimationFrame(() => {
+        wheelFrame = 0;
+        const k = wheelK;
+        wheelK = 1;
+        live.current.zoomTo(zoomRef.current * k, wheelAt.x, wheelAt.y);
+      });
     };
     el.addEventListener('wheel', onWheel, { passive: false });
     return () => {
@@ -233,10 +287,12 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       el.removeEventListener('touchmove', onMove);
       el.removeEventListener('touchend', onEnd);
       el.removeEventListener('touchcancel', onEnd);
+      el.removeEventListener('scroll', onScroll);
       el.removeEventListener('wheel', onWheel);
       cancelAnimationFrame(frame);
+      cancelAnimationFrame(wheelFrame);
     };
-  });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ----- object helpers -----
   const addObject = (o: EditorObject) => commit((s) => ({ ...s, objects: [...s.objects, o] }));
@@ -336,6 +392,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   const textEdits = (editsObj: Record<string, RunEdit>): TextEdit[] => {
     const out: TextEdit[] = [];
+    const rooms: Record<number, Record<string, { up: number; down: number }>> = {};
     for (const [key, e] of Object.entries(editsObj)) {
       const page = +key.split(':')[0];
       const run = pageData[page]?.runs.find((r) => r.key === key);
@@ -345,6 +402,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         page, key, region: run.region, text: e.text, sizeScale: e.sizeScale, color: e.color,
         charMap: font?.charMap ?? {}, fallback: font?.fallback ?? { family: 'Helvetica', bold: false, italic: false },
         bgColor: pageData[page]?.colors[key]?.bg ?? '#ffffff',
+        fgColor: pageData[page]?.colors[key]?.fg,
+        room: (rooms[page] ??= lineRooms(pageData[page].runs))[key],
       });
     }
     return out;

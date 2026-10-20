@@ -134,7 +134,18 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         continue;
       }
       const lines = e.text.split('\n');
-      if (hits.length) {
+      // Invisible text (OCR layer of a scan): the letters people see are part of an image,
+      // so cover them with the paper colour and draw the new text visibly.
+      const hidden = hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length;
+      const glyphless = hits.length > 0 && hits.every((g) => /GlyphLess/i.test(baseFontOf(fontDict, g.style.fontRes)));
+      if (hidden) add += whiteoutRegion(e, true);
+      const inkOf = () => {
+        // the sampled ink, unless it is barely different from the paper (nothing visible was there)
+        if (!e.fgColor) return '#000000';
+        const a = hexToRgb(e.fgColor), b = hexToRgb(e.bgColor);
+        return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 0.6 ? e.fgColor : '#000000';
+      };
+      if (hits.length && !glyphless) {
         // first glyph along the reading direction
         const [ux, uy] = e.region.u;
         const count = new Map<string, number>();
@@ -165,7 +176,8 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         }
         let s = 'q ' + st.ctm.map(f).join(' ') + ' cm BT ';
         s += `${f(st.Tc)} Tc ${f(st.Tw)} Tw ${f(st.Tz)} Tz ${f(st.Ts)} Ts ${st.Tr === 3 ? 0 : st.Tr} Tr `;
-        s += e.color ? rgb(e.color, 'rg') + ' ' : st.fill.join(' ') + ' ';
+        const ink = e.color ?? (hidden ? inkOf() : null);
+        s += ink ? rgb(ink, 'rg') + ' ' : (st.fill.join(' ') || '0 g') + ' ';
         s += first.tm.map(f).join(' ') + ' Tm ';
         const lead = sources[0].fs * 1.2;
         lines.forEach((line, li) => {
@@ -176,12 +188,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         add += s;
       } else {
         // Text lives somewhere we cannot rewrite (e.g. inside a form) — cover it.
-        add += whiteoutRegion(e);
+        if (!hidden) add += whiteoutRegion(e);
         const fb = await stdFont(e.fallback.family, e.fallback.bold, e.fallback.italic);
         const key = leaf.newFontDictionary('FbE', fb.ref).asString();
         const h = e.region.height * e.sizeScale;
         const [ux, uy] = e.region.u;
-        let s = `q BT ${rgb(e.color ?? '#000000', 'rg')} ${key} 1 Tf `;
+        let s = `q BT ${rgb(e.color ?? (hidden ? inkOf() : '#000000'), 'rg')} ${key} 1 Tf `;
         lines.forEach((line, li) => {
           const ox = e.region.o[0] + uy * h * 1.2 * li;
           const oy = e.region.o[1] - ux * h * 1.2 * li;
@@ -275,14 +287,24 @@ async function fillForm(doc: PDFDocument, values: Record<string, string | boolea
   }
 }
 
-function whiteoutRegion(e: TextEdit): string {
+function baseFontOf(fontDict: PDFDict | undefined, res: string): string {
+  try { return fontDict?.lookupMaybe(PDFName.of(res), PDFDict)?.get(PDFName.of('BaseFont'))?.toString() ?? ''; } catch { return ''; }
+}
+
+/** Paint over a line. `scan`: the letters are pixels of an image, which rarely sit exactly on the OCR box. */
+function whiteoutRegion(e: TextEdit, scan = false): string {
   const [ox, oy] = e.region.o;
   const [ux, uy] = e.region.u;
   const h = e.region.height;
   const w = e.region.width;
-  const pad = h * 0.08;
-  const desc = h * 0.28;
-  const asc = h * 0.98;
+  const pad = h * (scan ? 0.15 : 0.08);
+  let desc = h * 0.28;
+  let asc = h * 0.98;
+  if (scan) {
+    // as far as the neighbouring lines allow
+    desc = Math.min(h * 0.42, e.room?.down ?? h * 0.42);
+    asc = Math.min(h * 1.05, e.room?.up ?? h * 1.05);
+  }
   const pts: [number, number][] = [
     [-pad, -desc], [w + pad, -desc], [w + pad, asc], [-pad, asc],
   ].map(([t, s]) => [ox + t * ux - s * uy, oy + t * uy + s * ux]);
