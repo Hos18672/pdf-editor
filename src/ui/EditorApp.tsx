@@ -266,6 +266,53 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
     r.readAsDataURL(f);
   };
 
+  const textEdits = (editsObj: Record<string, RunEdit>): TextEdit[] => {
+    const out: TextEdit[] = [];
+    for (const [key, e] of Object.entries(editsObj)) {
+      const page = +key.split(':')[0];
+      const run = pageData[page]?.runs.find((r) => r.key === key);
+      if (!run) continue;
+      const font = fonts[run.fontName];
+      out.push({
+        page, key, region: run.region, text: e.text, sizeScale: e.sizeScale, color: e.color,
+        charMap: font?.charMap ?? {}, fallback: font?.fallback ?? { family: 'Helvetica', bold: false, italic: false },
+        bgColor: pageData[page]?.colors[key]?.bg ?? '#ffffff',
+      });
+    }
+    return out;
+  };
+
+  // ----- live preview: re-write edited pages with the real fonts and show that -----
+  const editKeyOf = (src: number) => {
+    const list = Object.entries(snap.edits).filter(([k]) => k.startsWith(src + ':')).sort(([a], [b]) => (a < b ? -1 : 1));
+    return list.length ? JSON.stringify(list) : '';
+  };
+  const [preview, setPreview] = useState<{ pdf: any; keys: Record<number, string> } | null>(null);
+  const previewSeq = useRef(0);
+  useEffect(() => {
+    const seq = ++previewSeq.current;
+    const edits = textEdits(snap.edits);
+    if (!edits.length) { setPreview(null); return; }
+    const keys: Record<number, string> = {};
+    for (const e of edits) keys[e.page] = editKeyOf(e.page);
+    const t = setTimeout(async () => {
+      try {
+        const bytes = await exportPdf({
+          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits,
+          viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
+        });
+        if (seq !== previewSeq.current) return;
+        const doc = await openPdf(bytes);
+        if (seq !== previewSeq.current) { doc.destroy?.(); return; }
+        setPreview((old) => { if (old?.pdf && old.pdf !== pdf) setTimeout(() => old.pdf.destroy?.(), 2000); return { pdf: doc, keys }; });
+      } catch (err) {
+        console.warn('preview failed', err);
+      }
+    }, 250);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.edits]);
+
   // ----- export -----
   const download = async () => {
     setEditing(null);
@@ -273,18 +320,7 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
     await new Promise((r) => setTimeout(r, 30));
     setBusy('Preparing your PDF…');
     try {
-      const edits: TextEdit[] = [];
-      for (const [key, e] of Object.entries(snap.edits)) {
-        const page = +key.split(':')[0];
-        const run = pageData[page]?.runs.find((r) => r.key === key);
-        if (!run) continue;
-        const font = fonts[run.fontName];
-        edits.push({
-          page, key, region: run.region, text: e.text, sizeScale: e.sizeScale, color: e.color,
-          charMap: font?.charMap ?? {}, fallback: font?.fallback ?? { family: 'Helvetica', bold: false, italic: false },
-          bgColor: pageData[page]?.colors[key]?.bg ?? '#ffffff',
-        });
-      }
+      const edits = textEdits(snap.edits);
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits,
         viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
@@ -526,7 +562,9 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
                 onPlace={() => false}
                 onDelete={removeObject} onDuplicate={duplicateObject}
                 onTextPlaced={() => setTool('edit')}
-                onVisible={(src, r) => { ratios.current[src] = r; }} />
+                onVisible={(src, r) => { ratios.current[src] = r; }}
+                editKey={editKeyOf(p.src)}
+                preview={preview && preview.keys[p.src] !== undefined ? { pdf: preview.pdf, key: preview.keys[p.src] } : undefined} />
             ))}
           </div>
         </div>

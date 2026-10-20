@@ -44,6 +44,10 @@ interface Props {
   onDuplicate: (id: string) => void;
   onTextPlaced: () => void;
   onVisible: (src: number, ratio: number) => void;
+  /** the page as re-written with the current text edits (exact output glyphs) */
+  preview?: { pdf: any; key: string };
+  /** signature of this page's current text edits ('' = none) */
+  editKey: string;
 }
 
 export function PageView(p: Props) {
@@ -54,6 +58,10 @@ export function PageView(p: Props) {
   const [visible, setVisible] = useState(false);
   const [rendered, setRendered] = useState(0); // zoom it was rendered at
   const renderTask = useRef<any>(null);
+  const renderedKey = useRef<string | null>(null);
+  const [shownKey, setShownKey] = useState('');
+  const source = p.preview?.pdf ?? p.pdf;
+  const sourceKey = p.preview?.key ?? '';
   const [draft, setDraft] = useState<null | { x0: number; y0: number; x1: number; y1: number; pts?: number[] }>(null);
 
   const W = info.w * zoom;
@@ -78,10 +86,11 @@ export function PageView(p: Props) {
   // render canvas (debounced on zoom)
   useEffect(() => {
     if (!visible) return;
-    if (rendered && Math.abs(rendered - zoom) < 0.001) return;
+    if (rendered && Math.abs(rendered - zoom) < 0.001 && renderedKey.current === sourceKey) return;
     let cancelled = false;
     const t = setTimeout(async () => {
-      const page = await p.pdf.getPage(p.src + 1);
+      let page: any;
+      try { page = await source.getPage(p.src + 1); } catch { return; }
       if (cancelled) return;
       const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
       const scale = Math.min(zoom * dpr, 4096 / Math.max(info.w, info.h));
@@ -103,8 +112,10 @@ export function PageView(p: Props) {
       target.height = canvas.height;
       target.getContext('2d')!.drawImage(canvas, 0, 0);
       setRendered(zoom);
+      renderedKey.current = sourceKey;
+      setShownKey(sourceKey);
 
-      if (!p.data) {
+      if (!p.data && source === p.pdf) {
         const tc = await page.getTextContent();
         const runs = buildRuns(tc.items, p.src);
         const fonts: Record<string, FontInfo> = {};
@@ -134,10 +145,12 @@ export function PageView(p: Props) {
         }
         p.onData(p.src, { runs, colors }, fonts);
       }
-    }, rendered ? 160 : 0);
+    }, rendered && renderedKey.current === sourceKey ? 160 : 0);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, zoom, p.pdf, p.src]);
+  }, [visible, zoom, p.pdf, p.src, source, sourceKey]);
+  // the canvas already shows the edited text with the document's real glyphs
+  const live = p.editKey !== '' && shownKey === p.editKey;
 
   const local = (e: { clientX: number; clientY: number }) =>
     toLocal(e.clientX, e.clientY, pageRef.current!, info.w, info.h, zoom, rotation);
@@ -231,7 +244,7 @@ export function PageView(p: Props) {
         <div className={`layer${passive ? ' passive' : ''}`}>
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
-              edit={p.edits[r.key]} editing={p.editing === r.key} room={rooms[r.key]}
+              edit={p.edits[r.key]} editing={p.editing === r.key} room={rooms[r.key]} live={live}
               onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
               onCommit={(raw) => {
                 const text = raw.normalize('NFC');
@@ -301,7 +314,8 @@ function lineRooms(runs: TextRun[]): Record<string, { up: number; down: number }
   return out;
 }
 
-function RunView({ run, vm, zoom, font, color, edit, editing, room, onStart, onCommit }: {
+function RunView({ run, vm, zoom, font, color, edit, editing, room, live, onStart, onCommit }: {
+  live?: boolean;
   run: TextRun; vm: M; zoom: number; font?: FontInfo; color?: { bg: string; fg: string }; edit?: RunEdit;
   room?: { up: number; down: number };
   editing: boolean; onStart: () => void; onCommit: (text: string) => void;
@@ -349,7 +363,7 @@ function RunView({ run, vm, zoom, font, color, edit, editing, room, onStart, onC
     transformOrigin: `0 ${b.asc * zoom}px`,
   };
 
-  if (!edit && !editing) {
+  if ((!edit || live) && !editing) {
     return <div className="run" style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onStart(); }} />;
   }
   const lines = (editing ? value : edit!.text).split('\n');
