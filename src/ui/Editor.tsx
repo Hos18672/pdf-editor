@@ -63,10 +63,14 @@ const RAIL: RailItem[] = [
 ];
 const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'], ['line', 'Line', 'line']];
 
-export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy }: {
+/** What the editor opens with when started from the tools page. */
+export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages';
+
+export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start }: {
   host: HostProps; file: { name: string; bytes: Uint8Array }; pdf: any; infos: PageInfo[];
   hist: ReturnType<typeof useHistory>; onClose: () => void; onTools: () => void;
   theme: Theme; onTheme: () => void; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
+  start?: EditorStart;
 }) {
   const { snap, commit } = hist;
   const mobile = bp === 'mobile', tablet = bp === 'tablet', large = bp === 'large', desk = bp === 'desktop' || large;
@@ -80,7 +84,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [pageData, setPageData] = useState<Record<number, PageData>>({});
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
   const [showSig, setShowSig] = useState<null | { field?: FormField }>(null);
-  const [view, setView] = useState<'doc' | 'pages'>('doc');
+  const [view, setView] = useState<'doc' | 'pages'>(start === 'pages' ? 'pages' : 'doc');
   const [shapesOpen, setShapesOpen] = useState(false);
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const [slimOpen, setSlimOpen] = useState(false);
@@ -95,7 +99,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const shapesBtn = useRef<HTMLButtonElement>(null);
   const ratios = useRef<Record<number, number>>({});
 
-  useEffect(() => { readFields(pdf, infos.map((i) => i.vm)).then(setFields).catch(() => setFields([])); }, [pdf, infos]);
+  const [fieldsReady, setFieldsReady] = useState(false);
+  useEffect(() => {
+    readFields(pdf, infos.map((i) => i.vm)).then(setFields).catch(() => setFields([])).finally(() => setFieldsReady(true));
+  }, [pdf, infos]);
 
   // ----- zoom -----
   const fitZoom = () => {
@@ -541,6 +548,14 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (t === 'fill') setFillMark(fields.length ? null : 'check');
     setTool(t);
   };
+  // started from a tools card (Fill a form, Sign): switch to that tool once the form fields are known
+  const started = useRef(false);
+  useEffect(() => {
+    if (started.current || !fieldsReady) return;
+    started.current = true;
+    if (start === 'fill' || start === 'sign') pickTool(start);
+  }, [fieldsReady]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const railClick = (r: RailItem) => {
     if (r.t === 'shapes') { setShapesOpen((v) => !v); return; }
     if (r.t === 'pages') { setShapesOpen(false); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }

@@ -4,7 +4,7 @@ import { Icon } from './icons';
 import { openPdf, loadPdfjs } from './pdfjs';
 import { useHistory } from './store';
 import type { PageInfo } from './PageView';
-import { Editor, HostProps, ToastMsg, BusyMsg } from './Editor';
+import { Editor, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { Start, OpenState } from './Start';
 import { Tools, ToolId } from './Tools';
 import { useBp, useTheme, useVisualViewportHeight } from './hooks';
@@ -71,7 +71,9 @@ export default function EditorApp(host: HostProps) {
   const [openState, setOpenState] = useState<OpenState>({ kind: 'idle' });
   const [busy, setBusy] = useState<BusyMsg | null>(null);
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
-  const [route, setRoute] = useState<{ name: 'home' } | { name: 'editor' } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' }>({ name: 'home' });
+  const [route, setRoute] = useState<{ name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' }>({ name: 'home' });
+  // a tools card asked for a file first: where to land once it is open
+  const startAfterOpen = useRef<EditorStart | undefined>(undefined);
   const pending = useRef<{ name: string; bytes: Uint8Array } | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const hist = useHistory();
@@ -110,7 +112,8 @@ export default function EditorApp(host: HostProps) {
       setFile({ name, bytes });
       hist.reset(list.map((_, i) => ({ src: i, rotation: 0 })));
       setOpenState({ kind: 'idle' });
-      setRoute({ name: 'editor' });
+      setRoute({ name: 'editor', start: startAfterOpen.current });
+      startAfterOpen.current = undefined;
       pending.current = null;
     } catch (e: any) {
       if (e?.name === 'PasswordException') {
@@ -132,21 +135,21 @@ export default function EditorApp(host: HostProps) {
     } else inputRef.current?.click();
   };
   const close = () => { setFile(null); setPdf(null); setInfos([]); setRoute({ name: 'home' }); };
-  const openTools = (back: 'home' | 'editor') => setRoute({ name: 'tools', tool: 'hub', back });
+  const openTools = (back: 'home' | 'editor') => { startAfterOpen.current = undefined; setRoute({ name: 'tools', tool: 'hub', back }); };
 
   return (
     <>
       <style>{fontFaces() + css}</style>
       {route.name === 'editor' && file && pdf ? (
-        <Editor key={file.name + file.bytes.length} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
+        <Editor key={file.name + file.bytes.length} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
           toast={setToastMsg} setBusy={setBusy} />
       ) : route.name === 'tools' ? (
         <Tools initial={route.tool} bp={bp} host={host} toast={setToastMsg} setBusy={setBusy}
           current={file && pdf ? { name: file.name, bytes: file.bytes, pdf, pages: hist.snap.pages, changed: hist.past > 0 } : null}
-          onBack={() => setRoute(route.back === 'editor' && file ? { name: 'editor' } : { name: 'home' })}
+          onBack={() => { startAfterOpen.current = undefined; setRoute(route.back === 'editor' && file ? { name: 'editor' } : { name: 'home' }); }}
           onOpenInEditor={(name, bytes) => open(name, bytes)}
-          onEdit={() => (file ? setRoute({ name: 'editor' }) : pick())}
+          onEdit={(start) => { if (file) setRoute({ name: 'editor', start }); else { startAfterOpen.current = start; pick(); } }}
           onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }} />
       ) : (
         <Start state={openState} onFile={(f) => readFile(f)} onPick={pick} mobile={bp === 'mobile'}

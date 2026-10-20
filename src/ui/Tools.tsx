@@ -3,7 +3,7 @@ import { Icon } from './icons';
 import { openPdf } from './pdfjs';
 import { Thumb } from './Thumb';
 import { Seg, Stepper, Toggle } from './Panel';
-import { saveFile, HostProps, ToastMsg, BusyMsg } from './Editor';
+import { saveFile, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { parseRange, formatRange, loadDoc, pickPages, imageBytes, addImagePage, addOutline, save, baseName, fmtSize } from './pdfops';
 import { Convert } from './Convert';
 import { SortableArea, useSortableItem } from './sortable';
@@ -19,7 +19,7 @@ interface Src { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; f
 interface Props {
   initial: ToolId; bp: Bp; host: HostProps; current: Current | null;
   toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
-  onBack: () => void; onEdit: () => void;
+  onBack: () => void; onEdit: (start: EditorStart) => void;
   onOpenInEditor: (name: string, bytes: Uint8Array) => void;
   onApplyPages: (pages: PageState[]) => void;
 }
@@ -43,16 +43,16 @@ export function Tools(p: Props) {
   const conv = (k: string) => () => { setConvertKind(k); setTool('convert'); };
   const groups: { name: string; items: HubItem[] }[] = [
     { name: 'Edit & sign', items: [
-      { name: 'Edit PDF', desc: 'Retype text, add text, images and shapes', icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: p.onEdit },
-      { name: 'Fill a form', desc: 'Type in fields, tick boxes, pick options', icon: 'textbox:duotone', tile: TILE.edit, go: p.onEdit },
-      { name: 'Sign', desc: 'Draw, type or upload a signature', icon: 'signature:duotone', tile: TILE.edit, go: p.onEdit },
+      { name: 'Edit PDF', desc: 'Retype text, add text, images and shapes', icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
+      { name: 'Fill a form', desc: 'Type in fields, tick boxes, pick options', icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
+      { name: 'Sign', desc: 'Draw, type or upload a signature', icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
     ] },
     { name: 'Organize pages', items: [
       { name: 'Combine PDFs', desc: 'Merge several files into one', icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },
       { name: 'Extract pages', desc: 'Save chosen pages as a new PDF', icon: 'export:duotone', tile: TILE.org, go: () => setTool('extract') },
       { name: 'Remove pages', desc: 'Delete pages you don’t need', icon: 'file-minus:duotone', tile: TILE.org, go: () => setTool('remove') },
       { name: 'Insert pages', desc: 'Add blank pages, images or another PDF', icon: 'file-plus:duotone', tile: TILE.org, go: () => setTool('insert') },
-      { name: 'Reorder & rotate', desc: 'Drag pages into place, turn them', icon: 'squares-four:duotone', tile: TILE.org, go: p.onEdit },
+      { name: 'Reorder & rotate', desc: 'Drag pages into place, turn them', icon: 'squares-four:duotone', tile: TILE.org, go: () => p.onEdit('pages') },
     ] },
     { name: 'Convert to PDF', items: [
       { name: 'Images to PDF', desc: 'JPG, PNG, HEIC, WebP', icon: 'image:duotone', tile: TILE.conv, go: conv('image') },
