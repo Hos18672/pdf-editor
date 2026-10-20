@@ -122,6 +122,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     const { glyphs, shows } = interpret(ops, fonts);
 
     const edits = input.edits.filter((e) => e.page === pi);
+    const family = edits.length ? fontFamilies(glyphs, toUni) : null;
     const remove = new Set<Glyph>();
     let add = '';
 
@@ -149,10 +150,18 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         // others (a line is often split across several subset / Type3 fonts, e.g. Chrome prints).
         const sources: Source[] = [];
         const order = [main, ...[...count.keys()].filter((k) => k !== main)];
+        // then the other pieces of the same typeface & weight used elsewhere on the page,
+        // so letters this line doesn't contain still come from the real font
+        const roots = new Set(order.map((r) => family!.root(r)));
+        const mainH = hits.find((g) => g.style.fontRes === main)!;
+        for (const res of family!.all()) if (!order.includes(res) && roots.has(family!.root(res))) order.push(res);
         for (const res of order) {
-          const g0 = hits.find((g) => g.style.fontRes === res)!;
+          const g0 = hits.find((g) => g.style.fontRes === res) ?? glyphs.find((g) => g.style.fontRes === res);
+          if (!g0) continue;
+          // same visual size as the line: scale by the ratio of glyph heights
+          const fs = g0.style.fontSize * (mainH.height / (g0.height || mainH.height)) * e.sizeScale;
           const map = res === main && Object.keys(e.charMap).length ? e.charMap : toUni(res);
-          sources.push({ key: '/' + res, bpc: fonts(res)?.bytesPerCode ?? 1, map, fs: g0.style.fontSize * e.sizeScale });
+          sources.push({ key: '/' + res, bpc: fonts(res)?.bytesPerCode ?? 1, map, fs });
         }
         let s = 'q ' + st.ctm.map(f).join(' ') + ' cm BT ';
         s += `${f(st.Tc)} Tc ${f(st.Tw)} Tw ${f(st.Tz)} Tz ${f(st.Ts)} Ts ${st.Tr === 3 ? 0 : st.Tr} Tr `;
@@ -231,6 +240,47 @@ function whiteoutRegion(e: TextEdit): string {
     [-pad, -desc], [w + pad, -desc], [w + pad, asc], [-pad, asc],
   ].map(([t, s]) => [ox + t * ux - s * uy, oy + t * uy + s * ux]);
   return `q ${rgb(e.bgColor, 'rg')} ${pts.map(([x, y], i) => `${f(x)} ${f(y)} ${i ? 'l' : 'm'}`).join(' ')} h f Q\n`;
+}
+
+/**
+ * Group font resources that are pieces of one typeface: PDFs printed by Chrome (Gmail etc.)
+ * split a font into many small Type3/subset fonts, and letters of one word jump between them.
+ * Fonts used for neighbouring letters inside the same word belong together.
+ */
+function fontFamilies(glyphs: Glyph[], toUni: (res: string) => Record<string, number>) {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    if (!parent.has(x)) parent.set(x, x);
+    const p = parent.get(x)!;
+    if (p === x) return x;
+    const r = find(p);
+    parent.set(x, r);
+    return r;
+  };
+  const inv = new Map<string, Map<number, string>>();
+  const charOf = (g: Glyph) => {
+    const res = g.style.fontRes;
+    if (!inv.has(res)) {
+      const m = new Map<number, string>();
+      for (const [ch, code] of Object.entries(toUni(res))) m.set(code, ch);
+      inv.set(res, m);
+    }
+    return inv.get(res)!.get(g.code);
+  };
+  for (const g of glyphs) find(g.style.fontRes);
+  for (let i = 1; i < glyphs.length; i++) {
+    const a = glyphs[i - 1], b = glyphs[i];
+    if (a.style.fontRes === b.style.fontRes) continue;
+    const h = Math.max(a.height, b.height);
+    if (!h || Math.abs(a.height - b.height) > h * 0.04) continue;
+    if (Math.hypot(b.origin[0] - a.end[0], b.origin[1] - a.end[1]) > h * 0.12) continue;
+    const ca = charOf(a), cb = charOf(b);
+    if (!ca || !cb || /\s/.test(ca) || /\s/.test(cb)) continue;
+    const fa = a.style.fill.join(' '), fb = b.style.fill.join(' ');
+    if (fa !== fb) continue;
+    parent.set(find(a.style.fontRes), find(b.style.fontRes));
+  }
+  return { root: find, all: () => [...parent.keys()] };
 }
 
 interface Source { key: string; bpc: number; map: Record<string, number>; fs: number }
