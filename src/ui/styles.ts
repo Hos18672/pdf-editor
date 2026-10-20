@@ -397,9 +397,12 @@ button { cursor: pointer; }
 .tside .sf { padding: 16px 24px 24px; display: flex; flex-direction: column; gap: 10px; border-top: 1px solid var(--line); }
 .tside h3 { margin: 0; font-size: 17px; font-weight: 600; }
 .tbar { flex: none; display: flex; align-items: center; gap: 12px; padding: 12px 16px calc(12px + var(--safe-b)); background: var(--surface); border-top: 1px solid var(--line); }
-.tbar .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tbar .t { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tbar .t b, .tbar .t span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .tbar .t b { font-weight: 600; font-size: 14.5px; }
 .tbar .t span { font-size: 12.5px; color: var(--muted); }
+/* the action keeps its natural width; the status text gets the rest */
+.tbar > .btn, .tbar > .btn.block { width: auto; flex: none; max-width: 62%; }
 .privacy-pill { display: flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--surface-2); font-size: 12.5px; color: var(--muted-2); font-weight: 500; white-space: nowrap; }
 .privacy-pill svg { color: var(--success); }
 .hub { width: 100%; max-width: 1240px; display: flex; flex-direction: column; gap: 28px; }

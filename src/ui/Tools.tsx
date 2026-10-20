@@ -316,7 +316,7 @@ function PagePick(p: Props & { desk: boolean; mobile: boolean; mode: 'extract' |
   const ctaLabel = extract ? `Extract ${sel.length || ''} ${sel.length === 1 ? 'page' : 'pages'}` : `Remove ${sel.length || ''} ${sel.length === 1 ? 'page' : 'pages'}`;
   const cta = (
     <button className={`btn lg block ${extract ? 'primary' : 'danger solid'}`} disabled={!sel.length || (!extract && sel.length >= n)} onClick={run}>
-      <Icon name={extract ? 'export:bold' : 'trash:bold'} size={18} />{p.desk ? ctaLabel.replace(/\s+/g, ' ') : extract ? `Extract ${sel.length}` : `Remove ${sel.length}`}
+      <Icon name={extract ? 'export:bold' : 'trash:bold'} size={18} />{p.desk ? ctaLabel.replace(/\s+/g, ' ') : `${extract ? 'Extract' : 'Remove'}${sel.length ? ' ' + sel.length : ''}`}
     </button>
   );
   return (
