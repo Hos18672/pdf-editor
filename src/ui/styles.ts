@@ -376,14 +376,21 @@ button { cursor: pointer; }
 .org .ohead p { margin: 0; color: var(--muted); font-size: 13px; }
 .org .selbar { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 6px 0 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); font-weight: 600; }
 .org .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; max-width: 1240px; width: 100%; margin: 0 auto; }
-.ocard { display: flex; flex-direction: column; gap: 4px; padding: 10px 6px 2px; border-radius: 16px; transition: box-shadow .18s, transform .18s, background .18s; position: relative; }
-.ocard .sq { position: relative; aspect-ratio: 1; display: grid; place-items: center; cursor: pointer; }
+.org .grid { position: relative; }
+.oslot { position: relative; z-index: 0; }
+.oslot.hole, .oslot.rise { z-index: 10; }
+.oslot.hole::before { content: ""; position: absolute; inset: 2px; border-radius: 16px; border: 2px dashed var(--sel); background: var(--sel-tint); }
+.ocard { display: flex; flex-direction: column; gap: 4px; padding: 10px 6px 2px; border-radius: 16px; transition: box-shadow .18s, background .18s; position: relative; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.org.dragging, .org.dragging * { cursor: grabbing !important; }
+.ocard .sq { position: relative; aspect-ratio: 1; display: grid; place-items: center; cursor: grab; }
 .ocard .sq canvas { max-width: 100%; max-height: 100%; background: #fff; border-radius: 3px; box-shadow: 0 1px 2px rgba(20,23,46,.08), 0 6px 16px rgba(20,23,46,.10); display: block; transition: transform .2s; }
 .ocard .row { display: flex; align-items: center; gap: 2px; }
-.ocard .row .n { flex: 1; font-weight: 600; font-variant-numeric: tabular-nums; }
+.ocard .row .n { flex: 1; min-width: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ocard .row .ibtn { width: 44px; height: 44px; }
 .ocard .handle { width: 40px; height: 44px; display: grid; place-items: center; color: var(--muted); cursor: grab; touch-action: none; border: 0; background: none; padding: 0; }
-.ocard.lift { background: var(--surface); box-shadow: 0 18px 40px rgba(20,23,46,.22); transform: rotate(1.5deg); outline: 2px solid var(--ink); z-index: 2; }
+.ocard.lift { background: var(--surface); box-shadow: 0 24px 50px rgba(20,23,46,.28), 0 0 0 2px var(--sel); will-change: transform; }
+.ocard.settle { background: var(--surface); box-shadow: 0 0 0 2px var(--sel); }
+.ocard .sq canvas { -webkit-user-drag: none; }
 .ocard .ck { position: absolute; top: 18px; left: 14px; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: rgba(255,255,255,.92); box-shadow: inset 0 0 0 1.5px #9AA0B4; color: transparent; z-index: 1; border: 0; padding: 0; }
 .ocard.on .ck { background: var(--ink); color: var(--on-ink); box-shadow: none; }
 .ocard.on .sq canvas { box-shadow: 0 0 0 3px var(--ink), 0 8px 20px rgba(20,23,46,.14); }
