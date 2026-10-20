@@ -259,7 +259,7 @@ export function PageView(p: Props) {
           ))}
           {p.objects.map((o) => (
             <ObjectView key={o.id} o={o} zoom={zoom} selected={p.selected === o.id} editing={p.editing === o.id}
-              local={local} onSelect={() => p.onSelect(o.id)} onEditing={(v) => (v ? p.onEditing(o.id) : p.onStopEditing(o.id))}
+              local={local} rotation={rotation} onSelect={() => p.onSelect(o.id)} onEditing={(v) => (v ? p.onEditing(o.id) : p.onStopEditing(o.id))}
               onChange={(patch, merge) => p.onChange(o.id, patch, merge)}
               onDelete={() => p.onDelete(o.id)} onDuplicate={() => p.onDuplicate(o.id)}
               onDrag={(d) => p.onDragInfo(d ? { ...d, id: o.id, page: p.src } : null)} />
@@ -429,8 +429,8 @@ function segments(line: string, font?: FontInfo) {
 
 // ---------------- added objects ----------------
 
-function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag }: {
-  o: EditorObject; zoom: number; selected: boolean; editing: boolean;
+function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag }: {
+  o: EditorObject; zoom: number; selected: boolean; editing: boolean; rotation: number;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
   onSelect: () => void; onEditing: (v: boolean) => void; onChange: (patch: Partial<EditorObject>, merge: boolean) => void;
   onDelete: () => void; onDuplicate: () => void; onDrag: (d: { x: number; y: number } | null) => void;
@@ -502,6 +502,37 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
     onDrag(null);
     if (d && d.mode === 'move' && !d.moved && o.type === 'text' && selected) onEditing(true);
   };
+  // keep the toolbar inside the visible area: slide it sideways, flip it below when there's no room above
+  const barRef = useRef<HTMLDivElement>(null);
+  const [bar, setBar] = useState({ dx: 0, below: false });
+  const [, setTick] = useState(0);
+  useLayoutEffect(() => {
+    const el = barRef.current;
+    const wrap = el?.closest('.canvasWrap') as HTMLElement | null;
+    if (!el || !wrap) return;
+    const wr = wrap.getBoundingClientRect();
+    const objR = (el.parentElement as HTMLElement).getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    let dx = 0;
+    if (rotation % 360 === 0) {
+      const natLeft = r.left - bar.dx;
+      const minL = wr.left + 6, maxR = wr.right - 6;
+      if (natLeft < minL) dx = minL - natLeft;
+      else if (natLeft + r.width > maxR) dx = Math.max(minL - natLeft, maxR - (natLeft + r.width));
+    }
+    const below = objR.top - r.height - 14 < wr.top + 4;
+    if (Math.abs(dx - bar.dx) > 0.5 || below !== bar.below) setBar({ dx, below });
+  });
+  useEffect(() => {
+    if (!selected) return;
+    const wrap = barRef.current?.closest('.canvasWrap');
+    if (!wrap) return;
+    let raf = 0;
+    const fn = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setTick((t) => t + 1)); };
+    wrap.addEventListener('scroll', fn, { passive: true });
+    window.addEventListener('resize', fn);
+    return () => { wrap.removeEventListener('scroll', fn); window.removeEventListener('resize', fn); cancelAnimationFrame(raf); };
+  }, [selected]);
   // keep the text caret when pressing the grip / toolbar
   const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
@@ -581,7 +612,8 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
       onDoubleClick={() => o.type === 'text' && onEditing(true)}>
       {inner}
       {selected && (
-        <div className={`objbar${by * zoom < 56 ? ' below' : ''}${dragging ? ' moving' : ''}`}
+        <div ref={barRef} className={`objbar${bar.below ? ' below' : ''}${dragging ? ' moving' : ''}`}
+          style={{ transform: `translateX(calc(-50% + ${bar.dx}px))`, ['--ax' as any]: `calc(50% - ${bar.dx}px)` }}
           onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>
           <button type="button" className="grip" aria-label="Move" title="Drag to move"
             onPointerDown={start('grip')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>

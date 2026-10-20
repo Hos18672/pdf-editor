@@ -592,8 +592,9 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
       {dragInfo && (() => {
         const obj = snap.objects.find((o) => o.id === dragInfo.id);
         const pg = snap.pages.find((q) => q.src === dragInfo.page);
-        if (!obj || !pg) return null;
-        return <Loupe x={dragInfo.x} y={dragInfo.y} page={dragInfo.page} obj={obj} pageW={infos[dragInfo.page].w} pageH={infos[dragInfo.page].h} rotation={pg.rotation} zoom={zoom} />;
+        if (!obj || !pg || obj.type !== 'text') return null; // only text needs precise placement
+        const src = preview && preview.keys[dragInfo.page] !== undefined ? preview.pdf : pdf;
+        return <Loupe x={dragInfo.x} y={dragInfo.y} page={dragInfo.page} obj={obj} pdf={src} pageW={infos[dragInfo.page].w} pageH={infos[dragInfo.page].h} rotation={pg.rotation} zoom={zoom} />;
       })()}
     </div>
   );

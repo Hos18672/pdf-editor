@@ -101,7 +101,7 @@ button { font: inherit; color: inherit; }
 .obj.dragging { cursor: grabbing; }
 .obj.editing { cursor: text; }
 .objbar { position: absolute; left: 50%; bottom: calc(100% + 12px); transform: translateX(-50%); display: flex; align-items: center; gap: 2px; padding: 4px; background: var(--ink); border-radius: 12px; box-shadow: 0 10px 24px -8px rgba(20,24,56,.55); z-index: 5; white-space: nowrap; }
-.objbar::after { content: ""; position: absolute; left: 50%; top: 100%; margin-left: -6px; border: 6px solid transparent; border-top-color: var(--ink); }
+.objbar::after { content: ""; position: absolute; left: clamp(14px, var(--ax, 50%), calc(100% - 14px)); top: 100%; margin-left: -6px; border: 6px solid transparent; border-top-color: var(--ink); }
 .objbar.below { bottom: auto; top: calc(100% + 12px); }
 .objbar.below::after { top: auto; bottom: 100%; border-top-color: transparent; border-bottom-color: var(--ink); }
 .objbar button { width: 38px; height: 36px; display: grid; place-items: center; border: 0; border-radius: 8px; background: transparent; color: #fff; cursor: pointer; padding: 0; touch-action: none; }
@@ -110,9 +110,9 @@ button { font: inherit; color: inherit; }
 .objbar .grip { cursor: move; background: var(--marker); color: var(--ink); }
 .objbar .grip:hover { background: var(--marker); }
 .objbar .sep { width: 1px; height: 22px; background: rgba(255,255,255,.22); margin: 0 3px; }
-.objbar.moving button:not(.grip), .objbar.moving .sep { visibility: hidden; }
+.objbar.moving button:not(.grip), .objbar.moving .sep, .objbar.moving .fsize { visibility: hidden; }
 .objbar .fsize { min-width: 26px; text-align: center; color: #fff; font-weight: 600; font-size: 14px; }
-.loupe { position: fixed; z-index: 80; border-radius: 50%; overflow: hidden; pointer-events: none; border: 3px solid var(--paper); box-shadow: 0 0 0 1.5px var(--ink), 0 14px 34px -8px rgba(20,24,56,.55); background: #fff; }
+.loupe { position: fixed; z-index: 80; border-radius: 14px; overflow: hidden; pointer-events: none; border: 3px solid var(--paper); box-shadow: 0 0 0 1.5px var(--ink), 0 14px 34px -8px rgba(20,24,56,.55); background: #fff; }
 .loupe canvas { display: block; }
 .objbar svg { position: static; pointer-events: none; flex: none; }
 @media (max-width: 760px) { .objbar button { width: 40px; height: 40px; } }
