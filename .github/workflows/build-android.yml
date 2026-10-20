@@ -43,11 +43,6 @@ jobs:
           CI: '1'
         run: npx expo prebuild --platform android --no-install
 
-      - name: Ship pdf.js and fonts inside the APK (the app works offline)
-        run: |
-          mkdir -p android/app/src/main/assets
-          cp -r public/pdfjs public/fonts android/app/src/main/assets/
-
       - name: Build release APK
         working-directory: android
         env:
