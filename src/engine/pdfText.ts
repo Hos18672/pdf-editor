@@ -13,6 +13,10 @@ export interface FontInfo {
   display: Record<string, string>; // unicode char -> code point string in pdf.js' converted font
   fallback: { family: FontFamily; bold: boolean; italic: boolean };
   cssFallback: string;
+  /** unicode char -> glyph id in pdf.js' converted font data */
+  gids: Record<string, number>;
+  /** CSS family of the same font re-registered with a Unicode cmap (set by the UI once loaded) */
+  editFamily?: string;
 }
 
 export interface TextRun {
@@ -60,7 +64,8 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
 
   const charMap: Record<string, number> = {};
   const display: Record<string, string> = {};
-  if (font.isType3Font) return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback };
+  const gids: Record<string, number> = {};
+  if (font.isType3Font) return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids };
 
   let fk: any = null;
   if (font.data && !font.missingFile) {
@@ -69,17 +74,18 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
   for (const [code, uni] of toUnicodeEntries(font.toUnicode)) {
     if (!uni || [...uni].length !== 1) continue;
     const fc = font.toFontChar?.[code] ?? code;
+    let gid = 0;
     if (fk) {
-      let ok = false;
-      try { const g = fk.glyphForCodePoint(fc); ok = !!g && g.id > 0; } catch { ok = false; }
-      if (!ok) continue;
+      try { const g = fk.glyphForCodePoint(fc); gid = g ? g.id : 0; } catch { gid = 0; }
+      if (!gid) continue;
     } else if (font.data && !font.missingFile) continue;
     if (charMap[uni] === undefined) {
       charMap[uni] = code;
       display[uni] = String.fromCodePoint(fc);
+      if (gid) gids[uni] = gid;
     }
   }
-  return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback };
+  return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids };
 }
 
 /** Build editable runs from pdf.js getTextContent() items. */

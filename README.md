@@ -15,7 +15,11 @@ responsive web app and as an Android app.
   saved on the device), whiteout, highlights, boxes, circles, lines, freehand drawing.
 - Move / resize / duplicate / delete anything you added.
 - Organize pages: rotate, reorder, delete.
-- Undo / redo, zoom (buttons, Ctrl+wheel, pinch on touch).
+- Clicking existing text always edits it (with the Edit and Add-text tools). While typing, the
+  embedded font is re-registered with a Unicode cmap, so the edit box shows the document's own
+  glyphs at the exact size, colour and baseline.
+- Added objects have a move grip (works while typing) and a toolbar with Edit / Duplicate / Delete.
+- Undo / redo, zoom (buttons, Ctrl+wheel, two-finger pinch + pan on touch, anchored under the fingers).
 - Everything runs on the device; the file is never uploaded.
 
 ## Run it
@@ -50,6 +54,7 @@ src/engine/              PDF engine (pure TS, no DOM)
   interpreter.ts         tracks text state, finds every glyph's position; removes glyphs
   fonts.ts               glyph widths from the PDF font dictionaries
   pdfText.ts             pdf.js text runs + which characters each embedded font can draw
+  sfnt.ts                rewrites a font's cmap to Unicode (for typing in the original font)
   exporter.ts            writes edits and new objects with pdf-lib
 public/pdfjs, public/fonts   bundled pdf.js and UI/signature fonts (works offline)
 ```

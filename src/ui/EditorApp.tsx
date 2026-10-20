@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { gesture } from './gesture';
 import { css } from './styles';
 import { Icon } from './icons';
 import { openPdf, loadPdfjs } from './pdfjs';
@@ -202,6 +203,19 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
   const changeObject = (id: string, patch: Partial<EditorObject>, merge: boolean) =>
     commit((s) => ({ ...s, objects: s.objects.map((o) => (o.id === id ? ({ ...o, ...patch } as EditorObject) : o)) }), merge);
   const deleteObject = (id: string) => commit((s) => ({ ...s, objects: s.objects.filter((o) => o.id !== id) }));
+  const removeObject = (id: string) => {
+    deleteObject(id);
+    setSelected((cur) => (cur === id ? null : cur));
+    setEditing((cur) => (cur === id ? null : cur));
+  };
+  const duplicateObject = (id: string) => {
+    const o = snap.objects.find((x) => x.id === id);
+    if (!o) return;
+    const nid = uid();
+    setEditing(null);
+    addObject({ ...o, id: nid, x: o.x + 12, y: o.y + 12, ...(o.type === 'line' ? { x2: o.x2 + 12, y2: o.y2 + 12 } : {}) } as EditorObject);
+    setSelected(nid);
+  };
   const setRunEdit = (key: string, e: RunEdit | null) => commit((s) => {
     const edits = { ...s.edits };
     if (e) edits[key] = e; else delete edits[key];
@@ -313,40 +327,114 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
     return () => window.removeEventListener('keydown', onKey);
   });
 
-  // ----- pinch zoom -----
-  const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinch = useRef<{ d: number; z: number } | null>(null);
-  const onWrapDown = (e: React.PointerEvent) => {
-    if (e.pointerType !== 'touch') return;
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      pinch.current = { d: Math.hypot(a.x - b.x, a.y - b.y), z: zoom };
+  // ----- zoom: anchored so the point under the fingers / cursor stays put -----
+  const MIN_Z = 0.3, MAX_Z = 5;
+  const clampZ = (z: number) => Math.max(MIN_Z, Math.min(MAX_Z, z));
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  type Anchor = { el: HTMLElement; fx: number; fy: number; cx: number; cy: number };
+  const pendingAnchor = useRef<Anchor | null>(null);
+  const anchorAt = (cx: number, cy: number): Anchor | null => {
+    const wrap = wrapRef.current;
+    if (!wrap) return null;
+    let best: HTMLElement | null = null;
+    let bestD = Infinity;
+    wrap.querySelectorAll<HTMLElement>('.pageOuter').forEach((el) => {
+      const r = el.getBoundingClientRect();
+      const d = cy < r.top ? r.top - cy : cy > r.bottom ? cy - r.bottom : 0;
+      if (d < bestD) { bestD = d; best = el; }
+    });
+    if (!best) return null;
+    const r = (best as HTMLElement).getBoundingClientRect();
+    return { el: best, fx: (cx - r.left) / r.width, fy: (cy - r.top) / r.height, cx, cy };
+  };
+  const applyAnchor = (a: Anchor) => {
+    const wrap = wrapRef.current;
+    if (!wrap || !a.el.isConnected) return;
+    const r = a.el.getBoundingClientRect();
+    wrap.scrollLeft += r.left + a.fx * r.width - a.cx;
+    wrap.scrollTop += r.top + a.fy * r.height - a.cy;
+  };
+  useLayoutEffect(() => {
+    const a = pendingAnchor.current;
+    pendingAnchor.current = null;
+    if (a) applyAnchor(a);
+  }, [zoom]);
+  const zoomTo = (z: number, cx?: number, cy?: number) => {
+    const wrap = wrapRef.current;
+    if (!wrap) { setZoom(clampZ(z)); return; }
+    const wr = wrap.getBoundingClientRect();
+    const a = anchorAt(cx ?? wr.left + wr.width / 2, cy ?? wr.top + wr.height / 2);
+    const nz = clampZ(z);
+    if (a) {
+      if (Math.abs(nz - zoomRef.current) < 1e-4) { applyAnchor(a); return; }
+      pendingAnchor.current = a;
     }
+    setZoom(nz);
   };
-  const onWrapMove = (e: React.PointerEvent) => {
-    if (!pointers.current.has(e.pointerId)) return;
-    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    if (pinch.current && pointers.current.size === 2) {
-      const [a, b] = [...pointers.current.values()];
-      const d = Math.hypot(a.x - b.x, a.y - b.y);
-      setZoom(Math.max(0.3, Math.min(4, pinch.current.z * (d / pinch.current.d))));
-    }
-  };
-  const onWrapUp = (e: React.PointerEvent) => {
-    pointers.current.delete(e.pointerId);
-    if (pointers.current.size < 2) pinch.current = null;
-  };
+
+  // two fingers: pinch to zoom and drag to pan, at the same time
   useEffect(() => {
     const el = wrapRef.current;
     if (!el) return;
+    let start: null | { d: number; z: number; anchor: Anchor } = null;
+    let frame = 0;
+    let latest: TouchList | null = null;
+    const mid = (t: TouchList) => ({ x: (t[0].clientX + t[1].clientX) / 2, y: (t[0].clientY + t[1].clientY) / 2 });
+    const dist = (t: TouchList) => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY) || 1;
+    const begin = (t: TouchList) => {
+      const m = mid(t);
+      const anchor = anchorAt(m.x, m.y);
+      start = anchor ? { d: dist(t), z: zoomRef.current, anchor } : null;
+    };
+    const onStart = (e: TouchEvent) => {
+      if (e.touches.length >= 2) {
+        gesture.multi = true;
+        (document.activeElement as HTMLElement | null)?.blur?.();
+        begin(e.touches);
+        if (e.cancelable) e.preventDefault();
+      }
+    };
+    const onMove = (e: TouchEvent) => {
+      if (e.touches.length < 2 || !start) return;
+      if (e.cancelable) e.preventDefault();
+      latest = e.touches;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (!latest || latest.length < 2 || !start) return;
+        const m = mid(latest);
+        const z = clampZ(start.z * (dist(latest) / start.d));
+        const a = { ...start.anchor, cx: m.x, cy: m.y };
+        if (Math.abs(z - zoomRef.current) < 0.002) applyAnchor(a);
+        else { pendingAnchor.current = a; setZoom(z); }
+      });
+    };
+    const onEnd = (e: TouchEvent) => {
+      if (e.touches.length >= 2) { begin(e.touches); return; }
+      start = null;
+      latest = null;
+      if (e.touches.length === 0) setTimeout(() => { gesture.multi = false; }, 0);
+    };
+    el.addEventListener('touchstart', onStart, { passive: false });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    el.addEventListener('touchend', onEnd);
+    el.addEventListener('touchcancel', onEnd);
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey) return;
       e.preventDefault();
-      setZoom((z) => Math.max(0.3, Math.min(4, z * Math.exp(-e.deltaY * 0.01))));
+      zoomTo(zoomRef.current * Math.exp(-e.deltaY * 0.01), e.clientX, e.clientY);
     };
     el.addEventListener('wheel', onWheel, { passive: false });
-    return () => el.removeEventListener('wheel', onWheel);
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+      el.removeEventListener('touchend', onEnd);
+      el.removeEventListener('touchcancel', onEnd);
+      el.removeEventListener('wheel', onWheel);
+      cancelAnimationFrame(frame);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const findRun = (key: string) => pageData[+key.split(':')[0]]?.runs.find((r) => r.key === key);
@@ -390,9 +478,9 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
         <button className="iconbtn" onClick={hist.undo} disabled={!hist.canUndo} aria-label="Undo"><Icon name="undo" /></button>
         <button className="iconbtn" onClick={hist.redo} disabled={!hist.canRedo} aria-label="Redo"><Icon name="redo" /></button>
         <div className="zoom">
-          <button className="iconbtn" onClick={() => setZoom((z) => Math.max(0.3, z / 1.2))} aria-label="Zoom out"><Icon name="minus" size={18} /></button>
+          <button className="iconbtn" onClick={() => zoomTo(zoom / 1.2)} aria-label="Zoom out"><Icon name="minus" size={18} /></button>
           <span>{Math.round(zoom * 100)}%</span>
-          <button className="iconbtn" onClick={() => setZoom((z) => Math.min(4, z * 1.2))} aria-label="Zoom in"><Icon name="plus" size={18} /></button>
+          <button className="iconbtn" onClick={() => zoomTo(zoom * 1.2)} aria-label="Zoom in"><Icon name="plus" size={18} /></button>
         </div>
         <button className="btn small" onClick={download}><Icon name="download" size={18} /><span className="dl-label">Download</span></button>
       </header>
@@ -426,8 +514,7 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
           </div>
         )}
 
-        <div className="canvasWrap" ref={wrapRef}
-          onPointerDownCapture={onWrapDown} onPointerMoveCapture={onWrapMove} onPointerUpCapture={onWrapUp} onPointerCancelCapture={onWrapUp}>
+        <div className="canvasWrap" ref={wrapRef}>
           <div className="pages">
             {snap.pages.map((p, i) => (
               <PageView key={p.src} src={p.src} index={i} rotation={p.rotation} info={infos[p.src]} zoom={zoom} pdf={pdf}
@@ -437,19 +524,21 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
                 onSelect={setSelected} onEditing={setEditing} onStopEditing={stopEditing}
                 onRunEdit={setRunEdit} onAdd={addObject} onChange={changeObject}
                 onPlace={() => false}
+                onDelete={removeObject} onDuplicate={duplicateObject}
+                onTextPlaced={() => setTool('edit')}
                 onVisible={(src, r) => { ratios.current[src] = r; }} />
             ))}
           </div>
         </div>
 
-        {selRun && (
+        {selRun && !(mobile && editing === selRun.key) && (
           <RunPanel run={selRun} font={fonts[selRun.fontName]} edit={snap.edits[selRun.key]}
             onEdit={(e) => setRunEdit(selRun.key, e)} onReset={() => setRunEdit(selRun.key, null)} onClose={() => setSelected(null)} />
         )}
-        {selObj && (
+        {selObj && !(mobile && editing === selObj.id) && (
           <ObjectPanel o={selObj} onChange={(p) => changeObject(selObj.id, p, false)}
-            onDelete={() => { deleteObject(selObj.id); setSelected(null); }}
-            onDuplicate={() => { const id = uid(); addObject({ ...selObj, id, x: selObj.x + 12, y: selObj.y + 12, ...(selObj.type === 'line' ? { x2: selObj.x2 + 12, y2: selObj.y2 + 12 } : {}) } as EditorObject); setSelected(id); }}
+            onDelete={() => removeObject(selObj.id)}
+            onDuplicate={() => duplicateObject(selObj.id)}
             onClose={() => setSelected(null)} />
         )}
         {showToolPanel && <ToolPanel tool={tool} style={style} onChange={(s) => setStyle((v) => ({ ...v, ...s }))} />}

@@ -4,6 +4,9 @@ import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
 import { uid } from './store';
+import { registerEditFont, baselineInLine } from './textFonts';
+import { gesture } from './gesture';
+import { Icon } from './icons';
 
 export interface PageInfo { w: number; h: number; vm: M; }
 export interface PageData { runs: TextRun[]; colors: Record<string, { bg: string; fg: string }>; }
@@ -37,6 +40,9 @@ interface Props {
   onAdd: (o: EditorObject) => void;
   onChange: (id: string, patch: Partial<EditorObject>, merge: boolean) => void;
   onPlace: (src: number, x: number, y: number) => boolean;
+  onDelete: (id: string) => void;
+  onDuplicate: (id: string) => void;
+  onTextPlaced: () => void;
   onVisible: (src: number, ratio: number) => void;
 }
 
@@ -106,9 +112,17 @@ export function PageView(p: Props) {
           if (fonts[r.fontName] || p.fonts[r.fontName]) continue;
           try {
             const f = page.commonObjs.has(r.fontName) ? page.commonObjs.get(r.fontName) : null;
-            if (f) fonts[r.fontName] = analyseFont(f, r.fontName);
+            if (f) {
+              const info = analyseFont(f, r.fontName);
+              fonts[r.fontName] = info;
+              info.editFamily = await Promise.race([
+                registerEditFont(info, f),
+                new Promise<undefined>((res) => setTimeout(() => res(undefined), 2500)),
+              ]);
+            }
           } catch { /* font unavailable */ }
         }
+        if (cancelled) return;
         const colors: PageData['colors'] = {};
         const k = scale;
         for (const r of runs) {
@@ -130,19 +144,23 @@ export function PageView(p: Props) {
 
   // ---- creating shapes / placing things ----
   const dragTools: Tool[] = ['whiteout', 'highlight', 'rect', 'ellipse', 'line', 'draw'];
-  const onLayerDown = (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
-    if ((e.target as HTMLElement).closest('.obj, .run, textarea')) return;
+  const onLayerClick = (e: React.MouseEvent) => {
+    // new text boxes are placed on click (tap), so scrolling or a two-finger gesture never adds one
+    if (p.tool !== 'text' || gesture.multi) return;
+    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar')) return;
     const pt = local(e);
-    if (p.tool === 'text') {
-      const id = uid();
-      p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - p.style.fontSize * 0.6, w: 20, h: p.style.fontSize * 1.2,
-        text: '', family: p.style.family, size: p.style.fontSize, color: p.style.color, bold: false, italic: false });
-      p.onSelect(id);
-      p.onEditing(id);
-      e.preventDefault();
-      return;
-    }
+    const id = uid();
+    p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - p.style.fontSize * 0.6, w: 20, h: p.style.fontSize * 1.2,
+      text: '', family: p.style.family, size: p.style.fontSize, color: p.style.color, bold: false, italic: false });
+    p.onSelect(id);
+    p.onEditing(id);
+    p.onTextPlaced();
+  };
+  const onLayerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 || gesture.multi) return;
+    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar')) return;
+    const pt = local(e);
+    if (p.tool === 'text') return;
     if ((p.tool === 'sign' || p.tool === 'image') && p.onPlace(p.src, pt.x, pt.y)) return;
     if (dragTools.includes(p.tool)) {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -155,6 +173,7 @@ export function PageView(p: Props) {
   };
   const onLayerMove = (e: React.PointerEvent) => {
     if (!draft) return;
+    if (gesture.multi) { setDraft(null); return; }
     const pt = local(e);
     setDraft((d) => d && ({ ...d, x1: pt.x, y1: pt.y, pts: d.pts ? [...d.pts, pt.x, pt.y] : undefined }));
   };
@@ -162,6 +181,7 @@ export function PageView(p: Props) {
     if (!draft) return;
     const d = draft;
     setDraft(null);
+    if (gesture.multi) return;
     const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
     let w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
     const id = uid();
@@ -191,7 +211,8 @@ export function PageView(p: Props) {
     p.onSelect(id);
   };
 
-  const passive = p.tool !== 'edit';
+  // existing text stays clickable (= editable) with the Edit and Add-text tools
+  const passive = p.tool !== 'edit' && p.tool !== 'text';
 
   return (
     <div ref={outerRef} className="pageOuter" style={{ width: swap ? H : W, height: swap ? W : H }}>
@@ -200,6 +221,7 @@ export function PageView(p: Props) {
         className={`page tool-${p.tool}`}
         style={{ width: W, height: H, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
         onPointerDown={onLayerDown}
+        onClick={onLayerClick}
         onPointerMove={onLayerMove}
         onPointerUp={onLayerUp}
         onPointerCancel={() => setDraft(null)}
@@ -221,7 +243,8 @@ export function PageView(p: Props) {
           {p.objects.map((o) => (
             <ObjectView key={o.id} o={o} zoom={zoom} selected={p.selected === o.id} editing={p.editing === o.id}
               local={local} onSelect={() => p.onSelect(o.id)} onEditing={(v) => (v ? p.onEditing(o.id) : p.onStopEditing(o.id))}
-              onChange={(patch, merge) => p.onChange(o.id, patch, merge)} />
+              onChange={(patch, merge) => p.onChange(o.id, patch, merge)}
+              onDelete={() => p.onDelete(o.id)} onDuplicate={() => p.onDuplicate(o.id)} />
           ))}
           {draft && <Draft d={draft} zoom={zoom} tool={p.tool} style={p.style} />}
         </div>
@@ -283,9 +306,18 @@ function RunView({ run, vm, zoom, font, color, edit, editing, onStart, onCommit 
 
   const scale = edit?.sizeScale ?? 1;
   const size = b.h * scale * zoom;
+  const lineH = size * 1.2;
   const fg = edit?.color ?? color?.fg ?? '#000';
+  const bg = color?.bg ?? '#fff';
+  // Best: the embedded font re-registered with a Unicode cmap (exact glyphs while typing).
+  // Otherwise the pdf.js font when its codes are plain Unicode, else a similar system font.
   const identity = font ? Object.entries(font.display).every(([k, v]) => k === v) : false;
-  const fontCss = font ? `"${font.loadedName}", ${font.cssFallback}` : 'sans-serif';
+  const fontCss = font?.editFamily
+    ? `"${font.editFamily}", ${font.cssFallback}`
+    : font && identity ? `"${font.loadedName}", ${font.cssFallback}` : font?.cssFallback ?? 'Arial, sans-serif';
+  const mapped = !!font && !font.editFamily && !identity;
+  // put the baseline of the first line exactly on the original baseline
+  const lineTop = b.asc * zoom - baselineInLine(fontCss, size, lineH);
   const style: React.CSSProperties = {
     left: b.x * zoom, top: b.top * zoom, width: b.w * zoom, height: b.height * zoom,
     transform: b.angle ? `rotate(${b.angle}rad)` : undefined,
@@ -296,14 +328,17 @@ function RunView({ run, vm, zoom, font, color, edit, editing, onStart, onCommit 
     return <div className="run" style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onStart(); }} />;
   }
   const lines = (editing ? value : edit!.text).split('\n');
+  const textStyle: React.CSSProperties = { fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop };
   return (
-    <div className="run edited" style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) onStart(); }}>
-      <div className="cover" style={{ background: color?.bg ?? '#fff' }} />
+    <div className={`run edited${editing ? ' editing' : ''}`} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) onStart(); }}>
+      <div className="cover" style={{ background: bg }} />
       {editing ? (
         <textarea
           ref={taRef}
           value={value}
           spellCheck={false}
+          autoCapitalize="off"
+          autoCorrect="off"
           onChange={(e) => setValue(e.target.value)}
           onBlur={commitOnce}
           onKeyDown={(e) => {
@@ -311,15 +346,17 @@ function RunView({ run, vm, zoom, font, color, edit, editing, onStart, onCommit 
             if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) (e.target as HTMLTextAreaElement).blur();
             e.stopPropagation();
           }}
-          style={{ fontSize: size, color: fg, fontFamily: identity ? fontCss : font?.cssFallback ?? 'sans-serif', top: (b.asc - b.h * scale * 0.95) * zoom - 3 }}
+          style={{ ...textStyle, background: bg, caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
         />
       ) : (
-        <div className="txt" style={{ fontSize: size, color: fg, paddingTop: (b.asc - b.h * scale * 0.86) * zoom }}>
+        <div className="txt" style={textStyle}>
           {lines.map((line, li) => (
-            <div key={li} style={{ height: size * 1.2, lineHeight: `${size}px` }}>
-              {segments(line, font).map((s, i) => (
-                <span key={i} style={{ fontFamily: s.orig ? fontCss : font?.cssFallback ?? 'sans-serif' }}>{s.text}</span>
-              ))}
+            <div key={li} style={{ height: lineH }}>
+              {mapped
+                ? segments(line, font).map((sg, i) => (
+                  <span key={i} style={{ fontFamily: sg.orig ? `"${font!.loadedName}", ${font!.cssFallback}` : font!.cssFallback }}>{sg.text}</span>
+                ))
+                : line || '\u200b'}
             </div>
           ))}
         </div>
@@ -343,12 +380,14 @@ function segments(line: string, font?: FontInfo) {
 
 // ---------------- added objects ----------------
 
-function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, onChange }: {
+function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, onChange, onDelete, onDuplicate }: {
   o: EditorObject; zoom: number; selected: boolean; editing: boolean;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
   onSelect: () => void; onEditing: (v: boolean) => void; onChange: (patch: Partial<EditorObject>, merge: boolean) => void;
+  onDelete: () => void; onDuplicate: () => void;
 }) {
-  const drag = useRef<null | { mode: 'move' | 'resize' | 'end'; sx: number; sy: number; o: EditorObject; moved: boolean }>(null);
+  const drag = useRef<null | { mode: 'move' | 'grip' | 'resize' | 'end'; sx: number; sy: number; o: EditorObject; moved: boolean }>(null);
+  const [dragging, setDragging] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
 
@@ -358,9 +397,10 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
   const bw = isLine ? Math.abs(o.x2 - o.x) : o.w;
   const bh = isLine ? Math.abs(o.y2 - o.y) : o.h;
 
-  const start = (mode: 'move' | 'resize' | 'end') => (e: React.PointerEvent) => {
-    if (e.button !== 0) return;
+  const start = (mode: 'move' | 'grip' | 'resize' | 'end') => (e: React.PointerEvent) => {
+    if (e.button !== 0 || gesture.multi) return;
     e.stopPropagation();
+    // while typing, a press inside the box places the caret; the grip still moves the box
     if (editing && mode === 'move') return;
     const pt = local(e);
     drag.current = { mode, sx: pt.x, sy: pt.y, o, moved: false };
@@ -370,13 +410,15 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
   const move = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
+    if (gesture.multi) { drag.current = null; setDragging(false); return; }
     const pt = local(e);
     const dx = pt.x - d.sx, dy = pt.y - d.sy;
     if (!d.moved && Math.hypot(dx, dy) * zoom < 3) return;
     const first = !d.moved;
     d.moved = true;
+    if (first) setDragging(true);
     const s = d.o;
-    if (d.mode === 'move') {
+    if (d.mode === 'move' || d.mode === 'grip') {
       const patch: any = { x: s.x + dx, y: s.y + dy };
       if (s.type === 'line') { patch.x2 = s.x2 + dx; patch.y2 = s.y2 + dy; }
       onChange(patch, !first);
@@ -395,8 +437,11 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
   const end = () => {
     const d = drag.current;
     drag.current = null;
-    if (d && !d.moved && o.type === 'text' && selected) onEditing(true);
+    setDragging(false);
+    if (d && d.mode === 'move' && !d.moved && o.type === 'text' && selected) onEditing(true);
   };
+  // keep the text caret when pressing the grip / toolbar
+  const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
   // auto-size text boxes
   useLayoutEffect(() => {
@@ -468,11 +513,27 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
       break;
   }
   const resizable = o.type !== 'line' && o.type !== 'draw';
+  const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   return (
-    <div className={`obj${selected ? ' selected' : ''}`} style={style}
+    <div className={`obj${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${editing ? ' editing' : ''}`} style={style}
       onPointerDown={start('move')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
       onDoubleClick={() => o.type === 'text' && onEditing(true)}>
       {inner}
+      {selected && !dragging && (
+        <div className="objbar" onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>
+          {o.type === 'text' && !editing && (
+            <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="text" size={17} /></button>
+          )}
+          <button type="button" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate}><Icon name="copy" size={17} /></button>
+          <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={17} /></button>
+        </div>
+      )}
+      {selected && !isLine && (
+        <div className="grip" aria-label="Move" title="Drag to move" onMouseDown={keepFocus}
+          onPointerDown={start('grip')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+          <Icon name="move" size={15} />
+        </div>
+      )}
       {selected && resizable && !editing && <div className="handle" onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} />}
       {selected && isLine && (
         <div className="handle" style={{ left: (o.x2 - bx) * zoom - 9, top: (o.y2 - by) * zoom - 9, right: 'auto', bottom: 'auto', cursor: 'move' }}

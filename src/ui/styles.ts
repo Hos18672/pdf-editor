@@ -86,11 +86,11 @@ button { font: inherit; color: inherit; }
 .page.tool-whiteout, .page.tool-highlight, .page.tool-rect, .page.tool-ellipse, .page.tool-line, .page.tool-draw { cursor: crosshair; touch-action: none; }
 
 .run { position: absolute; white-space: pre; transform-origin: 0 0; border-radius: 2px; cursor: text; }
-.tool-edit .run:hover { outline: 1.5px solid rgba(30,37,89,.55); background: rgba(255,225,77,.18); }
+.tool-edit .run:hover, .tool-text .run:hover { outline: 1.5px solid rgba(30,37,89,.55); background: rgba(255,225,77,.18); }
 .run.edited { cursor: text; }
 .run .cover { position: absolute; inset: -2px -3px; border-radius: 1px; }
-.run .txt { position: relative; line-height: 1; white-space: pre; }
-.run textarea { position: absolute; left: -4px; top: -3px; min-width: calc(100% + 8px); padding: 2px 3px; border: 1.5px solid var(--ink); border-radius: 3px; background: #fff; resize: none; overflow: hidden; line-height: 1.2; white-space: pre; box-shadow: 0 6px 18px -6px rgba(30,37,89,.35); outline: none; }
+.run .txt { position: absolute; left: 0; white-space: pre; }
+.run textarea { position: absolute; left: 0; margin: 0; padding: 0; border: 0; border-radius: 1px; resize: none; overflow: hidden; white-space: pre; outline: none; box-shadow: 0 0 0 3px var(--paper), 0 0 0 4.5px var(--ink), 0 8px 22px -6px rgba(30,37,89,.35); font-kerning: normal; }
 .layer.passive .run { pointer-events: none; }
 
 .obj { position: absolute; touch-action: none; }
@@ -99,9 +99,17 @@ button { font: inherit; color: inherit; }
 .obj .handle::after { content: ""; position: absolute; inset: -10px; }
 .obj textarea, .obj .tview { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: transparent; resize: none; overflow: hidden; white-space: pre; line-height: 1.2; outline: none; }
 .obj.dragging { cursor: grabbing; }
+.obj.editing { cursor: text; }
+.obj .grip { position: absolute; left: -34px; top: -34px; width: 28px; height: 28px; display: grid; place-items: center; border-radius: 8px; background: var(--ink); color: #fff; cursor: move; touch-action: none; box-shadow: 0 4px 12px -4px rgba(30,37,89,.5); z-index: 3; }
+.obj .grip::after { content: ""; position: absolute; inset: -8px; }
+.objbar { position: absolute; right: 0; top: -44px; display: flex; gap: 2px; padding: 3px; background: var(--paper); border: 1px solid var(--line); border-radius: 10px; box-shadow: 0 8px 20px -8px rgba(30,37,89,.45); z-index: 3; white-space: nowrap; }
+.objbar button { width: 34px; height: 32px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--ink); cursor: pointer; padding: 0; }
+.objbar button:hover { background: var(--desk); }
+.objbar button.danger { color: var(--danger); }
+.objbar svg, .obj .grip svg { position: static; pointer-events: none; flex: none; }
 .tool-edit .obj { cursor: grab; }
 .obj img { width: 100%; height: 100%; display: block; pointer-events: none; }
-.obj svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.obj > svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 .draft { position: absolute; border: 1.5px dashed var(--ink); pointer-events: none; }
 
 /* properties panel */
