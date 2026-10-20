@@ -1,0 +1,84 @@
+name: Build Android APK
+
+# Run from the Actions tab ("Run workflow") or by pushing a tag like v1.0.1.
+# The APK is attached to a GitHub release, so it can be downloaded straight to a phone.
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: android
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Generate the native Android project
+        env:
+          CI: '1'
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Ship pdf.js and fonts inside the APK (the app works offline)
+        run: |
+          mkdir -p android/app/src/main/assets
+          cp -r public/pdfjs public/fonts android/app/src/main/assets/
+
+      - name: Build release APK
+        working-directory: android
+        env:
+          CI: '1'
+          NODE_ENV: production
+        # arm64 covers practically every Android phone from the last ~8 years and keeps the APK small.
+        # Signed with the project's debug key: fine for installing directly, not for the Play Store.
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=arm64-v8a
+
+      - name: Name the APK
+        id: apk
+        run: |
+          v=$(node -p "require('./app.json').expo.version")
+          out="PDF-Editor-$v-build${{ github.run_number }}.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "$out"
+          echo "file=$out" >> "$GITHUB_OUTPUT"
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          ls -l "$out"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: ${{ steps.apk.outputs.file }}
+
+      - name: Publish as a GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="android-build-${{ github.run_number }}"; fi
+          gh release create "$tag" "${{ steps.apk.outputs.file }}" \
+            --target "${GITHUB_SHA}" \
+            --title "PDF Editor ${{ steps.apk.outputs.version }} (Android, build ${{ github.run_number }})" \
+            --notes "Android app (APK) built from ${GITHUB_SHA::7}. On your phone: download the .apk, open it and allow installing from this source."

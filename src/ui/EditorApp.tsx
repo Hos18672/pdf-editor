@@ -4,6 +4,7 @@ import { Icon } from './icons';
 import { openPdf, loadPdfjs } from './pdfjs';
 import { useHistory } from './store';
 import type { PageInfo } from './PageView';
+import { appBase } from './assets';
 import { Editor, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { Start, OpenState } from './Start';
 import { Tools, ToolId } from './Tools';
@@ -20,10 +21,7 @@ export const fromB64 = (b64: string) => {
 };
 
 // Fonts ship with the app (public/fonts) so the editor also works offline.
-const fontBase = () => {
-  const b = (process.env.EXPO_BASE_URL as string | undefined) ?? '/';
-  return (b.endsWith('/') ? b : b + '/') + 'fonts/';
-};
+const fontBase = () => appBase() + 'fonts/';
 const fontFaces = () => {
   const u = fontBase();
   const face = (family: string, file: string, weight: number) =>

@@ -1,12 +1,11 @@
 // Loads pdf.js (v3 UMD build). Prefers the copy bundled in /public (works
 // offline, also inside the Android app), falls back to the CDN.
+import { appBase } from './assets';
+
 const VERSION = '3.11.174';
 const CDN = `https://cdn.jsdelivr.net/npm/pdfjs-dist@${VERSION}`;
 
-const localBase = () => {
-  const base = (process.env.EXPO_BASE_URL as string | undefined) ?? '/';
-  return (base.endsWith('/') ? base : base + '/') + 'pdfjs';
-};
+const localBase = () => appBase() + 'pdfjs';
 
 let loading: Promise<{ lib: any; base: string }> | null = null;
 
