@@ -141,23 +141,27 @@ export function SignatureModal({ onClose, onPick }: { onClose: () => void; onPic
 
   return (
     <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal" role="dialog" aria-label="Create signature">
+      <div className="modal sigmodal" role="dialog" aria-label="Create signature">
         <header>
           <h2>Your signature</h2>
           <button className="iconbtn" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
         </header>
         {saved.length > 0 && (
-          <div className="saved">
-            {saved.map((s) => (
-              <div key={s} className="s" role="button" tabIndex={0} onClick={() => stampFromSrc(s).then(onPick)}>
-                <img src={s} alt="Saved signature" />
-                <button className="x" aria-label="Remove saved signature" onClick={(e) => {
-                  e.stopPropagation();
-                  const list = saved.filter((x) => x !== s); setSaved(list); save(list);
-                }}>✕</button>
-              </div>
-            ))}
-          </div>
+          <section className="savedWrap">
+            <div className="savedHead">Saved signatures <span>Tap one to place it</span></div>
+            <div className="saved">
+              {saved.map((s) => (
+                <div key={s} className="s" role="button" tabIndex={0} aria-label="Place saved signature"
+                  onClick={() => stampFromSrc(s).then(onPick)} onKeyDown={(e) => e.key === 'Enter' && stampFromSrc(s).then(onPick)}>
+                  <img src={s} alt="" draggable={false} />
+                  <button className="x" aria-label="Remove saved signature" onClick={(e) => {
+                    e.stopPropagation();
+                    const list = saved.filter((x) => x !== s); setSaved(list); save(list);
+                  }}><Icon name="close" size={14} /></button>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
         <div className="tabs" role="tablist">
           {(['draw', 'type', 'upload'] as const).map((t) => (

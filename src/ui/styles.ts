@@ -175,10 +175,16 @@ button { font: inherit; color: inherit; }
 .typed .opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .typed .opts button { height: 64px; border: 1px solid var(--line); border-radius: var(--radius-m); background: #fff; font-size: 30px; cursor: pointer; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; padding: 0 10px; }
 .typed .opts button.on { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); }
-.saved { display: flex; gap: 8px; flex-wrap: wrap; }
-.saved .s { position: relative; width: 140px; height: 64px; border: 1px solid var(--line); border-radius: var(--radius-s); background: #fff; display: grid; place-items: center; cursor: pointer; padding: 6px; }
-.saved .s img { max-width: 100%; max-height: 100%; }
-.saved .s .x { position: absolute; top: -8px; right: -8px; width: 22px; height: 22px; border-radius: 50%; border: 1px solid var(--line); background: #fff; font-size: 12px; cursor: pointer; display: grid; place-items: center; padding: 0; }
+.savedWrap { display: grid; gap: 8px; }
+.savedHead { font-size: 13px; font-weight: 600; color: var(--ink); display: flex; align-items: baseline; gap: 8px; }
+.savedHead span { font-weight: 400; color: var(--muted); }
+.saved { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; }
+.saved .s { position: relative; height: 72px; border: 1px solid var(--line); border-radius: var(--radius-m); background: #fff; display: flex; align-items: center; justify-content: center; cursor: pointer; padding: 8px 30px 8px 12px; overflow: hidden; transition: border-color .15s, box-shadow .15s; }
+.saved .s:hover, .saved .s:focus-visible { border-color: var(--ink); box-shadow: 0 0 0 1px var(--ink); outline: none; }
+.saved .s img { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; }
+.saved .s .x { position: absolute; top: 4px; right: 4px; width: 24px; height: 24px; border-radius: 50%; border: 0; background: var(--desk); color: var(--muted); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.saved .s .x:hover { background: #fde4e4; color: var(--danger); }
+.sigmodal footer { position: sticky; bottom: -20px; background: var(--paper); margin: 0 -20px -20px; padding: 12px 20px 20px; border-top: 1px solid var(--line); }
 .modal footer { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
 
 .toast { position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 16px; border-radius: 10px; font-size: 14px; z-index: 60; box-shadow: 0 10px 30px -10px rgba(20,24,56,.6); max-width: calc(100% - 32px); }
@@ -218,6 +224,15 @@ button { font: inherit; color: inherit; }
   .panel.open .pbody { display: flex; gap: 14px; padding: 10px 8px 4px 0; overflow-y: auto; }
   .shapes { position: fixed; left: 8px; right: 8px; bottom: 74px; justify-content: center; }
   .modal { padding: 16px; border-radius: 14px; }
+  .scrim:has(.sigmodal) { place-items: end stretch; padding: 0; }
+  .sigmodal { width: 100%; max-height: 92dvh; border-radius: 18px 18px 0 0; gap: 14px; padding-bottom: 0; }
+  .sigmodal footer { bottom: 0; margin: 0 -16px; padding: 10px 16px calc(12px + env(safe-area-inset-bottom)); }
+  .sigmodal footer label { flex-basis: 100%; }
+  .sigmodal footer .btn { flex: 1; }
+  .saved { display: flex; overflow-x: auto; scroll-snap-type: x mandatory; padding-bottom: 2px; }
+  .saved .s { flex: none; width: 150px; height: 64px; scroll-snap-align: start; }
+  .sigpad { height: 180px; }
+  .sigpad .ph { right: 24px; }
   .typed .opts button { font-size: 24px; }
 }
 `;
