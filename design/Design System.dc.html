@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Source+Serif+4:wght@400&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>body{margin:0;background:#ECEEF3;}a{color:#1E2559;}a:hover{color:#3446C9;}</style>
+</helmet>
+<div style="max-width:1280px;margin:0 auto;padding:clamp(24px,5vw,72px);display:flex;flex-direction:column;gap:72px;font-family:'Schibsted Grotesk',system-ui,sans-serif;color:#151833;font-size:15px;">
+  <div style="display:flex;flex-direction:column;gap:12px;">
+    <div style="font-size:13px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:#5D637A;"><a href="PDF Editor Redesign.dc.html">PDF Editor</a> · Design system</div>
+    <div style="font-size:clamp(36px,5vw,60px);font-weight:700;letter-spacing:-.035em;line-height:1.02;">Quiet chrome, loud paper.</div>
+  </div>
+
+  <section style="display:flex;flex-direction:column;gap:20px;">
+    <div style="font-size:24px;font-weight:700;letter-spacing:-.01em;">Colour</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;">
+      <sc-for list="{{ colors }}" as="c" hint-placeholder-count="12">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <div style="{{ c.sw }}"></div>
+          <div style="display:flex;flex-direction:column;gap:2px;"><span style="font-weight:600;font-size:14px;">{{ c.name }}</span><span style="font-size:12.5px;color:#5D637A;">{{ c.light }} · dark {{ c.dark }}</span><span style="font-size:12.5px;color:#5D637A;">{{ c.use }}</span></div>
+        </div>
+      </sc-for>
+    </div>
+    <div style="font-size:13.5px;color:#5D637A;max-width:60em;line-height:1.55;">Text #151833 on desk #ECEEF3 = 15.1:1; muted #5D637A on white = 6.1:1; white on navy = 13.9:1. Yellow is never a text colour — only a fill behind navy (9.6:1).</div>
+  </section>
+
+  <section style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:48px;">
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div style="font-size:24px;font-weight:700;">Type · Schibsted Grotesk</div>
+      <sc-for list="{{ type }}" as="t" hint-placeholder-count="6">
+        <div style="display:flex;align-items:baseline;gap:16px;"><span style="width:96px;flex:none;font-size:12.5px;color:#5D637A;">{{ t.spec }}</span><span style="{{ t.st }}">{{ t.name }}</span></div>
+      </sc-for>
+      <div style="font-size:13.5px;color:#5D637A;line-height:1.55;">Tabular figures for zoom, page and size readouts. The document itself keeps its own fonts.</div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:16px;">
+      <div style="font-size:24px;font-weight:700;">Spacing · radii · shadow</div>
+      <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;">
+        <sc-for list="{{ space }}" as="s" hint-placeholder-count="8"><div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="{{ s.st }}"></div><span style="font-size:12px;color:#5D637A;">{{ s.v }}</span></div></sc-for>
+      </div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;">
+        <sc-for list="{{ radii }}" as="r" hint-placeholder-count="5"><div style="display:flex;flex-direction:column;align-items:center;gap:6px;"><div style="{{ r.st }}"></div><span style="font-size:12px;color:#5D637A;">{{ r.v }}</span></div></sc-for>
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;padding-top:8px;">
+        <sc-for list="{{ shadows }}" as="s" hint-placeholder-count="4"><div style="display:flex;flex-direction:column;gap:8px;"><div style="{{ s.st }}"></div><span style="font-size:12px;color:#5D637A;">{{ s.v }}</span></div></sc-for>
+      </div>
+    </div>
+  </section>
+
+  <section style="display:flex;flex-direction:column;gap:16px;">
+    <div style="font-size:24px;font-weight:700;">Icons · Phosphor</div>
+    <div style="font-size:14px;color:#5D637A;">Regular weight at 20–23px for tools; Fill weight only for the active tool. Bold for icons inside primary buttons.</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <sc-for list="{{ icons }}" as="i" hint-placeholder-count="14"><div style="width:52px;height:52px;border-radius:12px;background:#fff;display:flex;align-items:center;justify-content:center;font-size:23px;color:#1E2559;"><i class="{{ i }}"></i></div></sc-for>
+    </div>
+  </section>
+<section style="display:flex;flex-direction:column;gap:20px;">
+    <div style="font-size:24px;font-weight:700;">Components</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,380px),1fr));gap:20px;">
+      <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;">
+        <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5D637A;">Buttons · 40 desktop / 48 touch</div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+          <div style="height:40px;padding:0 18px 0 14px;border-radius:10px;background:#1E2559;color:#fff;display:flex;align-items:center;gap:8px;font-weight:600;" style-hover="background:#2B3478;"><i class="ph-bold ph-download-simple"></i>Download</div>
+          <div style="height:40px;padding:0 16px;border-radius:10px;border:1px solid #E1E4EB;display:flex;align-items:center;gap:8px;font-weight:600;" style-hover="background:#F5F6F9;">Secondary</div>
+          <div style="height:40px;padding:0 14px;border-radius:10px;display:flex;align-items:center;font-weight:600;" style-hover="background:#F5F6F9;">Ghost</div>
+          <div style="height:40px;padding:0 14px;border-radius:10px;display:flex;align-items:center;gap:8px;font-weight:600;color:#B83227;"><i class="ph ph-trash"></i>Delete</div>
+          <div style="height:40px;padding:0 16px;border-radius:10px;background:#1E2559;color:#fff;display:flex;align-items:center;font-weight:600;opacity:.4;">Disabled</div>
+        </div>
+        <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5D637A;padding-top:6px;">Icon buttons</div>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <div style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph ph-arrow-u-up-left"></i></div>
+          <div style="width:40px;height:40px;border-radius:10px;background:#F5F6F9;display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph ph-arrow-u-up-left"></i></div>
+          <div style="width:40px;height:40px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:19px;outline:2px solid #3446C9;outline-offset:2px;"><i class="ph ph-arrow-u-up-left"></i></div>
+          <div style="width:44px;height:44px;border-radius:12px;background:#1E2559;color:#fff;display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph-bold ph-download-simple"></i></div>
+          <span style="font-size:12.5px;color:#5D637A;">rest · hover · focus · touch primary</span>
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;">
+        <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5D637A;">Tool rail / dock item</div>
+        <div style="display:flex;gap:6px;">
+          <div style="width:68px;height:58px;border-radius:12px;background:#FFE14D;color:#1E2559;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-weight:600;font-size:11px;"><i class="ph-fill ph-signature" style="font-size:22px;"></i>Sign</div>
+          <div style="width:68px;height:58px;border-radius:12px;background:#F5F6F9;color:#151833;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:11px;font-weight:500;"><i class="ph ph-image" style="font-size:22px;"></i>Image</div>
+          <div style="width:68px;height:58px;border-radius:12px;color:#5D637A;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;font-size:11px;font-weight:500;"><i class="ph ph-shapes" style="font-size:22px;"></i>Shapes</div>
+        </div>
+        <div style="font-size:12.5px;color:#5D637A;line-height:1.5;">Active · hover · rest. Switching: the yellow fill slides between items (180ms ease-out) and the icon swaps Regular→Fill.</div>
+        <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5D637A;padding-top:6px;">Floating object toolbar</div>
+        <div style="align-self:flex-start;display:flex;align-items:center;gap:2px;padding:4px;background:#1E2559;border-radius:12px;color:#fff;box-shadow:0 8px 24px rgba(20,23,46,.25);">
+          <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="ph ph-arrows-out-cardinal"></i></div><div style="width:1px;height:20px;background:rgba(255,255,255,.18);"></div>
+          <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;"><i class="ph ph-minus"></i></div><span style="font-weight:600;font-size:13px;min-width:22px;text-align:center;">14</span><div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;"><i class="ph ph-plus"></i></div><div style="width:1px;height:20px;background:rgba(255,255,255,.18);"></div>
+          <div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="ph ph-copy"></i></div><div style="width:40px;height:40px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#FF9C8F;"><i class="ph ph-trash"></i></div>
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;">
+        <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5D637A;">Tabs · swatches · stepper</div>
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);padding:4px;gap:4px;background:#F0F2F6;border-radius:12px;">
+          <div style="height:40px;border-radius:9px;background:#fff;box-shadow:0 1px 3px rgba(20,23,46,.12);display:flex;align-items:center;justify-content:center;font-weight:600;">Draw</div><div style="height:40px;display:flex;align-items:center;justify-content:center;color:#5D637A;">Type</div><div style="height:40px;display:flex;align-items:center;justify-content:center;color:#5D637A;">Upload</div>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
+          <div style="width:32px;height:32px;border-radius:50%;background:#14161F;box-shadow:0 0 0 2px #fff,0 0 0 4px #1E2559;"></div><div style="width:32px;height:32px;border-radius:50%;background:#1E2559;"></div><div style="width:32px;height:32px;border-radius:50%;background:#2F5BD3;"></div><div style="width:32px;height:32px;border-radius:50%;background:#B83227;"></div>
+          <div style="flex:1;"></div>
+          <div style="height:44px;width:150px;border:1px solid #E1E4EB;border-radius:10px;display:flex;align-items:center;"><div style="width:44px;display:flex;justify-content:center;"><i class="ph ph-minus"></i></div><div style="flex:1;text-align:center;font-weight:600;">11 <span style="font-weight:400;color:#5D637A;font-size:12px;">pt</span></div><div style="width:44px;display:flex;justify-content:center;"><i class="ph ph-plus"></i></div></div>
+        </div>
+        <div style="font-size:12.5px;color:#5D637A;line-height:1.5;">Swatch hit area is 44px even when the dot is 28–32px. Stepper: tap ±1, long-press repeats, tap the number to type.</div>
+      </div>
+      <div style="background:#ECEEF3;border-radius:16px;padding:24px 24px 0;display:flex;flex-direction:column;gap:16px;overflow:hidden;">
+        <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5D637A;">Bottom sheet · slim → expanded</div>
+        <div style="background:#fff;border-radius:20px 20px 0 0;padding:8px 16px 20px;box-shadow:0 -8px 30px rgba(20,23,46,.12);display:flex;flex-direction:column;gap:14px;">
+          <div style="width:40px;height:5px;border-radius:3px;background:#E1E4EB;margin:0 auto;"></div>
+          <div style="display:flex;align-items:center;gap:8px;"><span style="flex:1;font-weight:600;font-size:16px;">Text properties</span><span style="font-size:13px;color:#5D637A;">Page 1 · Line 4</span></div>
+          <div style="height:44px;border:1px solid #E1E4EB;border-radius:10px;display:flex;align-items:center;padding:0 12px;gap:10px;"><span style="font-family:'Source Serif 4',serif;">Aa</span><span style="flex:1;">Times New Roman</span><i class="ph ph-caret-down"></i></div>
+          <div style="display:flex;gap:8px;"><div style="flex:1;height:44px;border-radius:10px;border:1px solid #E1E4EB;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;"><i class="ph ph-arrow-counter-clockwise"></i>Restore</div><div style="flex:1;height:44px;border-radius:10px;border:1px solid #E1E4EB;display:flex;align-items:center;justify-content:center;gap:6px;font-weight:600;color:#B83227;"><i class="ph ph-trash"></i>Delete</div></div>
+        </div>
+      </div>
+      <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:16px;">
+        <div style="font-size:12px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:#5D637A;">Toast · modal</div>
+        <div style="align-self:flex-start;display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-radius:14px;background:#151833;color:#fff;"><span style="width:26px;height:26px;border-radius:50%;background:#5BD69A;color:#0E3B26;display:flex;align-items:center;justify-content:center;"><i class="ph-bold ph-check"></i></span><span>Saved Lease_Agreement.pdf</span><span style="color:#FFE14D;font-weight:600;padding:0 10px;">Open</span></div>
+        <div style="align-self:flex-start;display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-radius:14px;background:#151833;color:#fff;"><span style="width:26px;height:26px;border-radius:50%;background:#FF8A7E;color:#4A0F0A;display:flex;align-items:center;justify-content:center;"><i class="ph-bold ph-x"></i></span><span>Couldn't place image</span><span style="color:#FFE14D;font-weight:600;padding:0 10px;">Retry</span></div>
+        <div style="font-size:12.5px;color:#5D637A;line-height:1.5;">Toasts rise 8px + fade (240ms), stay 4s, pause on hover. Modal: 20px radius, 24px padding, max 560px, backdrop rgba(16,19,40,.38); on phones it becomes a bottom sheet.</div>
+      </div>
+    </div>
+  </section>
+<section style="display:flex;flex-direction:column;gap:20px;">
+  <div style="font-size:28px;font-weight:700;letter-spacing:-.02em;">Interaction notes</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:20px;">
+    <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:10px;line-height:1.55;font-size:14px;color:#3F4560;">
+      <div style="font-size:17px;font-weight:600;color:#151833;">Selection</div>
+      <div>Edit tool: hovering a line shows a 1px dashed outline; tap or click opens the inline editor in place with the caret at the tapped spot. The line gets a navy 2px ring and a 5px soft halo; the rest of the page stays untouched.</div>
+      <div>Added objects: a single tap selects (blue outline, corner dots, resize knob bottom-right). Tap empty paper or press Esc to deselect. Shift-click adds to the selection on desktop.</div>
+      <div>Delete / Backspace removes the selection; Ctrl+D duplicates with an 8px offset.</div>
+    </div>
+    <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:10px;line-height:1.55;font-size:14px;color:#3F4560;">
+      <div style="font-size:17px;font-weight:600;color:#151833;">Dragging and resizing</div>
+      <div>Drag the object body or the move handle in its toolbar. On touch, dragging starts after 4px of travel so taps never nudge things.</div>
+      <div>While dragging, the floating toolbar fades out and alignment guides (1px, Selection blue) snap to page centre and margins within 6px. Arrow keys move 1pt, Shift+arrow 10pt.</div>
+      <div>The resize knob keeps aspect ratio for signatures and images; Alt/Option frees it. Text boxes resize the box and reflow; font size changes only through the stepper.</div>
+    </div>
+    <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:10px;line-height:1.55;font-size:14px;color:#3F4560;">
+      <div style="font-size:17px;font-weight:600;color:#151833;">Zoom</div>
+      <div>Pinch zooms around the midpoint between fingers; two-finger pan scrolls. Double-tap toggles fit-width and 200% at the tapped point. One-finger drag on empty desk scrolls, never draws (except with Draw active).</div>
+      <div>Desktop: Ctrl/⌘+wheel zooms at the cursor, Ctrl+0 fits width, the zoom pill shows tabular %. Range 25–400%, steps 25/50/75/100/125/150/200/300/400.</div>
+      <div>Objects and handles keep constant screen size at every zoom level.</div>
+    </div>
+    <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:10px;line-height:1.55;font-size:14px;color:#3F4560;">
+      <div style="font-size:17px;font-weight:600;color:#151833;">Where panels appear</div>
+      <div><b style="color:#151833;">Mobile 390:</b> tools in a scrollable bottom dock. Editing text swaps the dock for a slim properties bar above the keyboard; the page auto-scrolls so the edited line sits in the top third. Caret ^ expands the bar into a half sheet. Dialogs are bottom sheets.</div>
+      <div><b style="color:#151833;">Tablet 820:</b> left rail (reachable with the left thumb in both orientations). Properties float as a card bottom-right, moving to bottom-left if it would overlap the selection.</div>
+      <div><b style="color:#151833;">Desktop 1440:</b> rail left, 320px properties panel right showing the current selection or the change list.</div>
+      <div><b style="color:#151833;">Large 1920+:</b> adds a page-thumbnail column; the page grows to 780px max instead of stretching.</div>
+    </div>
+    <div style="background:#fff;border-radius:16px;padding:24px;display:flex;flex-direction:column;gap:10px;line-height:1.55;font-size:14px;color:#3F4560;">
+      <div style="font-size:17px;font-weight:600;color:#151833;">Motion</div>
+      <div>Tool switch: marker fill crossfades 180ms ease-out. Panels and sheets rise 8px + fade in 220–260ms; close is 160ms. Toasts enter from below, stay 4s. All motion drops to opacity-only under prefers-reduced-motion.</div>
+    </div>
+  </div>
+</section>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const C = (name, light, dark, use, extra) => ({ name, light, dark, use, sw: { height: '72px', borderRadius: '12px', background: light, border: '1px solid rgba(20,23,46,.08)', ...extra } });
+    return {
+      colors: [
+        C('Desk', '#ECEEF3', '#0F1118', 'Workspace ground'), C('Surface', '#FFFFFF', '#191C27', 'Bars, panels, sheets'),
+        C('Surface 2', '#F5F6F9', '#222635', 'Hover, inputs'), C('Line', '#E1E4EB', '#2D3245', 'Hairlines only'),
+        C('Text', '#151833', '#ECEEF6', 'Primary text'), C('Muted', '#5D637A', '#9CA2BA', 'Labels, meta'),
+        C('Ink', '#1E2559', '#B4BDFF', 'Primary actions'), C('Ink hover', '#2B3478', '#CDD3FF', 'Pressed / hover'),
+        C('Marker', '#FFE14D', '#FFE14D', 'Active tool, highlight'), C('Selection', '#3446C9', '#8E9BFF', 'Object outline, handles'),
+        C('Danger', '#B83227', '#FF8A7E', 'Delete, errors'), C('Success', '#1E7A4C', '#5BD69A', 'Saved'),
+      ],
+      type: [
+        { spec: '72 / 700 / −3.5%', name: 'Display', st: { fontSize: '48px', fontWeight: 700, letterSpacing: '-.035em', lineHeight: 1 } },
+        { spec: '20 / 600', name: 'Dialog title', st: { fontSize: '20px', fontWeight: 600 } },
+        { spec: '17 / 600', name: 'Panel title', st: { fontSize: '17px', fontWeight: 600 } },
+        { spec: '15 / 600', name: 'File name', st: { fontSize: '15px', fontWeight: 600 } },
+        { spec: '14 / 500', name: 'Body & buttons', st: { fontSize: '14px', fontWeight: 500 } },
+        { spec: '12 / 600 caps', name: 'SECTION LABEL', st: { fontSize: '12px', fontWeight: 600, letterSpacing: '.06em', color: '#5D637A' } },
+        { spec: '11 / 500', name: 'Tool label', st: { fontSize: '11px', fontWeight: 500 } },
+      ],
+      space: [4, 8, 12, 16, 20, 24, 32, 48].map(v => ({ v, st: { width: v + 'px', height: v + 'px', background: '#1E2559', borderRadius: '2px' } })),
+      radii: [['6', 'chip'], ['10', 'control'], ['12', 'tool'], ['16', 'panel'], ['20', 'modal']].map(([v, n]) => ({ v: v + ' ' + n, st: { width: '56px', height: '56px', background: '#fff', border: '1.5px solid #1E2559', borderRadius: v + 'px' } })),
+      shadows: [['Page', '0 1px 2px rgba(20,23,46,.06),0 10px 30px rgba(20,23,46,.10)'], ['Float', '0 2px 10px rgba(20,23,46,.10)'], ['Panel', '0 16px 40px rgba(20,23,46,.16)'], ['Modal', '0 30px 80px rgba(16,19,40,.35)']].map(([v, s]) => ({ v, st: { width: '96px', height: '64px', background: '#fff', borderRadius: '10px', boxShadow: s } })),
+      icons: ['ph ph-cursor-text','ph ph-text-t','ph ph-signature','ph ph-image','ph ph-eraser','ph ph-highlighter','ph ph-shapes','ph ph-scribble','ph ph-squares-four','ph ph-arrow-u-up-left','ph ph-arrows-out-cardinal','ph ph-copy','ph ph-trash','ph-fill ph-highlighter'],
+    };
+  }
+}
+</script>
+</body>
+</html>

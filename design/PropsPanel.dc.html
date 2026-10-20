@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+</helmet>
+<div style="display:flex;flex-direction:column;gap:24px;padding:20px 20px 24px;font-family:'Schibsted Grotesk',system-ui,sans-serif;color:var(--text,#151833);font-size:14px;">
+<sc-if value="{{ isEdit }}" hint-placeholder-val="{{ true }}">
+  <div style="display:flex;align-items:flex-start;gap:12px;">
+    <div style="flex:1;display:flex;flex-direction:column;gap:4px;"><div style="font-size:12px;font-weight:600;color:var(--muted,#5D637A);letter-spacing:.06em;text-transform:uppercase;">Existing text</div><div style="font-size:17px;font-weight:600;">Page 1 · Line 4</div></div>
+    <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--muted,#5D637A);" style-hover="background:var(--surface2,#F5F6F9);"><i class="ph ph-x"></i></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);">Font</div>
+    <div style="height:44px;border:1px solid var(--line,#E1E4EB);border-radius:10px;display:flex;align-items:center;gap:10px;padding:0 12px;">
+      <span style="font-family:'Source Serif 4',Georgia,serif;font-size:16px;">Aa</span><span style="flex:1;font-weight:500;">Times New Roman</span>
+      <span style="font-size:11px;font-weight:600;padding:3px 7px;border-radius:6px;background:var(--surface2,#F5F6F9);color:var(--muted,#5D637A);">Original</span><i class="ph ph-caret-down" style="color:var(--muted,#5D637A);"></i>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div style="display:flex;flex-direction:column;gap:8px;"><div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);">Size</div>
+      <div style="height:44px;border:1px solid var(--line,#E1E4EB);border-radius:10px;display:flex;align-items:center;">
+        <div style="width:40px;height:42px;display:flex;align-items:center;justify-content:center;"><i class="ph ph-minus"></i></div><div style="flex:1;text-align:center;font-weight:600;font-variant-numeric:tabular-nums;">11<span style="font-weight:400;color:var(--muted,#5D637A);font-size:12px;"> pt</span></div><div style="width:40px;height:42px;display:flex;align-items:center;justify-content:center;"><i class="ph ph-plus"></i></div>
+      </div></div>
+    <div style="display:flex;flex-direction:column;gap:8px;"><div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);">Style</div>
+      <div style="height:44px;border:1px solid var(--line,#E1E4EB);border-radius:10px;display:grid;grid-template-columns:1fr 1fr;padding:3px;gap:3px;">
+        <div style="border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:700;">B</div><div style="border-radius:7px;display:flex;align-items:center;justify-content:center;font-style:italic;font-family:Georgia,serif;">I</div>
+      </div></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px;">
+    <div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);">Colour</div>
+    <div style="display:flex;gap:10px;align-items:center;">
+      <div title="Original" style="width:32px;height:32px;border-radius:50%;background:#1d1d1f;box-shadow:0 0 0 2px var(--surface,#fff),0 0 0 4px var(--ink,#1E2559);"></div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#1E2559;"></div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#3446C9;"></div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#B83227;"></div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#1E7A4C;"></div>
+      <div style="width:32px;height:32px;border-radius:50%;border:1.5px dashed var(--line,#C9CDD8);display:flex;align-items:center;justify-content:center;color:var(--muted,#5D637A);"><i class="ph ph-plus"></i></div>
+    </div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:8px;">
+    <div style="height:44px;border-radius:10px;border:1px solid var(--line,#E1E4EB);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;" style-hover="background:var(--surface2,#F5F6F9);"><i class="ph ph-arrow-counter-clockwise" style="font-size:17px;"></i>Restore original</div>
+    <div style="height:44px;border-radius:10px;display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;color:var(--danger,#B83227);" style-hover="background:rgba(184,50,39,.08);"><i class="ph ph-trash" style="font-size:17px;"></i>Delete line</div>
+  </div>
+  <div style="font-size:12.5px;color:var(--muted,#5D637A);display:flex;gap:14px;"><span><b style="font-weight:600;">Enter</b> confirm</span><span><b style="font-weight:600;">Esc</b> cancel</span><span><b style="font-weight:600;">Tab</b> next line</span></div>
+</sc-if>
+<sc-if value="{{ isObj }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;align-items:flex-start;gap:12px;">
+    <div style="flex:1;display:flex;flex-direction:column;gap:4px;"><div style="font-size:12px;font-weight:600;color:var(--muted,#5D637A);letter-spacing:.06em;text-transform:uppercase;">Added object</div><div style="font-size:17px;font-weight:600;">Signature</div></div>
+    <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:18px;color:var(--muted,#5D637A);"><i class="ph ph-x"></i></div>
+  </div>
+  <div style="display:flex;flex-direction:column;gap:10px;"><div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);">Ink</div>
+    <div style="display:flex;gap:10px;">
+      <div style="width:32px;height:32px;border-radius:50%;background:#14161F;"></div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#1E2559;box-shadow:0 0 0 2px var(--surface,#fff),0 0 0 4px var(--ink,#1E2559);"></div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#2F5BD3;"></div>
+      <div style="width:32px;height:32px;border-radius:50%;background:#B83227;"></div>
+    </div></div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div style="display:flex;flex-direction:column;gap:8px;"><div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);">Size</div>
+      <div style="height:44px;border:1px solid var(--line,#E1E4EB);border-radius:10px;display:flex;align-items:center;"><div style="width:40px;display:flex;justify-content:center;"><i class="ph ph-minus"></i></div><div style="flex:1;text-align:center;font-weight:600;">28</div><div style="width:40px;display:flex;justify-content:center;"><i class="ph ph-plus"></i></div></div></div>
+    <div style="display:flex;flex-direction:column;gap:8px;"><div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);">Opacity</div>
+      <div style="height:44px;border:1px solid var(--line,#E1E4EB);border-radius:10px;display:flex;align-items:center;justify-content:center;font-weight:600;">100%</div></div>
+  </div>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+    <div style="height:44px;border-radius:10px;border:1px solid var(--line,#E1E4EB);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;"><i class="ph ph-copy" style="font-size:17px;"></i>Duplicate</div>
+    <div style="height:44px;border-radius:10px;border:1px solid var(--line,#E1E4EB);display:flex;align-items:center;justify-content:center;gap:8px;font-weight:600;color:var(--danger,#B83227);"><i class="ph ph-trash" style="font-size:17px;"></i>Delete</div>
+  </div>
+  <div style="font-size:12.5px;line-height:1.55;color:var(--muted,#5D637A);">Drag to move. Drag the corner to resize; Shift keeps proportions. Arrow keys nudge 1 pt.</div>
+</sc-if>
+<sc-if value="{{ isNone }}" hint-placeholder-val="{{ false }}">
+  <div style="display:flex;flex-direction:column;gap:6px;"><div style="font-size:12px;font-weight:600;color:var(--muted,#5D637A);letter-spacing:.06em;text-transform:uppercase;">Edit tool</div><div style="font-size:17px;font-weight:600;">Click any line to retype it</div><div style="font-size:13.5px;line-height:1.55;color:var(--muted,#5D637A);text-wrap:pretty;">The new text keeps the original font, size, colour and position.</div></div>
+  <div style="display:flex;flex-direction:column;gap:2px;">
+    <div style="font-size:13px;font-weight:500;color:var(--muted,#5D637A);padding-bottom:6px;">Changes</div>
+    <sc-for list="{{ changes }}" as="c" hint-placeholder-count="4">
+      <div style="display:flex;align-items:center;gap:12px;height:44px;padding:0 8px;margin:0 -8px;border-radius:10px;" style-hover="background:var(--surface2,#F5F6F9);">
+        <i class="{{ c.icon }}" style="font-size:18px;color:var(--muted,#5D637A);"></i><span style="flex:1;">{{ c.label }}</span><span style="font-size:12px;color:var(--muted,#5D637A);">p. {{ c.p }}</span>
+      </div>
+    </sc-for>
+  </div>
+</sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:320,&quot;height&quot;:640},&quot;kind&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;edit&quot;,&quot;obj&quot;,&quot;none&quot;],&quot;default&quot;:&quot;edit&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const k = this.props.kind ?? 'edit';
+    return {
+      isEdit: k === 'edit', isObj: k === 'obj', isNone: k === 'none',
+      changes: [
+        { icon: 'ph ph-cursor-text', label: 'Edited “Tenant” name', p: 1 },
+        { icon: 'ph ph-eraser', label: 'Whiteout', p: 2 },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

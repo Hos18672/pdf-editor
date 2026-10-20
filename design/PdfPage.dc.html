@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&family=Caveat:wght@600&family=Source+Serif+4:wght@400;600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+</helmet>
+<div style="position:relative;width:100%;aspect-ratio:1/1.414;background:#fff;border-radius:3px;box-shadow:0 1px 2px rgba(20,23,46,.06),0 10px 30px rgba(20,23,46,.10);container-type:inline-size;font-family:'Source Serif 4',Georgia,serif;color:#1d1d1f;">
+  <div style="position:absolute;inset:0;padding:9cqw 10cqw;display:flex;flex-direction:column;gap:2.2cqw;">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+      <div style="font-size:4.4cqw;font-weight:600;letter-spacing:-.01em;line-height:1.1;">Residential Lease<br>Agreement</div>
+      <div style="font-size:1.7cqw;color:#666;text-align:right;line-height:1.5;">Ref. 2026-0418<br>Page {{ pageNo }}</div>
+    </div>
+    <div style="height:1.4cqw;"></div>
+    <div style="font-size:2cqw;font-weight:600;">1. Parties</div>
+    <div style="position:relative;font-size:1.9cqw;line-height:1.6;">
+      <div>This agreement is made between Harbor Lane Properties LLC</div>
+      <sc-if value="{{ isEdit }}" hint-placeholder-val="{{ false }}">
+        <div style="position:relative;margin:-.3cqw -1cqw;padding:.3cqw 1cqw;background:#fff;outline:2px solid #1E2559;border-radius:3px;box-shadow:0 0 0 5px rgba(30,37,89,.10);">("Landlord") and Maya R. Okafor ("Tenant")<span style="display:inline-block;width:2px;height:2.2cqw;background:#1E2559;vertical-align:-.4cqw;margin-left:1px;"></span></div>
+      </sc-if>
+      <sc-if value="{{ notEdit }}" hint-placeholder-val="{{ true }}">
+        <div style="{{ hlStyle }}">("Landlord") and Jordan T. Ellis ("Tenant")</div>
+      </sc-if>
+      <div>for the premises located at 214 Wren Street, Apt 3B.</div>
+    </div>
+    <div style="font-size:2cqw;font-weight:600;margin-top:1cqw;">2. Term</div>
+    <div style="font-size:1.9cqw;line-height:1.6;">The lease begins on November 1, 2026 and ends on October 31, 2027, unless renewed in writing by both parties at least sixty days before the end date.</div>
+    <div style="font-size:2cqw;font-weight:600;margin-top:1cqw;">3. Rent and deposit</div>
+    <div style="font-size:1.9cqw;line-height:1.6;">Monthly rent of $1,850 is due on the first day of each month. A security deposit equal to one month of rent is held for the duration of the term.</div>
+    <div style="display:flex;flex-direction:column;gap:1.3cqw;margin-top:1cqw;">
+      <div style="height:1.1cqw;background:#ececee;border-radius:1px;width:92%;"></div>
+      <div style="height:1.1cqw;background:#ececee;border-radius:1px;width:86%;"></div>
+      <div style="height:1.1cqw;background:#ececee;border-radius:1px;width:90%;"></div>
+      <div style="height:1.1cqw;background:#ececee;border-radius:1px;width:58%;"></div>
+    </div>
+    <div style="flex:1;"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8cqw;">
+      <div style="display:flex;flex-direction:column;gap:1cqw;">
+        <div style="height:7cqw;"></div>
+        <div style="border-top:1px solid #333;padding-top:1cqw;font-size:1.6cqw;color:#555;">Landlord signature</div>
+      </div>
+      <div style="position:relative;display:flex;flex-direction:column;gap:1cqw;">
+        <div style="height:7cqw;"></div>
+        <div style="border-top:1px solid #333;padding-top:1cqw;font-size:1.6cqw;color:#555;">Tenant signature</div>
+      </div>
+    </div>
+  </div>
+  <sc-if value="{{ isSelect }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;left:52%;bottom:15.5cqw;width:34%;height:9cqw;outline:1.5px solid #3446C9;outline-offset:0;display:flex;align-items:center;justify-content:center;font-family:'Caveat',cursive;font-size:6.4cqw;color:#1E2559;line-height:1;">Jordan Ellis
+      <div style="position:absolute;left:-5px;top:-5px;width:9px;height:9px;background:#fff;border:1.5px solid #3446C9;border-radius:50%;"></div>
+      <div style="position:absolute;right:-5px;top:-5px;width:9px;height:9px;background:#fff;border:1.5px solid #3446C9;border-radius:50%;"></div>
+      <div style="position:absolute;left:-5px;bottom:-5px;width:9px;height:9px;background:#fff;border:1.5px solid #3446C9;border-radius:50%;"></div>
+      <div style="position:absolute;right:-9px;bottom:-9px;width:18px;height:18px;background:#3446C9;border:2px solid #fff;border-radius:50%;box-shadow:0 1px 4px rgba(20,23,46,.3);display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;"><i class="ph-bold ph-arrows-out-simple"></i></div>
+      <div style="position:absolute;bottom:calc(100% + 12px);left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:2px;padding:4px;background:#1E2559;border-radius:12px;box-shadow:0 8px 24px rgba(20,23,46,.25);font-family:'Schibsted Grotesk',sans-serif;color:#fff;white-space:nowrap;">
+        <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;cursor:grab;opacity:.85;"><i class="ph ph-arrows-out-cardinal"></i></div>
+        <div style="width:1px;height:20px;background:rgba(255,255,255,.18);"></div>
+        <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:16px;"><i class="ph ph-minus"></i></div>
+        <div style="font-size:13px;font-weight:600;min-width:24px;text-align:center;font-variant-numeric:tabular-nums;">28</div>
+        <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:16px;"><i class="ph ph-plus"></i></div>
+        <div style="width:1px;height:20px;background:rgba(255,255,255,.18);"></div>
+        <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="ph ph-copy"></i></div>
+        <div style="width:36px;height:36px;display:flex;align-items:center;justify-content:center;font-size:18px;color:#FF9C8F;"><i class="ph ph-trash"></i></div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isAdded }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;left:52%;bottom:15.5cqw;width:34%;height:9cqw;display:flex;align-items:center;justify-content:center;font-family:'Caveat',cursive;font-size:6.4cqw;color:#1E2559;line-height:1;">Jordan Ellis</div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:520,&quot;height&quot;:740},&quot;mode&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;plain&quot;,&quot;editText&quot;,&quot;selectObj&quot;,&quot;signed&quot;,&quot;highlight&quot;],&quot;default&quot;:&quot;plain&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;pageNo&quot;:{&quot;editor&quot;:&quot;text&quot;,&quot;default&quot;:&quot;1 of 4&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const m = this.props.mode ?? 'plain';
+    return {
+      pageNo: this.props.pageNo ?? '1 of 4',
+      isEdit: m === 'editText', notEdit: m !== 'editText',
+      isSelect: m === 'selectObj', isAdded: m === 'signed',
+      hlStyle: m === 'highlight' ? { background: 'rgba(255,225,77,.55)', margin: '0 -2px', padding: '0 2px' } : {},
+    };
+  }
+}
+</script>
+</body>
+</html>

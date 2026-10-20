@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="design_doc_mode" content="canvas">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700&display=swap">
+<style>body{margin:0;background:#E4E6EC;}a{color:#1E2559;}a:hover{color:#3446C9;}</style>
+</helmet>
+<div style="padding:96px;display:flex;flex-direction:column;gap:120px;font-family:'Schibsted Grotesk',system-ui,sans-serif;color:#151833;width:max-content;">
+  <div style="display:flex;flex-direction:column;gap:14px;max-width:1100px;">
+    <div style="font-size:15px;font-weight:600;color:#5D637A;letter-spacing:.08em;text-transform:uppercase;">PDF Editor · Redesign</div>
+    <div style="font-size:72px;font-weight:700;letter-spacing:-.035em;line-height:1;">Paper on a desk.</div>
+    <div style="font-size:22px;line-height:1.5;color:#4A5068;max-width:52em;">Every screen at 390 / 820 / 1440 / 1920. The document is the hero; chrome is white, quiet and navy. Marker-yellow marks the one active tool. Tokens, components and interaction notes live in <a href="Design System.dc.html">Design System</a>.</div>
+  </div>
+  <sc-for list="{{ rows }}" as="r" hint-placeholder-count="2">
+    <section style="display:flex;flex-direction:column;gap:36px;">
+      <div style="display:flex;align-items:baseline;gap:20px;">
+        <div style="font-size:20px;font-weight:700;color:#1E2559;background:#FFE14D;padding:2px 10px;border-radius:6px;">{{ r.no }}</div>
+        <div style="font-size:40px;font-weight:700;letter-spacing:-.02em;">{{ r.title }}</div>
+        <div style="font-size:19px;color:#5D637A;max-width:900px;line-height:1.45;">{{ r.note }}</div>
+      </div>
+      <div style="display:flex;gap:64px;align-items:flex-start;">
+        <sc-for list="{{ r.boards }}" as="b" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;gap:14px;">
+            <div style="font-size:16px;font-weight:600;color:#5D637A;">{{ b.label }}</div>
+            <div style="{{ b.frame }}">
+              <sc-if value="{{ b.isStart }}" hint-placeholder-val="{{ false }}"><dc-import name="Start" bp="{{ b.bp }}" state="{{ b.state }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
+              <sc-if value="{{ b.isTools }}" hint-placeholder-val="{{ false }}"><dc-import name="Tools" bp="{{ b.bp }}" screen="{{ b.screen }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
+              <sc-if value="{{ b.isEditor }}" hint-placeholder-val="{{ false }}"><dc-import name="Editor" bp="{{ b.bp }}" screen="{{ b.screen }}" theme="{{ b.theme }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </section>
+  </sc-for>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  renderVals() {
+    const size = { mobile: [390, 844], tablet: [820, 1180], desktop: [1440, 900], large: [1920, 1080] };
+    const names = { mobile: 'Mobile 390', tablet: 'Tablet 820', desktop: 'Desktop 1440', large: 'Large 1920' };
+    const b = (kind, bp, x, label, theme) => {
+      const [w, h] = size[bp];
+      return { label: label || names[bp], bp, isStart: kind === 'start', isEditor: kind === 'editor', isTools: kind === 'tools',
+        state: x, screen: x, theme: theme || 'light',
+        frame: { width: w + 'px', height: h + 'px', borderRadius: bp === 'mobile' ? '44px' : bp === 'tablet' ? '28px' : '12px', overflow: 'hidden', background: '#ECEEF3', boxShadow: '0 2px 6px rgba(20,23,46,.08),0 30px 80px rgba(20,23,46,.14)', outline: bp === 'mobile' || bp === 'tablet' ? '10px solid #151833' : '1px solid #D5D8E0', position: 'relative' } };
+    };
+    const all = (kind, x) => ['mobile', 'tablet', 'desktop', 'large'].map(bp => b(kind, bp, x));
+    const three = x => ['mobile', 'tablet', 'desktop'].map(bp => b('tools', bp, x));
+    return { rows: [
+      { no: '09', title: 'All tools', note: 'New hub reached from Start (“More tools”) and the editor’s back menu. Grouped by intent: edit & sign, organize, convert. Rows on phones, cards from tablet up.', boards: all('tools', 'hub') },
+      { no: '10', title: 'Fill a form', note: 'Fillable PDFs: fields are tinted so they read as tappable; the active one gets the selection ring. Mobile: a navy field navigator rides above the keyboard (prev / next / Done) and the page scrolls so the field stays visible. Flat (non-fillable) forms: tap anywhere to drop a tick, cross, dot, text or date.', boards: all('tools', 'fill') },
+      { no: '11', title: 'Combine PDFs', note: 'Files are stacked cards; drag to reorder (card 2 is mid-drag), set a page range per file, add more PDFs or images. One action at the bottom.', boards: three('combine') },
+      { no: '12', title: 'Extract & remove pages', note: 'Same grid, one switch. Extract selects in navy and saves a new file; Remove marks pages in red, shows what remains and can be undone. Range field for typing “1–2, 5”.', boards: [b('tools','mobile','extract','Mobile · extract'), b('tools','tablet','remove','Tablet · remove'), b('tools','desktop','extract','Desktop · extract'), b('tools','desktop','remove','Desktop · remove')] },
+      { no: '13', title: 'Insert pages', note: 'A + sits in every gap; the chosen gap becomes a dashed “New page” slot. Add a blank page, pages from another PDF, images, or a camera scan (Android app).', boards: three('insert') },
+      { no: '14', title: 'Convert to PDF', note: 'Images, Word, Excel, PowerPoint, OpenDocument, text and HTML. Each file has its own status: ready (preview), converting, waiting, unsupported (retry). Office layout is computed on-device, so the panel says honestly that complex layouts may shift.', boards: three('convert') },
+      { no: '01', title: 'Start', note: 'One action: open or drop a PDF. The privacy promise sits above the headline, not in fine print. Large shows the drag-over state.', boards: [b('start','mobile','idle'), b('start','tablet','idle'), b('start','desktop','idle'), b('start','large','dragover','Large 1920 · drag over')] },
+      { no: '02', title: 'Editor workspace', note: 'Mobile: thumb dock. Tablet: left rail (both thumbs reach it in landscape and portrait). Desktop: rail + properties. Large adds the page sidebar.', boards: all('editor', 'workspace') },
+      { no: '03', title: 'Editing existing text', note: 'The line becomes an inline editor in place. Mobile zooms to the line and keeps it above the keyboard; properties ride as a slim bar. Tablet panel floats low, page scrolls so the line stays clear.', boards: all('editor', 'editText') },
+      { no: '04', title: 'Selected added object', note: 'Floating navy toolbar above the object: move, size −/+, duplicate, delete. Corner handle resizes. It flips below when there is no room above.', boards: all('editor', 'selectObj') },
+      { no: '05', title: 'Signature', note: 'Bottom sheet on phones, centred modal elsewhere. Saved signatures first — one tap places them.', boards: all('editor', 'signature') },
+      { no: '06', title: 'Pages organizer', note: 'Replaces the desk; controls are always visible (no hover-only actions on touch). The lifted card shows a drag in progress; page 3 is rotated.', boards: all('editor', 'pages') },
+      { no: '07', title: 'States', note: 'Opening, error (password / invalid file), preparing the download, success toast. Start idle doubles as the empty state.', boards: [b('start','mobile','loading','Mobile · opening'), b('start','mobile','error','Mobile · error'), b('editor','mobile','toast','Mobile · saved toast'), b('editor','desktop','export','Desktop · preparing download'), b('start','desktop','error','Desktop · error')] },
+      { no: '08', title: 'Dark theme proposal', note: 'Desk goes ink-black; pages stay white so the document still reads as paper. Primary actions flip to a pale periwinkle; yellow stays the active-tool marker.', boards: [b('editor','mobile','selectObj','Mobile · dark','dark'), b('editor','tablet','editText','Tablet · dark','dark'), b('editor','desktop','editText','Desktop · dark','dark')] },
+    ] };
+  }
+}
+</script>
+</body>
+</html>
