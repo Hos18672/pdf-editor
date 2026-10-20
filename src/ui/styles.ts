@@ -111,8 +111,11 @@ button { font: inherit; color: inherit; }
 .objbar .grip:hover { background: var(--marker); }
 .objbar .sep { width: 1px; height: 22px; background: rgba(255,255,255,.22); margin: 0 3px; }
 .objbar.moving button:not(.grip), .objbar.moving .sep { visibility: hidden; }
+.objbar .fsize { min-width: 26px; text-align: center; color: #fff; font-weight: 600; font-size: 14px; }
+.loupe { position: fixed; z-index: 80; border-radius: 50%; overflow: hidden; pointer-events: none; border: 3px solid var(--paper); box-shadow: 0 0 0 1.5px var(--ink), 0 14px 34px -8px rgba(20,24,56,.55); background: #fff; }
+.loupe canvas { display: block; }
 .objbar svg { position: static; pointer-events: none; flex: none; }
-@media (max-width: 760px) { .objbar button { width: 44px; height: 40px; } }
+@media (max-width: 760px) { .objbar button { width: 40px; height: 40px; } }
 .tool-edit .obj { cursor: grab; }
 .obj img { width: 100%; height: 100%; display: block; pointer-events: none; }
 .obj > svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }

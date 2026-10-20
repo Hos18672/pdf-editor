@@ -7,6 +7,7 @@ import { useHistory, uid, Tool, ToolStyle, RunEdit } from './store';
 import { PageView, PageInfo, PageData } from './PageView';
 import { SignatureModal, Stamp } from './SignatureModal';
 import { PagesModal } from './PagesModal';
+import { Loupe } from './Loupe';
 import { RunPanel, ObjectPanel, ToolPanel } from './Panel';
 import { exportPdf } from '../engine/exporter';
 import type { EditorObject, TextEdit, M } from '../engine/types';
@@ -167,6 +168,7 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
   const [showPages, setShowPages] = useState(false);
   const [showShapes, setShowShapes] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [dragInfo, setDragInfo] = useState<{ x: number; y: number; id: string; page: number } | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const imgInput = useRef<HTMLInputElement>(null);
   const ratios = useRef<Record<number, number>>({});
@@ -564,6 +566,7 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
                 onTextPlaced={() => setTool('edit')}
                 onVisible={(src, r) => { ratios.current[src] = r; }}
                 editKey={editKeyOf(p.src)}
+                onDragInfo={setDragInfo}
                 preview={preview && preview.keys[p.src] !== undefined ? { pdf: preview.pdf, key: preview.keys[p.src] } : undefined} />
             ))}
           </div>
@@ -586,6 +589,12 @@ function Editor({ host, file, pdf, infos, hist, snap, commit, onClose, setBusy }
       {showSig && <SignatureModal onClose={() => setShowSig(false)} onPick={(s) => { setShowSig(false); placeStamp(s, 'signature'); }} />}
       {showPages && <PagesModal pdf={pdf} pages={snap.pages} onChange={(pages) => commit((s) => ({ ...s, pages }))} onClose={() => setShowPages(false)} />}
       {toast && <div className="toast" role="status">{toast}</div>}
+      {dragInfo && (() => {
+        const obj = snap.objects.find((o) => o.id === dragInfo.id);
+        const pg = snap.pages.find((q) => q.src === dragInfo.page);
+        if (!obj || !pg) return null;
+        return <Loupe x={dragInfo.x} y={dragInfo.y} page={dragInfo.page} obj={obj} pageW={infos[dragInfo.page].w} pageH={infos[dragInfo.page].h} rotation={pg.rotation} zoom={zoom} />;
+      })()}
     </div>
   );
 }

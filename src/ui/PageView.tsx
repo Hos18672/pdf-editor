@@ -43,6 +43,8 @@ interface Props {
   onDelete: (id: string) => void;
   onDuplicate: (id: string) => void;
   onTextPlaced: () => void;
+  /** where a drag is happening (for the magnifier), null when it ends */
+  onDragInfo: (d: { x: number; y: number; id: string; page: number } | null) => void;
   onVisible: (src: number, ratio: number) => void;
   /** the page as re-written with the current text edits (exact output glyphs) */
   preview?: { pdf: any; key: string };
@@ -229,7 +231,7 @@ export function PageView(p: Props) {
   const rooms = useMemo(() => lineRooms(p.data?.runs ?? []), [p.data]);
 
   return (
-    <div ref={outerRef} className="pageOuter" style={{ width: swap ? H : W, height: swap ? W : H }}>
+    <div ref={outerRef} className="pageOuter" data-src={p.src} style={{ width: swap ? H : W, height: swap ? W : H }}>
       <div
         ref={pageRef}
         className={`page tool-${p.tool}`}
@@ -259,7 +261,8 @@ export function PageView(p: Props) {
             <ObjectView key={o.id} o={o} zoom={zoom} selected={p.selected === o.id} editing={p.editing === o.id}
               local={local} onSelect={() => p.onSelect(o.id)} onEditing={(v) => (v ? p.onEditing(o.id) : p.onStopEditing(o.id))}
               onChange={(patch, merge) => p.onChange(o.id, patch, merge)}
-              onDelete={() => p.onDelete(o.id)} onDuplicate={() => p.onDuplicate(o.id)} />
+              onDelete={() => p.onDelete(o.id)} onDuplicate={() => p.onDuplicate(o.id)}
+              onDrag={(d) => p.onDragInfo(d ? { ...d, id: o.id, page: p.src } : null)} />
           ))}
           {draft && <Draft d={draft} zoom={zoom} tool={p.tool} style={p.style} />}
         </div>
@@ -426,13 +429,14 @@ function segments(line: string, font?: FontInfo) {
 
 // ---------------- added objects ----------------
 
-function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, onChange, onDelete, onDuplicate }: {
+function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag }: {
   o: EditorObject; zoom: number; selected: boolean; editing: boolean;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
   onSelect: () => void; onEditing: (v: boolean) => void; onChange: (patch: Partial<EditorObject>, merge: boolean) => void;
-  onDelete: () => void; onDuplicate: () => void;
+  onDelete: () => void; onDuplicate: () => void; onDrag: (d: { x: number; y: number } | null) => void;
 }) {
-  const drag = useRef<null | { mode: 'move' | 'grip' | 'resize' | 'end'; sx: number; sy: number; o: EditorObject; moved: boolean }>(null);
+  type Mode = 'move' | 'grip' | 'resize' | 'end' | 'pending';
+  const drag = useRef<null | { mode: Mode; sx: number; sy: number; cx: number; cy: number; o: EditorObject; moved: boolean }>(null);
   const [dragging, setDragging] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
@@ -446,17 +450,28 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
   const start = (mode: 'move' | 'grip' | 'resize' | 'end') => (e: React.PointerEvent) => {
     if (e.button !== 0 || gesture.multi) return;
     e.stopPropagation();
-    // while typing, a press inside the box places the caret; the grip still moves the box
-    if (editing && mode === 'move') return;
     const pt = local(e);
-    drag.current = { mode, sx: pt.x, sy: pt.y, o, moved: false };
+    // while typing, a tap places the caret; dragging (> 10px) moves the box
+    if (editing && mode === 'move') {
+      drag.current = { mode: 'pending', sx: pt.x, sy: pt.y, cx: e.clientX, cy: e.clientY, o, moved: false };
+      return;
+    }
+    drag.current = { mode, sx: pt.x, sy: pt.y, cx: e.clientX, cy: e.clientY, o, moved: false };
     (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
     onSelect();
   };
   const move = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
-    if (gesture.multi) { drag.current = null; setDragging(false); return; }
+    if (gesture.multi) { drag.current = null; setDragging(false); onDrag(null); return; }
+    if (d.mode === 'pending') {
+      if (Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 10) return;
+      d.mode = 'move';
+      try { (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
+      window.getSelection()?.removeAllRanges?.();
+    }
+    e.preventDefault();
+    onDrag({ x: e.clientX, y: e.clientY });
     const pt = local(e);
     const dx = pt.x - d.sx, dy = pt.y - d.sy;
     if (!d.moved && Math.hypot(dx, dy) * zoom < 3) return;
@@ -484,6 +499,7 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
     const d = drag.current;
     drag.current = null;
     setDragging(false);
+    onDrag(null);
     if (d && d.mode === 'move' && !d.moved && o.type === 'text' && selected) onEditing(true);
   };
   // keep the text caret when pressing the grip / toolbar
@@ -513,11 +529,10 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
             {(o.text || ' ') + (o.text.endsWith('\n') ? ' ' : '')}
           </div>
           {editing && (
-            <textarea ref={taRef} value={o.text} spellCheck={false} style={ts} placeholder="Type here"
+            <textarea ref={taRef} value={o.text} spellCheck={false} style={{ ...ts, touchAction: 'none' }} placeholder="Type here"
               onChange={(e) => onChange({ text: e.target.value } as any, true)}
-              onBlur={() => onEditing(false)}
-              onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); e.stopPropagation(); }}
-              onPointerDown={(e) => e.stopPropagation()} />
+              onBlur={() => { if (!drag.current || drag.current.mode === 'pending') onEditing(false); }}
+              onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); e.stopPropagation(); }} />
           )}
         </>
       );
@@ -573,6 +588,14 @@ function ObjectView({ o, zoom, selected, editing, local, onSelect, onEditing, on
             <Icon name="move" size={18} />
           </button>
           <span className="sep" />
+          {o.type === 'text' && (
+            <>
+              <button type="button" aria-label="Smaller text" title="Smaller" onClick={() => onChange({ size: Math.max(4, Math.round(o.size) - 1) } as any, false)}><Icon name="minus" size={18} /></button>
+              <span className="fsize" aria-label="Font size">{Math.round(o.size)}</span>
+              <button type="button" aria-label="Larger text" title="Larger" onClick={() => onChange({ size: Math.min(200, Math.round(o.size) + 1) } as any, false)}><Icon name="plus" size={18} /></button>
+              <span className="sep" />
+            </>
+          )}
           {o.type === 'text' && !editing && (
             <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="edit" size={18} /></button>
           )}
