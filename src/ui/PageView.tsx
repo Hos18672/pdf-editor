@@ -247,6 +247,7 @@ export function PageView(p: Props) {
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
               edit={p.edits[r.key]} editing={p.editing === r.key} room={rooms[r.key]} live={live}
+              local={local}
               onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
               onCommit={(raw) => {
                 const text = raw.normalize('NFC');
@@ -317,11 +318,12 @@ function lineRooms(runs: TextRun[]): Record<string, { up: number; down: number }
   return out;
 }
 
-function RunView({ run, vm, zoom, font, color, edit, editing, room, live, onStart, onCommit }: {
+function RunView({ run, vm, zoom, font, color, edit, editing, room, live, local, onStart, onCommit }: {
   live?: boolean;
   run: TextRun; vm: M; zoom: number; font?: FontInfo; color?: { bg: string; fg: string }; edit?: RunEdit;
   room?: { up: number; down: number };
   editing: boolean; onStart: () => void; onCommit: (text: string) => void;
+  local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
 }) {
   const b = runBox(run, vm);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -335,7 +337,23 @@ function RunView({ run, vm, zoom, font, color, edit, editing, room, live, onStar
     ta.style.width = ta.scrollWidth + 4 + 'px';
     ta.style.height = ta.scrollHeight + 'px';
   }, [value, editing]);
-  useEffect(() => { if (editing) { taRef.current?.focus(); taRef.current?.select(); } }, [editing]);
+  // distance along the line (page units) where the user tapped; the caret goes there
+  const tapAt = useRef<number | null>(null);
+  const begin = (e: React.MouseEvent) => {
+    const pt = local(e);
+    tapAt.current = (pt.x - b.x) * Math.cos(b.angle) + (pt.y - b.y) * Math.sin(b.angle);
+    onStart();
+  };
+  useEffect(() => {
+    const ta = taRef.current;
+    if (!editing || !ta) return;
+    // never let the browser scroll the page to the end of the line
+    ta.focus({ preventScroll: true });
+    const text = ta.value;
+    const at = caretIndex(text, tapAt.current, fontCss, b.h * (edit?.sizeScale ?? 1), !edit ? b.w : null);
+    ta.setSelectionRange(at, at);
+    tapAt.current = null;
+  }, [editing]); // eslint-disable-line
   const latest = useRef({ value, onCommit, committed: false });
   latest.current.value = value;
   latest.current.onCommit = onCommit;
@@ -367,12 +385,12 @@ function RunView({ run, vm, zoom, font, color, edit, editing, room, live, onStar
   };
 
   if ((!edit || live) && !editing) {
-    return <div className="run" style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onStart(); }} />;
+    return <div className="run" style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }} />;
   }
   const lines = (editing ? value : edit!.text).split('\n');
   const textStyle: React.CSSProperties = { fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop };
   return (
-    <div className={`run edited${editing ? ' editing' : ''}`} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) onStart(); }}>
+    <div className={`run edited${editing ? ' editing' : ''}`} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
       <div className="cover" style={{
         background: bg,
         // hide the original glyphs completely (accents, descenders) but stay clear of the lines around it
@@ -412,6 +430,31 @@ function RunView({ run, vm, zoom, font, color, edit, editing, room, live, onStar
       )}
     </div>
   );
+}
+
+let measureCtx: CanvasRenderingContext2D | null = null;
+/** Character index closest to a distance along the line (first line only). */
+function caretIndex(text: string, t: number | null, fontCss: string, size: number, actualWidth: number | null) {
+  const first = text.split('\n')[0];
+  if (t === null) return first.length;
+  measureCtx ??= document.createElement('canvas').getContext('2d');
+  if (!measureCtx) return first.length;
+  measureCtx.font = `${size}px ${fontCss}`;
+  const chars = [...first];
+  const total = measureCtx.measureText(first).width || 1;
+  // stretch to the real width of the original line, so taps land on the right letter
+  const k = actualWidth ? actualWidth / total : 1;
+  let best = 0, bestD = Math.abs(t), acc = '';
+  let units = 0;
+  for (let i = 0; i < chars.length; i++) {
+    acc += chars[i];
+    const x = measureCtx.measureText(acc).width * k;
+    const d = Math.abs(t - x);
+    if (d < bestD) { bestD = d; best = acc.length; }
+    units = x;
+  }
+  if (t > units) return acc.length;
+  return best;
 }
 
 function segments(line: string, font?: FontInfo) {
