@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { EditorObject, M } from '../engine/types';
 import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
@@ -213,6 +213,7 @@ export function PageView(p: Props) {
 
   // existing text stays clickable (= editable) with the Edit and Add-text tools
   const passive = p.tool !== 'edit' && p.tool !== 'text';
+  const rooms = useMemo(() => lineRooms(p.data?.runs ?? []), [p.data]);
 
   return (
     <div ref={outerRef} className="pageOuter" style={{ width: swap ? H : W, height: swap ? W : H }}>
@@ -230,7 +231,7 @@ export function PageView(p: Props) {
         <div className={`layer${passive ? ' passive' : ''}`}>
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
-              edit={p.edits[r.key]} editing={p.editing === r.key}
+              edit={p.edits[r.key]} editing={p.editing === r.key} room={rooms[r.key]}
               onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
               onCommit={(raw) => {
                 const text = raw.normalize('NFC');
@@ -278,8 +279,31 @@ function Draft({ d, zoom, tool, style }: { d: { x0: number; y0: number; x1: numb
 
 // ---------------- existing text runs ----------------
 
-function RunView({ run, vm, zoom, font, color, edit, editing, onStart, onCommit }: {
+/** How far above / below its baseline each run can be covered without touching the neighbouring lines. */
+function lineRooms(runs: TextRun[]): Record<string, { up: number; down: number }> {
+  const out: Record<string, { up: number; down: number }> = {};
+  for (const r of runs) {
+    const h = r.region.height;
+    let up = h * 0.94, down = h * 0.3;
+    const [ux, uy] = r.region.u;
+    for (const o of runs) {
+      if (o === r || Math.abs(o.region.u[0] - ux) > 0.01 || Math.abs(o.region.u[1] - uy) > 0.01) continue;
+      const dx = o.region.o[0] - r.region.o[0], dy = o.region.o[1] - r.region.o[1];
+      const t = dx * ux + dy * uy;
+      const sOff = -dx * uy + dy * ux;
+      if (t > r.region.width || t + o.region.width < 0) continue; // no horizontal overlap
+      const oh = o.region.height;
+      if (sOff > h * 0.3) up = Math.min(up, sOff - oh * 0.24);
+      else if (sOff < -h * 0.3) down = Math.min(down, -sOff - oh * 0.76);
+    }
+    out[r.key] = { up: Math.max(up, h * 0.72), down: Math.max(down, h * 0.12) };
+  }
+  return out;
+}
+
+function RunView({ run, vm, zoom, font, color, edit, editing, room, onStart, onCommit }: {
   run: TextRun; vm: M; zoom: number; font?: FontInfo; color?: { bg: string; fg: string }; edit?: RunEdit;
+  room?: { up: number; down: number };
   editing: boolean; onStart: () => void; onCommit: (text: string) => void;
 }) {
   const b = runBox(run, vm);
@@ -334,8 +358,10 @@ function RunView({ run, vm, zoom, font, color, edit, editing, onStart, onCommit 
     <div className={`run edited${editing ? ' editing' : ''}`} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) onStart(); }}>
       <div className="cover" style={{
         background: bg,
-        // hide the original glyphs completely, including accents and descenders
-        top: -(b.h * 0.16 * zoom) - 2, bottom: -2,
+        // hide the original glyphs completely (accents, descenders) but stay clear of the lines around it
+        top: (b.asc - (room?.up ?? b.h * 0.94)) * zoom - 1,
+        height: ((room?.up ?? b.h * 0.94) + (room?.down ?? b.h * 0.3)) * zoom + 2,
+        bottom: 'auto',
         left: -Math.max(2, b.h * 0.06 * zoom), right: -Math.max(2, b.h * 0.06 * zoom),
       }} />
       {editing ? (

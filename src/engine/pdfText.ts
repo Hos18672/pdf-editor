@@ -99,6 +99,53 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
   return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids };
 }
 
+/** Join runs that sit next to each other on the same baseline but came out of the PDF in separate pieces. */
+function mergeNeighbours(runs: TextRun[]) {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    outer: for (let i = 0; i < runs.length; i++) {
+      for (let j = 0; j < runs.length; j++) {
+        if (i === j) continue;
+        const a = runs[i].region, b = runs[j].region;
+        if (Math.abs(a.u[0] - b.u[0]) > 0.01 || Math.abs(a.u[1] - b.u[1]) > 0.01) continue;
+        if (Math.abs(a.height - b.height) > Math.max(a.height, b.height) * 0.3) continue;
+        const h = Math.max(a.height, b.height);
+        const dx = b.o[0] - a.o[0], dy = b.o[1] - a.o[1];
+        const t = dx * a.u[0] + dy * a.u[1];
+        const sOff = -dx * a.u[1] + dy * a.u[0];
+        if (Math.abs(sOff) > h * 0.2) continue;
+        // b must start right after (or inside) a
+        if (t < -h * 0.2 || t > a.width + h * 0.6) continue;
+        const gap = t - a.width;
+        const A = runs[i], B = runs[j];
+        if (t < a.width - h * 0.3) {
+          // overlapping: only merge if b is fully inside a's span and short (a stray glyph)
+          if (t + b.width > a.width + h * 0.3) continue;
+        }
+        const join = gap > h * 0.12 && !A.str.endsWith(' ') && !B.str.startsWith(' ') ? ' ' : '';
+        const fc: Record<string, number> = { ...(A.fontChars ?? { [A.fontName]: [...A.str].length }) };
+        for (const [k, v] of Object.entries(B.fontChars ?? { [B.fontName]: [...B.str].length })) fc[k] = (fc[k] ?? 0) + v;
+        if (t >= a.width - h * 0.3) A.str = A.str + join + B.str;
+        else {
+          // insert by position
+          const ratio = Math.max(0, Math.min(1, t / Math.max(a.width, 1e-6)));
+          const chars = [...A.str];
+          const at = Math.round(chars.length * ratio);
+          A.str = chars.slice(0, at).join('') + B.str + chars.slice(at).join('');
+        }
+        a.width = Math.max(a.width, t + b.width);
+        a.height = Math.max(a.height, b.height);
+        A.fontChars = fc;
+        A.fontName = Object.entries(fc).sort((x, y) => y[1] - x[1])[0][0];
+        runs.splice(j, 1);
+        changed = true;
+        break outer;
+      }
+    }
+  }
+}
+
 /** Build editable runs from pdf.js getTextContent() items. */
 export function buildRuns(items: any[], page: number): TextRun[] {
   const runs: TextRun[] = [];
@@ -110,6 +157,9 @@ export function buildRuns(items: any[], page: number): TextRun[] {
     const len = Math.hypot(tr[0], tr[1]) || 1;
     const u: [number, number] = [tr[0] / len, tr[1] / len];
     const o: [number, number] = [tr[4], tr[5]];
+    // some PDFs (Type3 / chunked fonts) report 0 or nonsense widths: estimate instead
+    const nChars = [...(it.str || '')].length;
+    const w = it.width > 0 && it.width < height * 3 * Math.max(1, nChars) ? it.width : height * 0.55 * nChars;
     if (!it.str || !it.str.trim()) {
       if (cur && it.str === ' ' ) cur.str += ' ';
       continue;
@@ -122,20 +172,21 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       const sameLine = Math.abs(s) < r.height * 0.2 && Math.abs(height - r.height) < r.height * 0.15 &&
         Math.abs(u[0] - r.u[0]) < 0.01 && Math.abs(u[1] - r.u[1]) < 0.01;
       // a line is one editable run even when the PDF splits it across fonts
-      const maxGap = cur.fontName === it.fontName ? 0.7 : 0.45;
+      const maxGap = cur.fontName === it.fontName ? 0.7 : 0.6;
       if (sameLine && gap > -r.height * 0.3 && gap < r.height * maxGap) {
         if (gap > r.height * 0.12 && !cur.str.endsWith(' ') && !it.str.startsWith(' ')) cur.str += ' ';
         cur.str += it.str;
-        r.width = t + it.width;
+        r.width = Math.max(r.width, t + w);
         const fc = (cur.fontChars ??= { [cur.fontName]: [...cur.str].length - [...it.str].length });
         fc[it.fontName] = (fc[it.fontName] ?? 0) + [...it.str].length;
         continue;
       }
       runs.push(cur);
     }
-    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: it.width, height } };
+    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: w, height } };
   }
   if (cur) runs.push(cur);
+  mergeNeighbours(runs);
   runs.forEach((r, i) => {
     r.key = `${page}:${i}`;
     r.str = r.str.replace(/\s+$/, '').normalize('NFC');

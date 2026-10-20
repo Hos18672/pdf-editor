@@ -134,7 +134,16 @@ button { font: inherit; color: inherit; }
 .seg button.on { background: var(--ink); color: #fff; }
 .note { font-size: 13px; color: var(--muted); background: var(--desk); border-radius: var(--radius-s); padding: 10px 12px; }
 .note.warn { background: #fff6d6; color: #6a5300; }
-.panel .close { display: none; }
+.panel .close, .panel .more, .panel .mobile-only, .panel .stepper { display: none; }
+.panel .phead { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.panel .psub { font-size: 13px; color: var(--muted); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel .ptitle { min-width: 0; }
+.panel .pacts { display: flex; align-items: center; gap: 2px; flex: none; }
+.panel .pbody { display: flex; flex-direction: column; gap: 18px; }
+.panel .iconbtn.danger { color: var(--danger); }
+.stepper { display: inline-flex; align-items: center; height: 36px; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: #fff; }
+.stepper button { width: 34px; height: 100%; border: 0; background: transparent; display: grid; place-items: center; cursor: pointer; color: var(--ink); padding: 0; }
+.stepper span { min-width: 36px; text-align: center; font-size: 14px; font-weight: 600; }
 
 /* page manager */
 .thumbs { display: grid; grid-template-columns: repeat(auto-fill, minmax(112px, 1fr)); gap: 16px; }
@@ -196,7 +205,14 @@ button { font: inherit; color: inherit; }
   .rail hr { border-top: 0; border-left: 1px solid var(--line); margin: 8px 4px; }
   .pages { padding: 16px 8px 140px; gap: 18px; }
   .panel { position: fixed; left: 0; right: 0; bottom: 0; width: auto; max-height: 52vh; z-index: 40; border-left: 0; border-top: 1px solid var(--line); border-radius: 16px 16px 0 0; box-shadow: 0 -12px 40px -12px rgba(30,37,89,.35); padding: 14px 16px calc(16px + env(safe-area-inset-bottom)); gap: 14px; }
-  .panel .close { display: inline-grid; position: absolute; right: 8px; top: 6px; }
+  .panel { gap: 0; padding: 8px 8px calc(8px + env(safe-area-inset-bottom)) 16px; max-height: 60vh; }
+  .panel .close, .panel .more, .panel .mobile-only { display: inline-grid; }
+  .panel .stepper { display: inline-flex; margin-right: 4px; }
+  .panel .phead { align-items: center; min-height: 44px; }
+  .panel .phead h3 { font-size: 14px; }
+  .panel .psub { font-size: 12px; margin-top: 1px; max-width: 34vw; }
+  .panel .pbody { display: none; }
+  .panel.open .pbody { display: flex; gap: 14px; padding: 10px 8px 4px 0; overflow-y: auto; }
   .shapes { position: fixed; left: 8px; right: 8px; bottom: 74px; justify-content: center; }
   .modal { padding: 16px; border-radius: 14px; }
   .typed .opts button { font-size: 24px; }

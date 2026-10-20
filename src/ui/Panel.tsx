@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { EditorObject, FontFamily } from '../engine/types';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { RunEdit, Tool, ToolStyle } from './store';
@@ -39,26 +39,56 @@ const Num = ({ label, value, onChange, min = 1, max = 400, step = 1 }: { label: 
   </label>
 );
 
+/** Desktop: side panel. Phone: a slim bar with the main actions; tap the chevron for all options. */
+function Sheet({ label, title, sub, actions, children, onClose }: {
+  label: string; title: string; sub?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; onClose: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <aside className={`panel${open ? ' open' : ''}`} aria-label={label}>
+      <div className="phead">
+        <div className="ptitle"><h3>{title}</h3>{sub && <div className="psub">{sub}</div>}</div>
+        <div className="pacts">
+          {actions}
+          <button className="iconbtn more" onClick={() => setOpen((v) => !v)} aria-label={open ? 'Fewer options' : 'More options'} aria-expanded={open}>
+            <Icon name={open ? 'down' : 'up'} />
+          </button>
+          <button className="iconbtn close" onClick={onClose} aria-label="Close panel"><Icon name="close" /></button>
+        </div>
+      </div>
+      <div className="pbody">{children}</div>
+    </aside>
+  );
+}
+
+const Stepper = ({ value, onChange, min, max, label }: { value: number; onChange: (v: number) => void; min: number; max: number; label: string }) => (
+  <div className="stepper" role="group" aria-label={label}>
+    <button onClick={() => onChange(Math.max(min, Math.round(value) - 1))} aria-label={`Smaller ${label}`}><Icon name="minus" size={16} /></button>
+    <span>{Math.round(value * 10) / 10}</span>
+    <button onClick={() => onChange(Math.min(max, Math.round(value) + 1))} aria-label={`Larger ${label}`}><Icon name="plus" size={16} /></button>
+  </div>
+);
+
 export function RunPanel({ run, font, edit, onEdit, onReset, onClose }: {
   run: TextRun; font?: FontInfo; edit?: RunEdit; onEdit: (e: RunEdit) => void; onReset: () => void; onClose: () => void;
 }) {
   const cur: RunEdit = edit ?? { text: run.str, sizeScale: 1, color: null };
   const missing = [...new Set([...cur.text].filter((c) => !/\s/.test(c) && font && font.charMap[c] === undefined))];
   const fbName = font ? (font.fallback.family === 'Times' ? 'Times' : font.fallback.family === 'Courier' ? 'Courier' : 'Helvetica') : 'Helvetica';
+  const size = run.region.height * cur.sizeScale;
+  const setSize = (v: number) => onEdit({ ...cur, sizeScale: v / run.region.height });
   return (
-    <aside className="panel" aria-label="Text properties">
-      <button className="iconbtn close" onClick={onClose} aria-label="Close panel"><Icon name="close" /></button>
-      <div>
-        <h3>Existing text</h3>
-        <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>Font: {font?.name || 'Embedded font'}</div>
-      </div>
+    <Sheet label="Text properties" title="Existing text" sub={`Font: ${font?.name || 'Embedded font'}`} onClose={onClose}
+      actions={<>
+        <Stepper value={size} min={2} max={300} onChange={setSize} label="size" />
+        <button className="iconbtn danger mobile-only" onClick={() => onEdit({ ...cur, text: '' })} aria-label="Delete text"><Icon name="trash" /></button>
+      </>}>
       {missing.length > 0 && (
         <div className="note warn">
           The embedded font doesn't include {missing.slice(0, 12).join(' ')}{missing.length > 12 ? '…' : ''}. Those characters use {fbName}; everything else keeps the original font.
         </div>
       )}
-      <Num label="Size (pt)" value={run.region.height * cur.sizeScale} min={2} max={300}
-        onChange={(v) => onEdit({ ...cur, sizeScale: v / run.region.height })} />
+      <Num label="Size (pt)" value={size} min={2} max={300} onChange={setSize} />
       <label className="f">Colour
         <div className="row">
           <button className={`btn ghost small`} style={cur.color === null ? { borderColor: 'var(--ink)' } : undefined} onClick={() => onEdit({ ...cur, color: null })}>Original</button>
@@ -69,7 +99,7 @@ export function RunPanel({ run, font, edit, onEdit, onReset, onClose }: {
         <button className="btn ghost small" onClick={() => onEdit({ ...cur, text: '' })}><Icon name="trash" size={16} /> Delete text</button>
         {edit && <button className="btn ghost small" onClick={onReset}>Restore original</button>}
       </div>
-    </aside>
+    </Sheet>
   );
 }
 
@@ -82,9 +112,11 @@ export function ObjectPanel({ o, onChange, onDelete, onDuplicate, onClose }: {
   };
   const set = (p: any) => onChange(p);
   return (
-    <aside className="panel" aria-label={`${title[o.type]} properties`}>
-      <button className="iconbtn close" onClick={onClose} aria-label="Close panel"><Icon name="close" /></button>
-      <h3>{title[o.type]}</h3>
+    <Sheet label={`${title[o.type]} properties`} title={title[o.type]} onClose={onClose}
+      actions={<>
+        {o.type === 'text' && <Stepper value={o.size} min={4} max={200} onChange={(size) => set({ size })} label="size" />}
+        <button className="iconbtn danger mobile-only" onClick={onDelete} aria-label="Delete"><Icon name="trash" /></button>
+      </>}>
       {o.type === 'text' && (
         <>
           <Family value={o.family} onChange={(family) => set({ family })} />
@@ -126,7 +158,7 @@ export function ObjectPanel({ o, onChange, onDelete, onDuplicate, onClose }: {
         <button className="btn ghost small" onClick={onDuplicate}><Icon name="copy" size={16} /> Duplicate</button>
         <button className="btn ghost small" onClick={onDelete}><Icon name="trash" size={16} /> Delete</button>
       </div>
-    </aside>
+    </Sheet>
   );
 }
 

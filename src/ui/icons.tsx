@@ -22,6 +22,8 @@ const P: Record<string, React.ReactNode> = {
   minus: <path d="M5 12h14" />,
   rotate: <><path d="M20 11a8 8 0 10-2.3 5.7" /><path d="M20 4v7h-7" /></>,
   trash: <><path d="M4 7h16" /><path d="M10 11v6M14 11v6" /><path d="M6 7l1 13h10l1-13" /><path d="M9 7V4h6v3" /></>,
+  up: <path d="M6 15l6-6 6 6" />,
+  down: <path d="M6 9l6 6 6-6" />,
   left: <path d="M14 6l-6 6 6 6" />,
   right: <path d="M10 6l6 6-6 6" />,
   check: <path d="M5 12l5 5 9-10" />,
