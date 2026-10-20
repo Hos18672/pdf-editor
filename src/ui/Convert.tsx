@@ -5,6 +5,7 @@ import { Seg, Toggle } from './Panel';
 import { saveFile, HostProps, ToastMsg } from './Editor';
 import { convertFile, ConvertOptions, kindOf, KINDS, ALL_ACCEPT } from './convert';
 import { baseName, loadDoc, save } from './pdfops';
+import { SortableArea, useSortableItem } from './sortable';
 
 interface Item { id: string; file: File; status: 'waiting' | 'busy' | 'ok' | 'err' | 'unsupported'; progress: number; bytes?: Uint8Array; pages?: number; error?: string }
 
@@ -130,25 +131,16 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
             <button className="btn secondary" style={{ height: 44, color: 'var(--ink)' }} onClick={() => input.current?.click()}><Icon name="open" size={17} />Choose files</button>
           </div>
           {items.length > 0 && (
-            <div className="queue">
-              {items.map((it) => {
-                const k = kindOf(it.file.name, it.file.type) ?? 'none';
-                const look = LOOK[it.status === 'unsupported' ? 'none' : k];
-                const status = it.status === 'ok' ? `Ready · ${it.pages} ${it.pages === 1 ? 'page' : 'pages'}` : it.status === 'busy' ? 'Converting…'
-                  : it.status === 'waiting' ? 'Waiting' : it.status === 'unsupported' ? 'This file type isn’t supported yet' : `Failed: ${it.error}`;
-                return (
-                  <div key={it.id} className="qrow">
-                    <span className="qi" style={{ background: look.bg, color: look.fg }}><Icon name={look.icon} size={20} /></span>
-                    <div className="qt"><b title={it.file.name}>{it.file.name}</b>
-                      {it.status === 'busy' && <div className="bar"><div style={{ width: `${Math.round(it.progress * 100)}%` }} /></div>}
-                      <span className={it.status === 'ok' ? 'ok' : it.status === 'err' || it.status === 'unsupported' ? 'err' : ''}>{status}</span></div>
-                    {it.status === 'ok' && <button className="ibtn muted" aria-label={`Preview ${it.file.name}`} title="Preview" onClick={() => preview(it)}><Icon name="eye" size={18} /></button>}
-                    {it.status === 'err' && <button className="ibtn danger" aria-label="Retry" title="Retry" onClick={() => patch(it.id, { status: 'waiting', progress: 0 })}><Icon name="rotate" size={18} /></button>}
-                    <button className="ibtn muted" aria-label={`Remove ${it.file.name}`} title="Remove" onClick={() => setItems((cur) => cur.filter((x) => x.id !== it.id))}><Icon name="close" size={17} /></button>
-                  </div>
-                );
-              })}
-            </div>
+            <SortableArea items={items} idOf={(it) => it.id} onReorder={setItems} layout="list"
+              overlay={(it) => <div className="qrow"><QueueRowBody it={it} /></div>}>
+              <div className="queue">
+                {items.map((it) => (
+                  <QueueRow key={it.id} it={it} onPreview={() => preview(it)}
+                    onRetry={() => patch(it.id, { status: 'waiting', progress: 0 })}
+                    onRemove={() => setItems((cur) => cur.filter((x) => x.id !== it.id))} />
+                ))}
+              </div>
+            </SortableArea>
           )}
           {!desk && optsOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: 'var(--surface)', borderRadius: 14, boxShadow: 'var(--shadow-card)' }}>{options}</div>}
         </div>
@@ -163,5 +155,37 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
         </div>
       )}
     </div>
+  );
+}
+
+function QueueRow({ it, onPreview, onRetry, onRemove }: { it: Item; onPreview: () => void; onRetry: () => void; onRemove: () => void }) {
+  const s = useSortableItem(it.id);
+  return (
+    <div ref={s.ref} style={s.style} className={`qrow${s.dragging ? ' hole' : ''}`} {...s.pointer}>
+      <QueueRowBody it={it} grip={s.grip} onPreview={onPreview} onRetry={onRetry} onRemove={onRemove} />
+    </div>
+  );
+}
+
+/** A queue row's content; also drawn under the finger while dragging. */
+function QueueRowBody({ it, grip, onPreview, onRetry, onRemove }: { it: Item; grip?: Record<string, any>; onPreview?: () => void; onRetry?: () => void; onRemove?: () => void }) {
+  const k = kindOf(it.file.name, it.file.type) ?? 'none';
+  const look = LOOK[it.status === 'unsupported' ? 'none' : k];
+  const status = it.status === 'ok' ? `Ready · ${it.pages} ${it.pages === 1 ? 'page' : 'pages'}` : it.status === 'busy' ? 'Converting…'
+    : it.status === 'waiting' ? 'Waiting' : it.status === 'unsupported' ? 'This file type isn’t supported yet' : `Failed: ${it.error}`;
+  const tab = grip ? 0 : -1;
+  return (
+    <>
+      <button className="fgrip" aria-label={`Move ${it.file.name}`} title="Drag to set the order (or press Space, then the arrow keys)" {...grip}>
+        <Icon name="dots-six-vertical:bold" size={18} />
+      </button>
+      <span className="qi" style={{ background: look.bg, color: look.fg }}><Icon name={look.icon} size={20} /></span>
+      <div className="qt"><b title={it.file.name}>{it.file.name}</b>
+        {it.status === 'busy' && <div className="bar"><div style={{ width: `${Math.round(it.progress * 100)}%` }} /></div>}
+        <span className={it.status === 'ok' ? 'ok' : it.status === 'err' || it.status === 'unsupported' ? 'err' : ''}>{status}</span></div>
+      {it.status === 'ok' && <button className="ibtn muted" aria-label={`Preview ${it.file.name}`} title="Preview" tabIndex={tab} onClick={onPreview}><Icon name="eye" size={18} /></button>}
+      {it.status === 'err' && <button className="ibtn danger" aria-label="Retry" title="Retry" tabIndex={tab} onClick={onRetry}><Icon name="rotate" size={18} /></button>}
+      <button className="ibtn muted" aria-label={`Remove ${it.file.name}`} title="Remove" tabIndex={tab} onClick={onRemove}><Icon name="close" size={17} /></button>
+    </>
   );
 }

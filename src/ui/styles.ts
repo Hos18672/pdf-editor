@@ -377,19 +377,16 @@ button { cursor: pointer; }
 .org .selbar { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 6px 0 14px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-card); font-weight: 600; }
 .org .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; max-width: 1240px; width: 100%; margin: 0 auto; }
 .org .grid { position: relative; }
-.oslot { position: relative; z-index: 0; }
-.oslot.hole, .oslot.rise { z-index: 10; }
+.oslot { position: relative; }
 .oslot.hole::before { content: ""; position: absolute; inset: 2px; border-radius: 16px; border: 2px dashed var(--sel); background: var(--sel-tint); }
-.ocard { display: flex; flex-direction: column; gap: 4px; padding: 10px 6px 2px; border-radius: 16px; transition: box-shadow .18s, background .18s; position: relative; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
-.org.dragging, .org.dragging * { cursor: grabbing !important; }
+.oslot.hole > .ocard { opacity: 0; }
+.ocard { display: flex; flex-direction: column; gap: 4px; padding: 10px 6px 2px; border-radius: 16px; transition: box-shadow .18s, background .18s; position: relative; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
 .ocard .sq { position: relative; aspect-ratio: 1; display: grid; place-items: center; cursor: grab; }
 .ocard .sq canvas { max-width: 100%; max-height: 100%; background: #fff; border-radius: 3px; box-shadow: 0 1px 2px rgba(20,23,46,.08), 0 6px 16px rgba(20,23,46,.10); display: block; transition: transform .2s; }
 .ocard .row { display: flex; align-items: center; gap: 2px; }
 .ocard .row .n { flex: 1; min-width: 0; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ocard .row .ibtn { width: 44px; height: 44px; }
 .ocard .handle { width: 40px; height: 44px; display: grid; place-items: center; color: var(--muted); cursor: grab; touch-action: none; border: 0; background: none; padding: 0; }
-.ocard.lift { background: var(--surface); box-shadow: 0 24px 50px rgba(20,23,46,.28), 0 0 0 2px var(--sel); will-change: transform; }
-.ocard.settle { background: var(--surface); box-shadow: 0 0 0 2px var(--sel); }
 .ocard .sq canvas { -webkit-user-drag: none; }
 .ocard .ck { position: absolute; top: 18px; left: 14px; width: 26px; height: 26px; border-radius: 8px; display: grid; place-items: center; background: rgba(255,255,255,.92); box-shadow: inset 0 0 0 1.5px #9AA0B4; color: transparent; z-index: 1; border: 0; padding: 0; }
 .ocard.on .ck { background: var(--ink); color: var(--on-ink); box-shadow: none; }
@@ -425,8 +422,18 @@ button { cursor: pointer; }
 .hcard .tt span { font-size: 13px; color: var(--muted); line-height: 1.35; }
 .hcard > svg:last-child { color: var(--faint); }
 .flist { width: 100%; max-width: 760px; display: flex; flex-direction: column; gap: 10px; }
-.frow { display: flex; align-items: center; gap: 10px; padding: 8px 6px 8px 4px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); transition: transform .15s, box-shadow .15s; }
-.frow.lift { box-shadow: 0 14px 36px rgba(20,23,46,.18), 0 0 0 2px var(--sel); transform: translateX(8px) rotate(-.6deg); position: relative; z-index: 2; }
+.frow { display: flex; align-items: center; gap: 10px; padding: 8px 6px 8px 4px; background: var(--surface); border-radius: 14px; box-shadow: var(--shadow-card); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
+.frow.hole, .qrow.hole { background: var(--sel-tint); box-shadow: none; outline: 2px dashed var(--sel); outline-offset: -2px; }
+.frow.hole > *, .qrow.hole > * { visibility: hidden; }
+.fgrip { width: 28px; height: 44px; flex: none; border: 0; background: none; color: var(--faint); cursor: grab; display: grid; place-items: center; padding: 0; border-radius: 8px; }
+.fgrip:hover { color: var(--muted); background: var(--surface-2); }
+/* the item under the finger while dragging */
+@keyframes dnd-pick { from { transform: none; box-shadow: var(--shadow-card); } }
+.dnd-lift { width: 100%; height: 100%; cursor: grabbing; }
+.dnd-lift > * { height: 100%; background: var(--surface); box-shadow: 0 22px 48px rgba(20,23,46,.26), 0 0 0 2px var(--sel); animation: dnd-pick .16s ease-out; }
+.dnd-lift > .ocard { transform: scale(1.04) rotate(-1.5deg); }
+.dnd-lift > .frow, .dnd-lift > .qrow { transform: scale(1.02) rotate(-.6deg); border-radius: 14px; }
+:root[data-theme="dark"] .dnd-lift > * { box-shadow: 0 22px 48px rgba(0,0,0,.6), 0 0 0 2px var(--sel); }
 .frow .fthumb { width: 40px; height: 54px; flex: none; background: #fff; border-radius: 3px; box-shadow: 0 0 0 1px var(--line), 0 2px 6px rgba(20,23,46,.08); overflow: hidden; display: grid; place-items: center; }
 .frow .fthumb canvas, .frow .fthumb img { max-width: 100%; max-height: 100%; display: block; }
 .frow .fi { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -475,7 +482,7 @@ button { cursor: pointer; }
 .types { display: flex; flex-wrap: wrap; gap: 6px; }
 .types span { height: 24px; padding: 0 8px; border-radius: 6px; font-size: 11.5px; font-weight: 700; letter-spacing: .03em; display: inline-flex; align-items: center; }
 .queue { display: flex; flex-direction: column; background: var(--surface); border-radius: 16px; box-shadow: var(--shadow-card); overflow: hidden; width: 100%; }
-.qrow { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }
+.qrow { display: flex; align-items: center; gap: 10px; padding: 12px 14px 12px 6px; background: var(--surface); user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
 .qrow + .qrow { border-top: 1px solid var(--line); }
 .qrow .qi { width: 40px; height: 40px; flex: none; border-radius: 10px; display: grid; place-items: center; }
 .qrow .qt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }

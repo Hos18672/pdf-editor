@@ -6,6 +6,7 @@ import { Seg, Stepper, Toggle } from './Panel';
 import { saveFile, HostProps, ToastMsg, BusyMsg } from './Editor';
 import { parseRange, formatRange, loadDoc, pickPages, imageBytes, addImagePage, addOutline, save, baseName, fmtSize } from './pdfops';
 import { Convert } from './Convert';
+import { SortableArea, useSortableItem } from './sortable';
 import type { Bp } from './hooks';
 import type { PageState } from '../engine/types';
 import { PDFDocument } from 'pdf-lib';
@@ -156,10 +157,8 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
   const [files, setFiles] = useState<CFile[]>([]);
   const [outName, setOutName] = useState('Combined.pdf');
   const [marks, setMarks] = useState(true);
-  const [drag, setDrag] = useState<string | null>(null);
   const [optsOpen, setOptsOpen] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const listRef = useRef<HTMLDivElement>(null);
   const started = useRef(false);
 
   const add = async (list: FileList | File[]) => {
@@ -192,15 +191,6 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
   }, [p.current]);
 
   const total = files.reduce((n, f) => n + (f.kind === 'pdf' ? (f.range.trim() ? parseRange(f.range, f.pages).length : f.pages) : 1), 0);
-  const startDrag = (id: string) => (e: React.PointerEvent) => { e.preventDefault(); (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId); setDrag(id); };
-  const moveDrag = (e: React.PointerEvent) => {
-    if (!drag || !listRef.current) return;
-    const rows = [...listRef.current.querySelectorAll<HTMLElement>('.frow')];
-    const from = files.findIndex((f) => f.id === drag);
-    let to = from;
-    rows.forEach((r, i) => { const b = r.getBoundingClientRect(); if (e.clientY > b.top && e.clientY < b.bottom) to = i; });
-    if (to !== from) { const next = files.slice(); const [it] = next.splice(from, 1); next.splice(to, 0, it); setFiles(next); }
-  };
 
   const run = async () => {
     if (!files.length) return;
@@ -240,23 +230,16 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
   return (
     <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column' }}>
       <div className="tmain">
-        <div className="flist" ref={listRef}>
-          <div className="label" style={{ padding: '0 4px 4px' }}>Drag to set the order. Type a range like “1–3” to use only some pages.</div>
-          {files.map((f) => (
-            <div key={f.id} className={`frow${drag === f.id ? ' lift' : ''}`}>
-              <button className="handle" style={{ width: 28, height: 44, border: 0, background: 'none', color: 'var(--faint)', cursor: 'grab', touchAction: 'none', display: 'grid', placeItems: 'center', padding: 0 }}
-                aria-label={`Drag ${f.name}`} onPointerDown={startDrag(f.id)} onPointerMove={moveDrag} onPointerUp={() => setDrag(null)} onPointerCancel={() => setDrag(null)}>
-                <Icon name="dots-six-vertical:bold" size={18} />
-              </button>
-              <div className="fthumb">{f.pdf ? <Thumb pdf={f.pdf} src={0} size={60} /> : <img src={f.thumb} alt="" />}</div>
-              <div className="fi"><b title={f.name}>{f.name}</b><span>{f.kind === 'pdf' ? `${f.pages} ${f.pages === 1 ? 'page' : 'pages'}` : 'Image · 1 page'} · {fmtSize(f.size)}</span></div>
-              {f.kind === 'pdf' && f.pages > 1 && (
-                <input className="range-in" value={f.range} placeholder="All pages" aria-label={`Pages of ${f.name}`}
-                  onChange={(e) => setFiles((cur) => cur.map((x) => (x.id === f.id ? { ...x, range: e.target.value } : x)))} />
-              )}
-              <button className="ibtn muted" aria-label={`Remove ${f.name}`} onClick={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))}><Icon name="close" size={17} /></button>
-            </div>
-          ))}
+        <div className="flist">
+          <div className="label" style={{ padding: '0 4px 4px' }}>{p.mobile ? 'Hold a file to drag it into place.' : 'Drag to set the order.'} Type a range like “1–3” to use only some pages.</div>
+          <SortableArea items={files} idOf={(f) => f.id} onReorder={setFiles} layout="list"
+            overlay={(f) => <div className="frow"><FileRowBody f={f} /></div>}>
+            {files.map((f) => (
+              <FileRow key={f.id} f={f}
+                onRange={(range) => setFiles((cur) => cur.map((x) => (x.id === f.id ? { ...x, range } : x)))}
+                onRemove={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))} />
+            ))}
+          </SortableArea>
           <button className="adddash" onClick={() => input.current?.click()}><Icon name="plus:bold" size={16} />Add PDFs or images</button>
           {!p.desk && optsOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: 'var(--surface)', borderRadius: 14, boxShadow: 'var(--shadow-card)' }}>{options}</div>}
         </div>
@@ -266,6 +249,33 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
       <Bar desk={p.desk} cta={cta} bar={{ title: `${total} ${total === 1 ? 'page' : 'pages'} in total`, sub: outName,
         extra: <button className="ibtn" style={{ width: 48, height: 48, borderRadius: 12, boxShadow: 'inset 0 0 0 1.5px var(--line-2)' }} aria-label="Options" aria-expanded={optsOpen} onClick={() => setOptsOpen((v) => !v)}><Icon name="more" size={20} /></button> }} />
     </div>
+  );
+}
+
+function FileRow({ f, onRange, onRemove }: { f: CFile; onRange: (r: string) => void; onRemove: () => void }) {
+  const s = useSortableItem(f.id);
+  return (
+    <div ref={s.ref} style={s.style} className={`frow${s.dragging ? ' hole' : ''}`} {...s.pointer}>
+      <FileRowBody f={f} grip={s.grip} onRange={onRange} onRemove={onRemove} />
+    </div>
+  );
+}
+
+/** A file row's content; also drawn under the finger while dragging. */
+function FileRowBody({ f, grip, onRange, onRemove }: { f: CFile; grip?: Record<string, any>; onRange?: (r: string) => void; onRemove?: () => void }) {
+  return (
+    <>
+      <button className="fgrip" aria-label={`Move ${f.name}`} title="Drag to reorder (or press Space, then the arrow keys)" {...grip}>
+        <Icon name="dots-six-vertical:bold" size={18} />
+      </button>
+      <div className="fthumb">{f.pdf ? <Thumb pdf={f.pdf} src={0} size={60} /> : <img src={f.thumb} alt="" draggable={false} />}</div>
+      <div className="fi"><b title={f.name}>{f.name}</b><span>{f.kind === 'pdf' ? `${f.pages} ${f.pages === 1 ? 'page' : 'pages'}` : 'Image · 1 page'} · {fmtSize(f.size)}</span></div>
+      {f.kind === 'pdf' && f.pages > 1 && (
+        <input className="range-in" value={f.range} placeholder="All pages" aria-label={`Pages of ${f.name}`} readOnly={!onRange}
+          onChange={(e) => onRange?.(e.target.value)} />
+      )}
+      <button className="ibtn muted" aria-label={`Remove ${f.name}`} tabIndex={grip ? 0 : -1} onClick={onRemove}><Icon name="close" size={17} /></button>
+    </>
   );
 }
 
