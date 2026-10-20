@@ -4,7 +4,7 @@ import { Icon } from './icons';
 export interface Stamp { src: string; w: number; h: number; }
 
 const SIG_FONTS = ['Caveat', 'Dancing Script', 'Great Vibes', 'Homemade Apple'];
-const INKS = ['#14183a', '#1d3fb8', '#000000'];
+const INKS = ['#14161F', '#1E2559', '#2F5BD3'];
 const STORE = 'pdfeditor.signatures';
 
 const loadSaved = (): string[] => {
@@ -45,9 +45,9 @@ const stampFromSrc = (src: string): Promise<Stamp> => new Promise((res) => {
   im.src = src;
 });
 
-export function SignatureModal({ onClose, onPick }: { onClose: () => void; onPick: (s: Stamp) => void }) {
+export function SignatureModal({ onClose, onPick, sheet }: { onClose: () => void; onPick: (s: Stamp) => void; sheet?: boolean }) {
   const [tab, setTab] = useState<'draw' | 'type' | 'upload'>('draw');
-  const [ink, setInk] = useState(INKS[0]);
+  const [ink, setInk] = useState(INKS[1]);
   const [saved, setSaved] = useState<string[]>(loadSaved);
   const [name, setName] = useState('');
   const [font, setFont] = useState(SIG_FONTS[0]);
@@ -139,16 +139,21 @@ export function SignatureModal({ onClose, onPick }: { onClose: () => void; onPic
     r.readAsDataURL(f);
   };
 
+  const place = () => {
+    if (tab === 'draw') finish(trim(padRef.current!));
+    else document.fonts.load(`160px "${font}"`).catch(() => null).then(() => finish(typedStamp()));
+  };
   return (
-    <div className="scrim" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal sigmodal" role="dialog" aria-label="Create signature">
-        <header>
-          <h2>Your signature</h2>
-          <button className="iconbtn" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
-        </header>
+    <div className={`scrim${sheet ? ' sheet' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal sigmodal" role="dialog" aria-modal="true" aria-label="Add signature">
+        <div className="grab" />
+        <div className="mhead">
+          <h2>Add signature</h2>
+          <button className="ibtn" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+        </div>
         {saved.length > 0 && (
-          <section className="savedWrap">
-            <div className="savedHead">Saved signatures <span>Tap one to place it</span></div>
+          <section className="field">
+            <div className="label">Saved on this device · tap to place</div>
             <div className="saved">
               {saved.map((s) => (
                 <div key={s} className="s" role="button" tabIndex={0} aria-label="Place saved signature"
@@ -157,37 +162,29 @@ export function SignatureModal({ onClose, onPick }: { onClose: () => void; onPic
                   <button className="x" aria-label="Remove saved signature" onClick={(e) => {
                     e.stopPropagation();
                     const list = saved.filter((x) => x !== s); setSaved(list); save(list);
-                  }}><Icon name="close" size={14} /></button>
+                  }}><Icon name="close" size={13} /></button>
                 </div>
               ))}
             </div>
           </section>
         )}
-        <div className="tabs" role="tablist">
-          {(['draw', 'type', 'upload'] as const).map((t) => (
+        <div className="seg lg" role="tablist">
+          {([['draw', 'Draw', 'scribble'], ['type', 'Type', 'keyboard'], ['upload', 'Upload', 'upload']] as const).map(([t, label, ic]) => (
             <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)} role="tab" aria-selected={tab === t}>
-              {t === 'draw' ? 'Draw' : t === 'type' ? 'Type' : 'Upload image'}
+              <Icon name={ic} size={17} />{label}
             </button>
           ))}
         </div>
-        {tab !== 'upload' && (
-          <div className="row" style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <span style={{ fontSize: 13, color: 'var(--muted)' }}>Ink</span>
-            <div className="swatches">
-              {INKS.map((c) => <button key={c} className={`swatch${ink === c ? ' on' : ''}`} style={{ background: c }} onClick={() => setInk(c)} aria-label={`Ink ${c}`} />)}
-            </div>
-          </div>
-        )}
         {tab === 'draw' && (
           <div className="sigpad">
             <canvas ref={padRef} onPointerDown={down} onPointerMove={moveP} onPointerUp={upP} onPointerCancel={upP} />
-            <div className="base" />
-            {!hasInk && <div className="ph">Sign above the line with your mouse, finger or pen</div>}
+            <div className="base" /><div className="xm"><Icon name="close" size={16} /></div>
+            {!hasInk && <div className="ph">Sign with finger, pen or mouse</div>}
           </div>
         )}
         {tab === 'type' && (
           <div className="typed">
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Type your name" autoFocus />
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Type your name" autoFocus />
             <div className="opts">
               {SIG_FONTS.map((f) => (
                 <button key={f} className={font === f ? 'on' : ''} style={{ fontFamily: `"${f}"`, color: ink }} onClick={() => setFont(f)}>
@@ -198,25 +195,34 @@ export function SignatureModal({ onClose, onPick }: { onClose: () => void; onPic
           </div>
         )}
         {tab === 'upload' && (
-          <label className="sigpad" style={{ display: 'grid', placeItems: 'center', cursor: 'pointer', textAlign: 'center', padding: 16 }}>
+          <label className="sigpad upload">
             <input type="file" accept="image/*" hidden onChange={(e) => onFile(e.target.files?.[0])} />
             <div><Icon name="upload" size={28} /><div style={{ marginTop: 8, fontWeight: 600 }}>Choose a photo of your signature</div>
               <div style={{ color: 'var(--muted)', fontSize: 13 }}>A white background is removed automatically</div></div>
           </label>
         )}
-        <footer>
-          <label style={{ display: 'flex', alignItems: 'center', gap: 6, marginRight: 'auto', fontSize: 14 }}>
-            <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} /> Save on this device
-          </label>
-          {tab === 'draw' && <button className="btn ghost small" onClick={clear} disabled={!hasInk}>Clear</button>}
+        <div className="inkrow">
           {tab !== 'upload' && (
-            <button className="btn small" disabled={tab === 'draw' ? !hasInk : !name.trim()}
-              onClick={() => {
-                if (tab === 'draw') finish(trim(padRef.current!));
-                else document.fonts.load(`160px "${font}"`).catch(() => null).then(() => finish(typedStamp()));
-              }}>Place signature</button>
+            <div className="inks"><span className="label">Ink</span>
+              <div className="swatches">
+                {INKS.map((c) => <button key={c} className={`swatch${ink === c ? ' on' : ''}`} onClick={() => setInk(c)} aria-label={`Ink ${c}`}><i style={{ background: c, width: 28, height: 28 }} /></button>)}
+              </div>
+            </div>
           )}
-        </footer>
+          <div style={{ flex: 1 }} />
+          <label className="check">
+            <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
+            <span className="box"><Icon name="check" size={14} /></span>Save on this device
+          </label>
+        </div>
+        {tab !== 'upload' && (
+          <div className="foot">
+            {tab === 'draw' && <button className="btn outline lg" onClick={clear} disabled={!hasInk}><Icon name="restore" size={17} />Clear</button>}
+            <button className="btn primary lg" disabled={tab === 'draw' ? !hasInk : !name.trim()} onClick={place}>
+              <Icon name="signature:bold" size={18} />Place signature
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,193 +1,252 @@
-import React, { useState } from 'react';
+import React from 'react';
 import type { EditorObject, FontFamily } from '../engine/types';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { RunEdit, Tool, ToolStyle } from './store';
 import { Icon } from './icons';
 
-export const COLORS = ['#000000', '#1e2559', '#1d3fb8', '#c93434', '#157a52', '#d9730d', '#ffffff'];
-export const HIGHLIGHTS = ['#ffe14d', '#8fe39a', '#ffadc4', '#94ccff'];
+export const COLORS = ['#000000', '#1E2559', '#3446C9', '#B83227', '#1E7A4C'];
+export const INKS = ['#14161F', '#1E2559', '#2F5BD3', '#B83227'];
+export const HIGHLIGHTS = ['#FFE14D', '#8FE39A', '#FFADC4', '#94CCFF'];
 
-function Swatches({ value, onPick, list = COLORS, allowNone }: { value: string | null; onPick: (c: string | null) => void; list?: string[]; allowNone?: boolean }) {
+const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCase() === b.toLowerCase();
+const rgbOf = (h: string) => { const v = h.replace('#', ''); return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) || 0); };
+const near = (a: string, b: string) => { const x = rgbOf(a), y = rgbOf(b); return Math.abs(x[0] - y[0]) + Math.abs(x[1] - y[1]) + Math.abs(x[2] - y[2]) < 48; };
+
+export function Swatches({ value, onPick, list = COLORS, allowNone, original, custom = true }: {
+  value: string | null; onPick: (c: string | null) => void; list?: string[]; allowNone?: boolean;
+  /** first swatch = keep the original colour (value null) */ original?: string; custom?: boolean;
+}) {
   return (
     <div className="swatches">
-      {allowNone && <button className={`swatch none${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label="No fill" />}
-      {list.map((c) => (
-        <button key={c} className={`swatch${value?.toLowerCase() === c ? ' on' : ''}`} style={{ background: c }} onClick={() => onPick(c)} aria-label={`Colour ${c}`} />
+      {original !== undefined && (
+        <button className={`swatch${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label="Original colour" title="Original">
+          <i style={{ background: original }} />
+        </button>
+      )}
+      {allowNone && <button className={`swatch none${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label="No fill" title="None"><i /></button>}
+      {list.filter((c) => !(original && near(c, original))).map((c) => (
+        <button key={c} className={`swatch${same(value, c) ? ' on' : ''}`} onClick={() => onPick(c)} aria-label={`Colour ${c}`}><i style={{ background: c }} /></button>
       ))}
-      <label className="swatch" style={{ background: 'conic-gradient(red, yellow, lime, cyan, blue, magenta, red)', position: 'relative' }} aria-label="Custom colour">
-        <input type="color" value={value ?? '#000000'} onChange={(e) => onPick(e.target.value)} style={{ opacity: 0, position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: 'pointer' }} />
-      </label>
+      {custom && (
+        <label className={`swatch custom${value && !list.some((c) => same(c, value)) ? ' on' : ''}`} aria-label="Custom colour" title="Custom colour">
+          <i style={value && !list.some((c) => same(c, value)) ? { background: value, border: 0 } : undefined}>
+            {!(value && !list.some((c) => same(c, value))) && <Icon name="plus" size={14} />}
+          </i>
+          <input type="color" value={value ?? '#000000'} onChange={(e) => onPick(e.target.value)} />
+        </label>
+      )}
     </div>
   );
 }
 
-const Family = ({ value, onChange }: { value: FontFamily; onChange: (f: FontFamily) => void }) => (
-  <div className="seg">
-    {(['Helvetica', 'Times', 'Courier'] as FontFamily[]).map((f) => (
-      <button key={f} className={value === f ? 'on' : ''} onClick={() => onChange(f)}
-        style={{ fontFamily: f === 'Helvetica' ? 'Arial' : f === 'Times' ? '"Times New Roman"' : '"Courier New"' }}>
-        {f === 'Helvetica' ? 'Sans' : f === 'Times' ? 'Serif' : 'Mono'}
-      </button>
-    ))}
-  </div>
-);
-
-const Num = ({ label, value, onChange, min = 1, max = 400, step = 1 }: { label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; step?: number }) => (
-  <label className="f">{label}
-    <input type="number" value={Math.round(value * 10) / 10} min={min} max={max} step={step}
-      onChange={(e) => { const v = parseFloat(e.target.value); if (!isNaN(v)) onChange(Math.min(max, Math.max(min, v))); }} />
-  </label>
-);
-
-/** Desktop: side panel. Phone: a slim bar with the main actions; tap the chevron for all options. */
-function Sheet({ label, title, sub, actions, children, onClose }: {
-  label: string; title: string; sub?: React.ReactNode; actions?: React.ReactNode; children: React.ReactNode; onClose: () => void;
-}) {
-  const [open, setOpen] = useState(false);
+export const Stepper = ({ value, onChange, min, max, label, unit, soft, step = 1 }: {
+  value: number; onChange: (v: number) => void; min: number; max: number; label: string; unit?: string; soft?: boolean; step?: number;
+}) => {
+  const r = (v: number) => Math.round(v / step) * step;
   return (
-    <aside className={`panel${open ? ' open' : ''}`} aria-label={label}>
-      <div className="phead">
-        <div className="ptitle"><h3>{title}</h3>{sub && <div className="psub">{sub}</div>}</div>
-        <div className="pacts">
-          {actions}
-          <button className="iconbtn more" onClick={() => setOpen((v) => !v)} aria-label={open ? 'Fewer options' : 'More options'} aria-expanded={open}>
-            <Icon name={open ? 'down' : 'up'} />
-          </button>
-          <button className="iconbtn close" onClick={onClose} aria-label="Close panel"><Icon name="close" /></button>
-        </div>
-      </div>
-      <div className="pbody">{children}</div>
-    </aside>
+    <div className={`stepper${soft ? ' soft' : ''}`} role="group" aria-label={label}>
+      <button type="button" onClick={() => onChange(Math.max(min, r(value) - step))} aria-label={`Decrease ${label}`}><Icon name="minus" size={16} /></button>
+      <span className="v">{Math.round(value * 10) / 10}{unit && <small> {unit}</small>}</span>
+      <button type="button" onClick={() => onChange(Math.min(max, r(value) + step))} aria-label={`Increase ${label}`}><Icon name="plus" size={16} /></button>
+    </div>
+  );
+};
+
+export function Toggle({ label, hint, checked, onChange }: { label: string; hint?: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <label className="toggle">
+      <span className="t"><b>{label}</b>{hint && <span>{hint}</span>}</span>
+      <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+      <span className="sw" />
+    </label>
   );
 }
 
-const Stepper = ({ value, onChange, min, max, label }: { value: number; onChange: (v: number) => void; min: number; max: number; label: string }) => (
-  <div className="stepper" role="group" aria-label={label}>
-    <button onClick={() => onChange(Math.max(min, Math.round(value) - 1))} aria-label={`Smaller ${label}`}><Icon name="minus" size={16} /></button>
-    <span>{Math.round(value * 10) / 10}</span>
-    <button onClick={() => onChange(Math.min(max, Math.round(value) + 1))} aria-label={`Larger ${label}`}><Icon name="plus" size={16} /></button>
-  </div>
+export function Seg<T extends string>({ value, options, onChange, lg }: { value: T; options: [T, React.ReactNode][]; onChange: (v: T) => void; lg?: boolean }) {
+  return (
+    <div className={`seg${lg ? ' lg' : ''}`} role="radiogroup">
+      {options.map(([v, label]) => (
+        <button key={v} type="button" role="radio" aria-checked={value === v} className={value === v ? 'on' : ''} onClick={() => onChange(v)}>{label}</button>
+      ))}
+    </div>
+  );
+}
+
+const FAMILIES: [FontFamily, string, string][] = [
+  ['Helvetica', 'Sans', 'Arial, Helvetica, sans-serif'], ['Times', 'Serif', '"Times New Roman", serif'], ['Courier', 'Mono', '"Courier New", monospace'],
+];
+const Family = ({ value, onChange }: { value: FontFamily; onChange: (f: FontFamily) => void }) => (
+  <Seg value={value} onChange={onChange} options={FAMILIES.map(([f, label, css]) => [f, <span style={{ fontFamily: css }}>{label}</span>])} />
 );
 
-export function RunPanel({ run, font, edit, onEdit, onReset, onClose }: {
-  run: TextRun; font?: FontInfo; edit?: RunEdit; onEdit: (e: RunEdit) => void; onReset: () => void; onClose: () => void;
+function Head({ kicker, title, onClose }: { kicker: string; title: string; onClose?: () => void }) {
+  return (
+    <div className="head">
+      <div className="t"><div className="kicker">{kicker}</div><h3>{title}</h3></div>
+      {onClose && <button className="ibtn" onClick={onClose} aria-label="Close panel"><Icon name="close" size={18} /></button>}
+    </div>
+  );
+}
+
+export const fontLabel = (font?: FontInfo) => {
+  const n = (font?.name || '').replace(/^[A-Z]{6}\+/, '').replace(/[-,](Regular|Roman)$/i, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ');
+  return n || 'Embedded font';
+};
+
+/** Properties of an existing line of text */
+export function RunProps({ run, font, known, edit, line, origColor, onEdit, onReset, onClose, compact }: {
+  run: TextRun; font?: FontInfo; known?: (c: string) => boolean; edit?: RunEdit; line: string; origColor: string;
+  onEdit: (e: RunEdit) => void; onReset: () => void; onClose?: () => void; compact?: boolean;
 }) {
   const cur: RunEdit = edit ?? { text: run.str, sizeScale: 1, color: null };
-  const missing = [...new Set([...cur.text].filter((c) => !/\s/.test(c) && font && font.charMap[c] === undefined))];
-  const fbName = font ? (font.fallback.family === 'Times' ? 'Times' : font.fallback.family === 'Courier' ? 'Courier' : 'Helvetica') : 'Helvetica';
+  const missing = [...new Set([...cur.text].filter((c) => !/\s/.test(c) && font && !(known ? known(c) : font.charMap[c] !== undefined)))];
   const size = run.region.height * cur.sizeScale;
   const setSize = (v: number) => onEdit({ ...cur, sizeScale: v / run.region.height });
   return (
-    <Sheet label="Text properties" title="Existing text" sub={`Font: ${font?.name || 'Embedded font'}`} onClose={onClose}
-      actions={<>
-        <Stepper value={size} min={2} max={300} onChange={setSize} label="size" />
-        <button className="iconbtn danger mobile-only" onClick={() => onEdit({ ...cur, text: '' })} aria-label="Delete text"><Icon name="trash" /></button>
-      </>}>
+    <div className="props">
+      {!compact && <Head kicker="Existing text" title={line} onClose={onClose} />}
+      <div className="field">
+        <div className="label">Font</div>
+        <div className="fontbox" title={font?.name}>
+          <span className="aa" style={{ fontFamily: font?.editFamily ? `"${font.editFamily}", ${font.cssFallback}` : font?.cssFallback }}>Aa</span>
+          <span className="fn">{fontLabel(font)}</span><span className="badge">Original</span>
+        </div>
+      </div>
       {missing.length > 0 && (
-        <div className="note warn">
-          The embedded font doesn't include {missing.slice(0, 12).join(' ')}{missing.length > 12 ? '…' : ''}. Those characters use {fbName}; everything else keeps the original font.
+        <div className="note warn"><Icon name="info" size={16} />
+          <span>The embedded font has no {missing.slice(0, 10).join(' ')}{missing.length > 10 ? '…' : ''}. Those characters use a similar standard font.</span>
         </div>
       )}
-      <Num label="Size (pt)" value={size} min={2} max={300} onChange={setSize} />
-      <label className="f">Colour
-        <div className="row">
-          <button className={`btn ghost small`} style={cur.color === null ? { borderColor: 'var(--ink)' } : undefined} onClick={() => onEdit({ ...cur, color: null })}>Original</button>
-        </div>
-        <Swatches value={cur.color} onPick={(c) => onEdit({ ...cur, color: c })} />
-      </label>
-      <div className="row">
-        <button className="btn ghost small" onClick={() => onEdit({ ...cur, text: '' })}><Icon name="trash" size={16} /> Delete text</button>
-        {edit && <button className="btn ghost small" onClick={onReset}>Restore original</button>}
+      <div className="field"><div className="label">Size</div>
+        <Stepper value={size} min={2} max={300} onChange={setSize} label="size" unit="pt" />
       </div>
-    </Sheet>
+      <div className="field"><div className="label">Colour</div>
+        <Swatches value={cur.color} original={origColor} custom={!compact} onPick={(c) => onEdit({ ...cur, color: c })} />
+      </div>
+      <div className="acts">
+        {edit && <button className="btn outline" onClick={onReset}><Icon name="restore" size={17} />Restore original</button>}
+        <button className="btn danger" onClick={() => onEdit({ ...cur, text: '' })}><Icon name="trash" size={17} />Delete line</button>
+      </div>
+      {!compact && <div className="keys"><span><b>Enter</b> confirm</span><span><b>Esc</b> cancel</span><span><b>Tab</b> next line</span></div>}
+    </div>
   );
 }
 
-export function ObjectPanel({ o, onChange, onDelete, onDuplicate, onClose }: {
-  o: EditorObject; onChange: (p: Partial<EditorObject>) => void; onDelete: () => void; onDuplicate: () => void; onClose: () => void;
+export const OBJ_TITLE: Record<EditorObject['type'], string> = {
+  text: 'Text', image: 'Image', signature: 'Signature', rect: 'Box', ellipse: 'Circle',
+  whiteout: 'Whiteout', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark',
+};
+
+export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact }: {
+  o: EditorObject; onChange: (p: Partial<EditorObject>) => void; onDelete: () => void; onDuplicate: () => void; onClose?: () => void; compact?: boolean;
 }) {
-  const title: Record<EditorObject['type'], string> = {
-    text: 'Text', image: 'Image', signature: 'Signature', rect: 'Rectangle', ellipse: 'Ellipse',
-    whiteout: 'Whiteout', highlight: 'Highlight', line: 'Line', draw: 'Drawing',
-  };
   const set = (p: any) => onChange(p);
   return (
-    <Sheet label={`${title[o.type]} properties`} title={title[o.type]} onClose={onClose}
-      actions={<>
-        {o.type === 'text' && <Stepper value={o.size} min={4} max={200} onChange={(size) => set({ size })} label="size" />}
-        <button className="iconbtn danger mobile-only" onClick={onDelete} aria-label="Delete"><Icon name="trash" /></button>
-      </>}>
+    <div className="props">
+      {!compact && <Head kicker="Added object" title={OBJ_TITLE[o.type]} onClose={onClose} />}
       {o.type === 'text' && (
         <>
-          <Family value={o.family} onChange={(family) => set({ family })} />
-          <div className="row">
-            <div className="seg">
-              <button className={o.bold ? 'on' : ''} onClick={() => set({ bold: !o.bold })} style={{ fontWeight: 700 }} aria-label="Bold">B</button>
-              <button className={o.italic ? 'on' : ''} onClick={() => set({ italic: !o.italic })} style={{ fontStyle: 'italic', fontFamily: 'serif' }} aria-label="Italic">I</button>
+          <div className="field"><div className="label">Font</div><Family value={o.family} onChange={(family) => set({ family })} /></div>
+          <div className="grid2">
+            <div className="field"><div className="label">Size</div><Stepper value={o.size} min={4} max={200} onChange={(size) => set({ size })} label="size" /></div>
+            <div className="field"><div className="label">Style</div>
+              <div className="bstyle">
+                <button className={o.bold ? 'on' : ''} onClick={() => set({ bold: !o.bold })} style={{ fontWeight: 700 }} aria-label="Bold" aria-pressed={o.bold}>B</button>
+                <button className={o.italic ? 'on' : ''} onClick={() => set({ italic: !o.italic })} style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }} aria-label="Italic" aria-pressed={o.italic}>I</button>
+              </div>
             </div>
           </div>
-          <Num label="Size (pt)" value={o.size} min={4} max={200} onChange={(size) => set({ size })} />
-          <label className="f">Colour<Swatches value={o.color} onPick={(color) => set({ color: color ?? '#000000' })} /></label>
+          <div className="field"><div className="label">Colour</div><Swatches value={o.color} onPick={(color) => set({ color: color ?? '#000000' })} /></div>
         </>
       )}
       {(o.type === 'rect' || o.type === 'ellipse') && (
         <>
-          <label className="f">Outline<Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></label>
-          <label className="f">Fill<Swatches value={o.fill} allowNone onPick={(fill) => set({ fill })} /></label>
-          <Num label="Outline width" value={o.strokeWidth} min={0} max={30} onChange={(strokeWidth) => set({ strokeWidth })} />
+          <div className="field"><div className="label">Outline</div><Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></div>
+          <div className="field"><div className="label">Fill</div><Swatches value={o.fill} allowNone onPick={(fill) => set({ fill })} /></div>
+          <div className="field"><div className="label">Outline width</div><Stepper value={o.strokeWidth} min={0} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} label="outline width" unit="pt" /></div>
         </>
       )}
       {(o.type === 'line' || o.type === 'draw') && (
         <>
-          <label className="f">Colour<Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></label>
-          <Num label="Width" value={o.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} />
+          <div className="field"><div className="label">Colour</div><Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></div>
+          <div className="field"><div className="label">Width</div><Stepper value={o.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} label="width" unit="pt" /></div>
+        </>
+      )}
+      {o.type === 'mark' && (
+        <>
+          <div className="field"><div className="label">Colour</div><Swatches value={o.color} onPick={(color) => set({ color: color ?? '#000000' })} /></div>
+          <div className="field"><div className="label">Size</div><Stepper value={o.w} min={4} max={60} onChange={(w) => set({ w, h: w })} label="size" unit="pt" /></div>
         </>
       )}
       {o.type === 'whiteout' && (
-        <label className="f">Colour<Swatches value={o.fill} list={['#ffffff', '#f4f4f4', '#000000']} onPick={(fill) => set({ fill: fill ?? '#ffffff' })} /></label>
+        <div className="field"><div className="label">Colour</div><Swatches value={o.fill} list={['#ffffff', '#f4f4f4', '#000000']} onPick={(fill) => set({ fill: fill ?? '#ffffff' })} /></div>
       )}
       {o.type === 'highlight' && (
-        <label className="f">Colour<Swatches value={o.fill} list={HIGHLIGHTS} onPick={(fill) => set({ fill: fill ?? HIGHLIGHTS[0] })} /></label>
+        <div className="field"><div className="label">Colour</div><Swatches value={o.fill} list={HIGHLIGHTS} custom={false} onPick={(fill) => set({ fill: fill ?? HIGHLIGHTS[0] })} /></div>
       )}
       {(o.type === 'image' || o.type === 'signature') && (
-        <label className="f">Opacity
-          <input type="range" min={0.1} max={1} step={0.05} value={o.opacity ?? 1} onChange={(e) => set({ opacity: parseFloat(e.target.value) })} />
-        </label>
+        <div className="field"><div className="label">Opacity</div>
+          <Stepper value={Math.round((o.opacity ?? 1) * 100)} min={10} max={100} step={10} unit="%" onChange={(v) => set({ opacity: v / 100 })} label="opacity" />
+        </div>
       )}
-      <div className="row">
-        <button className="btn ghost small" onClick={onDuplicate}><Icon name="copy" size={16} /> Duplicate</button>
-        <button className="btn ghost small" onClick={onDelete}><Icon name="trash" size={16} /> Delete</button>
+      <div className="acts2">
+        <button className="btn outline" onClick={onDuplicate}><Icon name="copy" size={17} />Duplicate</button>
+        <button className="btn outline danger" onClick={onDelete}><Icon name="trash" size={17} />Delete</button>
       </div>
-    </Sheet>
+      {!compact && <div className="hint">Drag to move. Drag the corner to resize{o.type === 'image' || o.type === 'signature' ? ' (Alt frees the proportions)' : ''}. Arrow keys nudge 1 pt, Shift+arrow 10 pt.</div>}
+    </div>
   );
 }
 
-export function ToolPanel({ tool, style, onChange }: { tool: Tool; style: ToolStyle; onChange: (s: Partial<ToolStyle>) => void }) {
-  const names: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Rectangle', ellipse: 'Ellipse', line: 'Line', draw: 'Draw', highlight: 'Highlight', whiteout: 'Whiteout' };
-  const hint: Partial<Record<Tool, string>> = {
-    text: 'Click anywhere on a page to start typing.',
-    rect: 'Drag on the page to draw.', ellipse: 'Drag on the page to draw.', line: 'Drag on the page to draw.',
-    draw: 'Draw freely on the page.', highlight: 'Drag over the area to highlight.',
-    whiteout: 'Drag over anything you want to hide. Click a text line with Edit to change it instead.',
-  };
+const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', draw: 'Draw', highlight: 'Highlight', whiteout: 'Whiteout' };
+const TOOL_HINTS: Partial<Record<Tool, string>> = {
+  text: 'Click anywhere on a page to start typing.', rect: 'Drag on the page to draw a box.', ellipse: 'Drag on the page to draw a circle.',
+  line: 'Drag on the page to draw a line.', draw: 'Draw freely with mouse, finger or pen.', highlight: 'Drag over the area to highlight.',
+  whiteout: 'Drag over anything you want to hide. To change a line of text, use Edit and click it instead.',
+};
+export const toolHasProps = (t: Tool) => !!TOOL_NAMES[t];
+
+export function ToolProps({ tool, style, onChange }: { tool: Tool; style: ToolStyle; onChange: (s: Partial<ToolStyle>) => void }) {
   return (
-    <aside className="panel toolprefs" aria-label="Tool settings">
-      <div><h3>{names[tool]}</h3><div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{hint[tool]}</div></div>
+    <div className="props">
+      <div className="head"><div className="t"><div className="kicker">Tool</div><h3>{TOOL_NAMES[tool]}</h3>
+        <div className="hint" style={{ marginTop: 2 }}>{TOOL_HINTS[tool]}</div></div></div>
       {tool === 'text' && (
         <>
-          <Family value={style.family} onChange={(family) => onChange({ family })} />
-          <Num label="Size (pt)" value={style.fontSize} min={4} max={200} onChange={(fontSize) => onChange({ fontSize })} />
-          <label className="f">Colour<Swatches value={style.color} onPick={(color) => onChange({ color: color ?? '#000000' })} /></label>
+          <div className="field"><div className="label">Font</div><Family value={style.family} onChange={(family) => onChange({ family })} /></div>
+          <div className="field"><div className="label">Size</div><Stepper value={style.fontSize} min={4} max={200} onChange={(fontSize) => onChange({ fontSize })} label="size" unit="pt" /></div>
+          <div className="field"><div className="label">Colour</div><Swatches value={style.color} onPick={(color) => onChange({ color: color ?? '#000000' })} /></div>
         </>
       )}
       {(tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'draw') && (
         <>
-          <label className="f">Colour<Swatches value={style.stroke} onPick={(stroke) => onChange({ stroke: stroke ?? '#000000' })} /></label>
-          {(tool === 'rect' || tool === 'ellipse') && <label className="f">Fill<Swatches value={style.fill} allowNone onPick={(fill) => onChange({ fill })} /></label>}
-          <Num label="Width" value={style.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => onChange({ strokeWidth })} />
+          <div className="field"><div className="label">Colour</div><Swatches value={style.stroke} onPick={(stroke) => onChange({ stroke: stroke ?? '#000000' })} /></div>
+          {(tool === 'rect' || tool === 'ellipse') && <div className="field"><div className="label">Fill</div><Swatches value={style.fill} allowNone onPick={(fill) => onChange({ fill })} /></div>}
+          <div className="field"><div className="label">Width</div><Stepper value={style.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => onChange({ strokeWidth })} label="width" unit="pt" /></div>
         </>
       )}
-      {tool === 'highlight' && <label className="f">Colour<Swatches value={style.highlight} list={HIGHLIGHTS} onPick={(highlight) => onChange({ highlight: highlight ?? HIGHLIGHTS[0] })} /></label>}
-    </aside>
+      {tool === 'highlight' && <div className="field"><div className="label">Colour</div><Swatches value={style.highlight} list={HIGHLIGHTS} custom={false} onPick={(highlight) => onChange({ highlight: highlight ?? HIGHLIGHTS[0] })} /></div>}
+    </div>
+  );
+}
+
+export interface ChangeItem { id: string; icon: string; label: string; page: number }
+
+export function IdleProps({ changes, onPick }: { changes: ChangeItem[]; onPick: (id: string) => void }) {
+  return (
+    <div className="props">
+      <div className="head"><div className="t"><div className="kicker">Edit tool</div><h3 style={{ whiteSpace: 'normal' }}>Click any line to retype it</h3>
+        <div className="hint" style={{ fontSize: 13.5, marginTop: 2 }}>The new text keeps the original font, size, colour and position.</div></div></div>
+      <div className="field">
+        <div className="label">Changes</div>
+        {changes.length ? (
+          <div className="changes">
+            {changes.map((c) => (
+              <button key={c.id} onClick={() => onPick(c.id)}><Icon name={c.icon} size={18} /><span className="l">{c.label}</span><span className="p">p. {c.page}</span></button>
+            ))}
+          </div>
+        ) : <div className="empty-changes">No changes yet.</div>}
+      </div>
+    </div>
   );
 }

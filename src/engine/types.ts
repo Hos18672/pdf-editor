@@ -34,7 +34,11 @@ export type EditorObject =
   | (Base & { type: 'whiteout'; fill: string })
   | (Base & { type: 'highlight'; fill: string })
   | (Base & { type: 'line'; stroke: string; strokeWidth: number; x2: number; y2: number })
-  | (Base & { type: 'draw'; stroke: string; strokeWidth: number; points: number[] }); // relative to x,y
+  | (Base & { type: 'draw'; stroke: string; strokeWidth: number; points: number[] }) // relative to x,y
+  | (Base & { type: 'mark'; kind: 'check' | 'cross' | 'dot'; color: string });
+
+/** Form field values by fully qualified field name: text/choice = string, checkbox = boolean, radio = export value */
+export type FormValues = Record<string, string | boolean>;
 
 export interface PageState {
   src: number; // original page index
@@ -48,4 +52,7 @@ export interface ExportInput {
   edits: TextEdit[];
   /** user space -> viewport (scale 1, original rotation) for each original page */
   viewMatrices: Record<number, M>;
+  forms?: FormValues;
+  /** turn form fields into plain page content */
+  flatten?: boolean;
 }

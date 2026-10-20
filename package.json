@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "expo-router/entry",
   "dependencies": {
+    "@cantoo/pdf-lib": "^2.11.1",
     "@expo/dom-webview": "~58.0.2",
     "@expo/metro-runtime": "~58.0.14",
     "@pdf-lib/fontkit": "^1.1.1",
@@ -14,6 +15,11 @@
     "expo-router": "~58.0.24",
     "expo-sharing": "~58.0.19",
     "expo-status-bar": "~58.0.3",
+    "heic2any": "^0.0.4",
+    "html2canvas": "^1.4.1",
+    "jszip": "^3.10.2",
+    "mammoth": "^1.13.0",
+    "marked": "^18.1.1",
     "pdf-lib": "^1.17.1",
     "react": "19.3.0",
     "react-dom": "^19.3.0",
@@ -21,10 +27,13 @@
     "react-native-safe-area-context": "~5.10.1",
     "react-native-screens": "~4.30.0",
     "react-native-web": "^0.21.4",
-    "react-native-webview": "^14.0.1"
+    "react-native-webview": "^14.0.1",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
+    "@phosphor-icons/core": "^2.1.1",
     "@types/react": "~19.3.0",
+    "@types/react-dom": "^19.3.0",
     "pdfjs-dist": "^3.11.174",
     "tsx": "^4.23.15",
     "typescript": "~6.0.3"

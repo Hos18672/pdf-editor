@@ -1,8 +1,8 @@
 import { useCallback, useReducer } from 'react';
-import type { EditorObject, PageState, FontFamily } from '../engine/types';
+import type { EditorObject, PageState, FontFamily, FormValues } from '../engine/types';
 
 export type Tool =
-  | 'edit' | 'text' | 'sign' | 'image' | 'whiteout' | 'highlight' | 'rect' | 'ellipse' | 'line' | 'draw';
+  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'highlight' | 'rect' | 'ellipse' | 'line' | 'draw';
 
 export interface RunEdit {
   text: string;
@@ -14,6 +14,7 @@ export interface Snapshot {
   pages: PageState[];
   objects: EditorObject[];
   edits: Record<string, RunEdit>;
+  forms: FormValues;
 }
 
 export interface ToolStyle {
@@ -38,7 +39,7 @@ type Action =
   | { type: 'undo' }
   | { type: 'redo' };
 
-const empty: Snapshot = { pages: [], objects: [], edits: {} };
+const empty: Snapshot = { pages: [], objects: [], edits: {}, forms: {} };
 
 function reducer(s: State, a: Action): State {
   switch (a.type) {
@@ -72,6 +73,7 @@ export function useHistory() {
     undo: () => dispatch({ type: 'undo' }),
     redo: () => dispatch({ type: 'redo' }),
     reset: (pages: PageState[]) => dispatch({ type: 'reset', pages }),
+    past: state.past.length,
   };
 }
 

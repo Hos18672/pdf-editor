@@ -45,10 +45,11 @@ export function loadPdfjs(): Promise<{ lib: any; base: string }> {
   return loading;
 }
 
-export async function openPdf(bytes: Uint8Array) {
+export async function openPdf(bytes: Uint8Array, password?: string) {
   const { lib, base } = await loadPdfjs();
   return lib.getDocument({
     data: bytes.slice(),
+    password,
     fontExtraProperties: true,
     isEvalSupported: false,
     cMapUrl: `${base}/cmaps/`,

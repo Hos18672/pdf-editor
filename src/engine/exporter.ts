@@ -1,6 +1,6 @@
 import {
   PDFDocument, PDFDict, PDFName, PDFRef, PDFArray, PDFRawStream, PDFStream, StandardFonts,
-  decodePDFRawStream, degrees, PDFFont,
+  decodePDFRawStream, degrees, PDFFont, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList, PDFBool,
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
@@ -213,6 +213,9 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     leaf.set(PDFName.of('Contents'), doc.context.register(stream));
   }
 
+  if (input.forms && Object.keys(input.forms).length) await fillForm(doc, input.forms, !!input.flatten);
+  else if (input.flatten) { try { doc.getForm().flatten(); } catch { /* no form */ } }
+
   // Page rotation, order and deletion
   const finalPages = input.pages.map((p) => {
     const pg = pages[p.src];
@@ -226,6 +229,50 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     for (const p of finalPages) doc.addPage(p);
   }
   return doc.save({ useObjectStreams: true });
+}
+
+async function fillForm(doc: PDFDocument, values: Record<string, string | boolean>, flatten: boolean) {
+  const form = doc.getForm();
+  let latinOnly = true;
+  for (const [name, v] of Object.entries(values)) {
+    let field: any;
+    try { field = form.getField(name); } catch { continue; }
+    try {
+      if (field instanceof PDFTextField) {
+        const s = String(v ?? '');
+        if (/[^\u0000-\u00ff]/.test(s)) latinOnly = false;
+        const max = field.getMaxLength();
+        field.setText(max ? s.slice(0, max) : s);
+      } else if (field instanceof PDFCheckBox) v ? field.check() : field.uncheck();
+      else if (field instanceof PDFRadioGroup) {
+        if (!v) field.clear();
+        else {
+          const opts = field.getOptions();
+          let opt = String(v);
+          if (!opts.includes(opt)) {
+            // the viewer reports the widget's appearance state (e.g. "1"); map it to the option
+            const on = (field.acroField as any).getOnValues?.() ?? [];
+            const i = on.findIndex((n: any) => n?.decodeText?.() === opt || n?.asString?.() === '/' + opt || String(n) === '/' + opt);
+            if (i >= 0 && opts[i] !== undefined) opt = opts[i];
+          }
+          field.select(opt);
+        }
+      }
+      else if (field instanceof PDFDropdown || field instanceof PDFOptionList) { if (v) field.select(String(v)); else field.clear(); }
+    } catch { /* value not accepted by the field */ }
+  }
+  try {
+    if (latinOnly) {
+      const helv = await doc.embedFont(StandardFonts.Helvetica);
+      form.updateFieldAppearances(helv);
+    } else {
+      // standard fonts can't draw this text: let the viewer build the appearance
+      form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.True);
+    }
+    if (flatten && latinOnly) form.flatten({ updateFieldAppearances: false });
+  } catch (e) {
+    form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.True);
+  }
 }
 
 function whiteoutRegion(e: TextEdit): string {
@@ -383,6 +430,22 @@ async function drawObject(
         s += `1 0 0 -1 ${f(o.x)} ${f(by)} Tm ${font.encodeText(safe(font, line)).toString()} Tj `;
       });
       s += 'ET ';
+      break;
+    }
+    case 'mark': {
+      const { x, y, w, h } = o;
+      if (o.kind === 'dot') {
+        const r = Math.min(w, h) * 0.32, cx = x + w / 2, cy = y + h / 2, k = r * KAPPA;
+        s += `${rgb(o.color, 'rg')} ${f(cx + r)} ${f(cy)} m ${f(cx + r)} ${f(cy + k)} ${f(cx + k)} ${f(cy + r)} ${f(cx)} ${f(cy + r)} c `;
+        s += `${f(cx - k)} ${f(cy + r)} ${f(cx - r)} ${f(cy + k)} ${f(cx - r)} ${f(cy)} c ${f(cx - r)} ${f(cy - k)} ${f(cx - k)} ${f(cy - r)} ${f(cx)} ${f(cy - r)} c `;
+        s += `${f(cx + k)} ${f(cy - r)} ${f(cx + r)} ${f(cy - k)} ${f(cx + r)} ${f(cy)} c f `;
+      } else {
+        s += `${rgb(o.color, 'RG')} ${f(Math.min(w, h) * 0.13)} w 1 J 1 j `;
+        const P = (px: number, py: number) => `${f(x + px * w)} ${f(y + py * h)}`;
+        s += o.kind === 'check'
+          ? `${P(0.14, 0.54)} m ${P(0.4, 0.8)} l ${P(0.88, 0.2)} l S `
+          : `${P(0.2, 0.2)} m ${P(0.8, 0.8)} l S ${P(0.8, 0.2)} m ${P(0.2, 0.8)} l S `;
+      }
       break;
     }
     case 'image':

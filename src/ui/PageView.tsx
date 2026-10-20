@@ -1,5 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { EditorObject, M } from '../engine/types';
+import { createPortal } from 'react-dom';
+import type { EditorObject, FormValues, M } from '../engine/types';
 import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
@@ -7,6 +8,9 @@ import { uid } from './store';
 import { registerEditFont, baselineInLine } from './textFonts';
 import { gesture } from './gesture';
 import { Icon } from './icons';
+import { FormLayer, FormField } from './Fields';
+
+export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
 
 export interface PageInfo { w: number; h: number; vm: M; }
 export interface PageData { runs: TextRun[]; colors: Record<string, { bg: string; fg: string }>; }
@@ -50,6 +54,18 @@ interface Props {
   preview?: { pdf: any; key: string };
   /** signature of this page's current text edits ('' = none) */
   editKey: string;
+  fields: FormField[];
+  forms: FormValues;
+  activeField: string | null;
+  fillMark: FillMark | null;
+  mobile: boolean;
+  onFieldValue: (name: string, v: string | boolean) => void;
+  onFieldFocus: (id: string) => void;
+  onFieldSign: (f: FormField) => void;
+  /** Tab in a line: edit the next one */
+  onNextRun: (key: string) => void;
+  /** phone: open the properties sheet of an object */
+  onMore: (id: string) => void;
 }
 
 export function PageView(p: Props) {
@@ -103,7 +119,7 @@ export function PageView(p: Props) {
       const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
       try {
         renderTask.current?.cancel?.();
-        renderTask.current = page.render({ canvasContext: ctx, viewport: vp });
+        renderTask.current = page.render({ canvasContext: ctx, viewport: vp, annotationMode: 2 /* ENABLE_FORMS: fields are drawn by the form layer */ });
         await renderTask.current.promise;
       } catch {
         return;
@@ -160,11 +176,26 @@ export function PageView(p: Props) {
   // ---- creating shapes / placing things ----
   const dragTools: Tool[] = ['whiteout', 'highlight', 'rect', 'ellipse', 'line', 'draw'];
   const onLayerClick = (e: React.MouseEvent) => {
-    // new text boxes are placed on click (tap), so scrolling or a two-finger gesture never adds one
-    if (p.tool !== 'text' || gesture.multi) return;
-    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar')) return;
+    if (gesture.multi) return;
+    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
     const id = uid();
+    if (p.tool === 'fill' && p.fillMark) {
+      if (p.fillMark === 'text' || p.fillMark === 'date') {
+        const size = 11;
+        const text = p.fillMark === 'date' ? new Date().toLocaleDateString() : '';
+        p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - size * 0.6, w: 20, h: size * 1.2, text, family: 'Helvetica', size, color: '#000000', bold: false, italic: false });
+        p.onSelect(id);
+        if (!text) p.onEditing(id);
+      } else {
+        const w = 12;
+        p.onAdd({ id, page: p.src, type: 'mark', kind: p.fillMark, x: pt.x - w / 2, y: pt.y - w / 2, w, h: w, color: '#1d1d1f' });
+        p.onSelect(id);
+      }
+      return;
+    }
+    // new text boxes are placed on click (tap), so scrolling or a two-finger gesture never adds one
+    if (p.tool !== 'text') return;
     p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - p.style.fontSize * 0.6, w: 20, h: p.style.fontSize * 1.2,
       text: '', family: p.style.family, size: p.style.fontSize, color: p.style.color, bold: false, italic: false });
     p.onSelect(id);
@@ -173,9 +204,9 @@ export function PageView(p: Props) {
   };
   const onLayerDown = (e: React.PointerEvent) => {
     if (e.button !== 0 || gesture.multi) return;
-    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar')) return;
+    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
-    if (p.tool === 'text') return;
+    if (p.tool === 'text' || (p.tool === 'fill' && p.fillMark)) return;
     if ((p.tool === 'sign' || p.tool === 'image') && p.onPlace(p.src, pt.x, pt.y)) return;
     if (dragTools.includes(p.tool)) {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -229,6 +260,20 @@ export function PageView(p: Props) {
   // existing text stays clickable (= editable) with the Edit and Add-text tools
   const passive = p.tool !== 'edit' && p.tool !== 'text';
   const rooms = useMemo(() => lineRooms(p.data?.runs ?? []), [p.data]);
+  // snap targets: page centre and the left margin(s) the text already uses
+  const snap = useMemo(() => {
+    const lefts = new Map<number, number>();
+    for (const r of p.data?.runs ?? []) {
+      const b = runBox(r, info.vm);
+      if (Math.abs(b.angle) > 0.01) continue;
+      const k = Math.round(b.x);
+      lefts.set(k, (lefts.get(k) ?? 0) + 1);
+    }
+    const xs = [...lefts.entries()].filter(([, n]) => n >= 3).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([x]) => x);
+    if (!xs.length) xs.push(36);
+    return { xs, cx: info.w / 2, cy: info.h / 2 };
+  }, [p.data, info]);
+  const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
 
   return (
     <div ref={outerRef} className="pageOuter" data-src={p.src} style={{ width: swap ? H : W, height: swap ? W : H }}>
@@ -246,8 +291,8 @@ export function PageView(p: Props) {
         <div className={`layer${passive ? ' passive' : ''}`}>
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
-              edit={p.edits[r.key]} editing={p.editing === r.key} room={rooms[r.key]} live={live}
-              local={local}
+              edit={p.edits[r.key]} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={live}
+              local={local} onNext={() => p.onNextRun(r.key)}
               onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
               onCommit={(raw) => {
                 const text = raw.normalize('NFC');
@@ -258,14 +303,21 @@ export function PageView(p: Props) {
                 p.onStopEditing(r.key);
               }} />
           ))}
+          {(p.fields.length > 0) && (
+            <FormLayer fields={p.fields} values={p.forms} zoom={zoom} interactive={p.tool === 'fill'} active={p.activeField}
+              onValue={p.onFieldValue} onFocus={p.onFieldFocus} onSign={p.onFieldSign} />
+          )}
           {p.objects.map((o) => (
             <ObjectView key={o.id} o={o} zoom={zoom} selected={p.selected === o.id} editing={p.editing === o.id}
               local={local} rotation={rotation} onSelect={() => p.onSelect(o.id)} onEditing={(v) => (v ? p.onEditing(o.id) : p.onStopEditing(o.id))}
               onChange={(patch, merge) => p.onChange(o.id, patch, merge)}
               onDelete={() => p.onDelete(o.id)} onDuplicate={() => p.onDuplicate(o.id)}
-              onDrag={(d) => p.onDragInfo(d ? { ...d, id: o.id, page: p.src } : null)} />
+              onDrag={(d) => p.onDragInfo(d ? { ...d, id: o.id, page: p.src } : null)}
+              snap={snap} page={info} onGuides={setGuides} mobile={p.mobile} onMore={() => p.onMore(o.id)} />
           ))}
           {draft && <Draft d={draft} zoom={zoom} tool={p.tool} style={p.style} />}
+          {guides.v.map((x) => <div key={'v' + x} className="guide v" style={{ left: x * zoom }} />)}
+          {guides.h.map((y) => <div key={'h' + y} className="guide h" style={{ top: y * zoom }} />)}
         </div>
       </div>
       <div className="pageNum">{p.index + 1}</div>
@@ -318,8 +370,8 @@ function lineRooms(runs: TextRun[]): Record<string, { up: number; down: number }
   return out;
 }
 
-function RunView({ run, vm, zoom, font, color, edit, editing, room, live, local, onStart, onCommit }: {
-  live?: boolean;
+function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, live, local, onStart, onCommit, onNext }: {
+  live?: boolean; selected: boolean; onNext: () => void;
   run: TextRun; vm: M; zoom: number; font?: FontInfo; color?: { bg: string; fg: string }; edit?: RunEdit;
   room?: { up: number; down: number };
   editing: boolean; onStart: () => void; onCommit: (text: string) => void;
@@ -354,15 +406,21 @@ function RunView({ run, vm, zoom, font, color, edit, editing, room, live, local,
     ta.setSelectionRange(at, at);
     tapAt.current = null;
   }, [editing]); // eslint-disable-line
-  const latest = useRef({ value, onCommit, committed: false });
+  const latest = useRef({ value, onCommit, committed: false, cancel: false });
   latest.current.value = value;
   latest.current.onCommit = onCommit;
   useEffect(() => {
     if (!editing) return;
     latest.current.committed = false;
+    latest.current.cancel = false;
     return () => { if (!latest.current.committed) { latest.current.committed = true; latest.current.onCommit(latest.current.value); } };
   }, [editing]);
-  const commitOnce = () => { if (!latest.current.committed) { latest.current.committed = true; onCommit(value); } };
+  const original = edit?.text ?? run.str;
+  const commitOnce = () => {
+    if (latest.current.committed) return;
+    latest.current.committed = true;
+    onCommit(latest.current.cancel ? original : value);
+  };
 
   const scale = edit?.sizeScale ?? 1;
   const size = b.h * scale * zoom;
@@ -385,12 +443,12 @@ function RunView({ run, vm, zoom, font, color, edit, editing, room, live, local,
   };
 
   if ((!edit || live) && !editing) {
-    return <div className="run" style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }} />;
+    return <div className={`run${selected ? ' selected' : ''}`} data-key={run.key} style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }} />;
   }
   const lines = (editing ? value : edit!.text).split('\n');
   const textStyle: React.CSSProperties = { fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop };
   return (
-    <div className={`run edited${editing ? ' editing' : ''}`} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
+    <div className={`run edited${editing ? ' editing' : ''}${selected ? ' selected' : ''}`} data-key={run.key} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
       <div className="cover" style={{
         background: bg,
         // hide the original glyphs completely (accents, descenders) but stay clear of the lines around it
@@ -409,9 +467,11 @@ function RunView({ run, vm, zoom, font, color, edit, editing, room, live, local,
           onChange={(e) => setValue(e.target.value)}
           onBlur={commitOnce}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') { (e.target as HTMLTextAreaElement).blur(); }
-            if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) (e.target as HTMLTextAreaElement).blur();
+            const ta = e.target as HTMLTextAreaElement;
             e.stopPropagation();
+            if (e.key === 'Escape') { latest.current.cancel = true; ta.blur(); }
+            else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
+            else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); ta.blur(); setTimeout(onNext, 0); }
           }}
           style={{ ...textStyle, background: bg, caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
         />
@@ -472,17 +532,21 @@ function segments(line: string, font?: FontInfo) {
 
 // ---------------- added objects ----------------
 
-function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag }: {
+type Snap = { xs: number[]; cx: number; cy: number };
+
+function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag, snap, page, onGuides, mobile, onMore }: {
   o: EditorObject; zoom: number; selected: boolean; editing: boolean; rotation: number;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
   onSelect: () => void; onEditing: (v: boolean) => void; onChange: (patch: Partial<EditorObject>, merge: boolean) => void;
   onDelete: () => void; onDuplicate: () => void; onDrag: (d: { x: number; y: number } | null) => void;
+  snap: Snap; page: PageInfo; onGuides: (g: { v: number[]; h: number[] }) => void; mobile: boolean; onMore: () => void;
 }) {
   type Mode = 'move' | 'grip' | 'resize' | 'end' | 'pending';
   const drag = useRef<null | { mode: Mode; sx: number; sy: number; cx: number; cy: number; o: EditorObject; moved: boolean }>(null);
   const [dragging, setDragging] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
+  const objRef = useRef<HTMLDivElement>(null);
 
   const isLine = o.type === 'line';
   const bx = isLine ? Math.min(o.x, o.x2) : o.x;
@@ -506,7 +570,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   const move = (e: React.PointerEvent) => {
     const d = drag.current;
     if (!d) return;
-    if (gesture.multi) { drag.current = null; setDragging(false); onDrag(null); return; }
+    if (gesture.multi) { drag.current = null; setDragging(false); onDrag(null); onGuides({ v: [], h: [] }); return; }
     if (d.mode === 'pending') {
       if (Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 10) return;
       d.mode = 'move';
@@ -514,15 +578,28 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       window.getSelection()?.removeAllRanges?.();
     }
     e.preventDefault();
+    // touch: start only after 4px so taps never nudge things
+    if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 4) return;
     onDrag({ x: e.clientX, y: e.clientY });
     const pt = local(e);
-    const dx = pt.x - d.sx, dy = pt.y - d.sy;
-    if (!d.moved && Math.hypot(dx, dy) * zoom < 3) return;
+    let dx = pt.x - d.sx, dy = pt.y - d.sy;
     const first = !d.moved;
     d.moved = true;
     if (first) setDragging(true);
     const s = d.o;
     if (d.mode === 'move' || d.mode === 'grip') {
+      if (s.type !== 'line') {
+        // snap to the page centre and the text margins within 6px on screen
+        const t = 6 / zoom;
+        const v: number[] = [], h: number[] = [];
+        const nx = s.x + dx, ny = s.y + dy;
+        const xc: [number, number][] = [[nx + s.w / 2, snap.cx], ...snap.xs.map((m) => [nx, m] as [number, number]), ...snap.xs.map((m) => [nx + s.w, page.w - m] as [number, number])];
+        let best: [number, number] | null = null;
+        for (const [a, b] of xc) if (Math.abs(a - b) < t && (!best || Math.abs(a - b) < Math.abs(best[0] - best[1]))) best = [a, b];
+        if (best) { dx += best[1] - best[0]; v.push(best[1]); }
+        if (Math.abs(ny + s.h / 2 - snap.cy) < t) { dy += snap.cy - (ny + s.h / 2); h.push(snap.cy); }
+        onGuides({ v, h });
+      }
       const patch: any = { x: s.x + dx, y: s.y + dy };
       if (s.type === 'line') { patch.x2 = s.x2 + dx; patch.y2 = s.y2 + dy; }
       onChange(patch, !first);
@@ -530,7 +607,8 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       onChange({ x2: s.x2 + dx, y2: s.y2 + dy } as any, !first);
     } else {
       let w = Math.max(8, s.w + dx), h = Math.max(8, s.h + dy);
-      if (s.type === 'image' || s.type === 'signature' || s.type === 'text') {
+      const keep = s.type === 'text' || s.type === 'mark' || ((s.type === 'image' || s.type === 'signature') && !e.altKey);
+      if (keep) {
         const k = Math.max(w / s.w, 8 / s.h);
         w = s.w * k; h = s.h * k;
         if (s.type === 'text') { onChange({ w, h, size: Math.max(4, s.size * k) } as any, !first); return; }
@@ -543,39 +621,46 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     drag.current = null;
     setDragging(false);
     onDrag(null);
+    onGuides({ v: [], h: [] });
     if (d && d.mode === 'move' && !d.moved && o.type === 'text' && selected) onEditing(true);
   };
-  // keep the toolbar inside the visible area: slide it sideways, flip it below when there's no room above
+
+  // floating toolbar: fixed to the viewport, kept inside the visible desk
   const barRef = useRef<HTMLDivElement>(null);
-  const [bar, setBar] = useState({ dx: 0, below: false });
-  const [, setTick] = useState(0);
+  const [bar, setBar] = useState<{ left: number; top: number; ax: number; below: boolean; hidden: boolean } | null>(null);
+  const [tick, setTick] = useState(0);
   useLayoutEffect(() => {
-    const el = barRef.current;
-    const wrap = el?.closest('.canvasWrap') as HTMLElement | null;
-    if (!el || !wrap) return;
+    const el = barRef.current, obj = objRef.current;
+    const wrap = obj?.closest('.canvasWrap') as HTMLElement | null;
+    if (!selected || !el || !obj || !wrap) return;
     const wr = wrap.getBoundingClientRect();
-    const objR = (el.parentElement as HTMLElement).getBoundingClientRect();
-    const r = el.getBoundingClientRect();
-    let dx = 0;
-    if (rotation % 360 === 0) {
-      const natLeft = r.left - bar.dx;
-      const minL = wr.left + 6, maxR = wr.right - 6;
-      if (natLeft < minL) dx = minL - natLeft;
-      else if (natLeft + r.width > maxR) dx = Math.max(minL - natLeft, maxR - (natLeft + r.width));
-    }
-    const below = objR.top - r.height - 14 < wr.top + 4;
-    if (Math.abs(dx - bar.dx) > 0.5 || below !== bar.below) setBar({ dx, below });
+    const r = obj.getBoundingClientRect();
+    const bw = el.offsetWidth, bh = el.offsetHeight;
+    const vw = window.innerWidth;
+    const minL = Math.max(4, wr.left + 8), maxL = Math.min(vw - 4, wr.right - 8) - bw;
+    let left = r.left + r.width / 2 - bw / 2;
+    left = maxL < minL ? Math.max(4, (vw - bw) / 2) : Math.min(maxL, Math.max(minL, left));
+    let top = r.top - 12 - bh, below = false;
+    if (top < wr.top + 8) { top = r.bottom + 12; below = true; }
+    top = Math.min(top, wr.bottom - bh - 8);
+    const hidden = r.bottom < wr.top || r.top > wr.bottom || r.right < wr.left || r.left > wr.right;
+    const next = { left: Math.round(left), top: Math.round(top), ax: Math.round(r.left + r.width / 2 - left), below, hidden };
+    if (!bar || next.left !== bar.left || next.top !== bar.top || next.below !== bar.below || next.hidden !== bar.hidden || next.ax !== bar.ax) setBar(next);
   });
   useEffect(() => {
-    if (!selected) return;
-    const wrap = barRef.current?.closest('.canvasWrap');
+    if (!selected) { setBar(null); return; }
+    const wrap = objRef.current?.closest('.canvasWrap');
     if (!wrap) return;
     let raf = 0;
     const fn = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => setTick((t) => t + 1)); };
     wrap.addEventListener('scroll', fn, { passive: true });
     window.addEventListener('resize', fn);
-    return () => { wrap.removeEventListener('scroll', fn); window.removeEventListener('resize', fn); cancelAnimationFrame(raf); };
+    window.visualViewport?.addEventListener('resize', fn);
+    const ro = new ResizeObserver(fn);
+    ro.observe(wrap);
+    return () => { wrap.removeEventListener('scroll', fn); window.removeEventListener('resize', fn); window.visualViewport?.removeEventListener('resize', fn); ro.disconnect(); cancelAnimationFrame(raf); };
   }, [selected]);
+  void tick;
   // keep the text caret when pressing the grip / toolbar
   const keepFocus = (e: React.MouseEvent) => e.preventDefault();
 
@@ -587,7 +672,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     const h = el.scrollHeight / zoom;
     if (Math.abs(w - o.w) > 0.5 || Math.abs(h - o.h) > 0.5) onChange({ w, h }, true);
   });
-  useEffect(() => { if (editing) taRef.current?.focus(); }, [editing]);
+  useEffect(() => { if (editing) taRef.current?.focus({ preventScroll: true }); }, [editing]);
 
   const style: React.CSSProperties = { left: bx * zoom, top: by * zoom, width: Math.max(bw * zoom, 1), height: Math.max(bh * zoom, 1) };
   let inner: React.ReactNode = null;
@@ -646,39 +731,63 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
         </svg>
       );
       break;
+    case 'mark': {
+      const W = o.w * zoom, H = o.h * zoom, sw = Math.min(W, H) * 0.13;
+      inner = (
+        <svg width="100%" height="100%" viewBox={`0 0 ${W} ${H}`}>
+          {o.kind === 'dot' && <circle cx={W / 2} cy={H / 2} r={Math.min(W, H) * 0.32} fill={o.color} />}
+          {o.kind === 'check' && <polyline points={`${W * 0.14},${H * 0.54} ${W * 0.4},${H * 0.8} ${W * 0.88},${H * 0.2}`} fill="none" stroke={o.color} strokeWidth={sw} strokeLinecap="round" strokeLinejoin="round" />}
+          {o.kind === 'cross' && <path d={`M${W * 0.2} ${H * 0.2}L${W * 0.8} ${H * 0.8}M${W * 0.8} ${H * 0.2}L${W * 0.2} ${H * 0.8}`} stroke={o.color} strokeWidth={sw} strokeLinecap="round" />}
+        </svg>
+      );
+      break;
+    }
   }
   const resizable = o.type !== 'line' && o.type !== 'draw';
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
+  const step = (d: number) => {
+    if (o.type === 'text') onChange({ size: Math.min(200, Math.max(4, Math.round(o.size) + d)) } as any, false);
+    else if (o.type === 'mark') { const w = Math.min(60, Math.max(4, Math.round(o.w) + d)); onChange({ w, h: w, x: o.x - (w - o.w) / 2, y: o.y - (w - o.h) / 2 } as any, false); }
+  };
+  const sized = o.type === 'text' || o.type === 'mark';
+  const toolbar = selected && typeof document !== 'undefined' ? createPortal(
+    <div ref={barRef} className={`objbar${bar?.below ? ' below' : ''}${dragging ? ' moving' : ''}`} role="toolbar" aria-label="Object actions"
+      style={{ left: bar?.left ?? -9999, top: bar?.top ?? -9999, visibility: !bar || bar.hidden ? 'hidden' : 'visible', ['--ax' as any]: `${bar?.ax ?? 0}px` }}
+      onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>
+      <button type="button" className="grip" aria-label="Move" title="Drag to move"
+        onPointerDown={start('grip')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+        <Icon name="move" size={18} />
+      </button>
+      <span className="sep" />
+      {sized && (
+        <>
+          <button type="button" aria-label="Smaller" title="Smaller" onClick={() => step(-1)}><Icon name="minus" size={16} /></button>
+          <span className="fsize" aria-label="Size">{Math.round(o.type === 'text' ? o.size : o.w)}</span>
+          <button type="button" aria-label="Larger" title="Larger" onClick={() => step(1)}><Icon name="plus" size={16} /></button>
+          <span className="sep" />
+        </>
+      )}
+      {o.type === 'text' && !editing && (
+        <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="pencil" size={18} /></button>
+      )}
+      <button type="button" aria-label="Duplicate" title="Duplicate (Ctrl+D)" onClick={onDuplicate}><Icon name="copy" size={18} /></button>
+      <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={18} /></button>
+      {mobile && !editing && o.type !== 'whiteout' && (
+        <><span className="sep" /><button type="button" aria-label="More options" title="More options" onClick={onMore}><Icon name="more" size={18} /></button></>
+      )}
+    </div>, document.body) : null;
   return (
-    <div className={`obj${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${editing ? ' editing' : ''}`} style={style}
+    <div ref={objRef} data-id={o.id} className={`obj${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${editing ? ' editing' : ''}`} style={style}
       onPointerDown={start('move')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
       onDoubleClick={() => o.type === 'text' && onEditing(true)}>
       {inner}
-      {selected && (
-        <div ref={barRef} className={`objbar${bar.below ? ' below' : ''}${dragging ? ' moving' : ''}`}
-          style={{ transform: `translateX(calc(-50% + ${bar.dx}px))`, ['--ax' as any]: `calc(50% - ${bar.dx}px)` }}
-          onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>
-          <button type="button" className="grip" aria-label="Move" title="Drag to move"
-            onPointerDown={start('grip')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-            <Icon name="move" size={18} />
-          </button>
-          <span className="sep" />
-          {o.type === 'text' && (
-            <>
-              <button type="button" aria-label="Smaller text" title="Smaller" onClick={() => onChange({ size: Math.max(4, Math.round(o.size) - 1) } as any, false)}><Icon name="minus" size={18} /></button>
-              <span className="fsize" aria-label="Font size">{Math.round(o.size)}</span>
-              <button type="button" aria-label="Larger text" title="Larger" onClick={() => onChange({ size: Math.min(200, Math.round(o.size) + 1) } as any, false)}><Icon name="plus" size={18} /></button>
-              <span className="sep" />
-            </>
-          )}
-          {o.type === 'text' && !editing && (
-            <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="edit" size={18} /></button>
-          )}
-          <button type="button" aria-label="Duplicate" title="Duplicate" onClick={onDuplicate}><Icon name="copy" size={18} /></button>
-          <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={18} /></button>
-        </div>
+      {toolbar}
+      {selected && resizable && !editing && (
+        <>
+          <i className="dotc" style={{ left: -5, top: -5 }} /><i className="dotc" style={{ right: -5, top: -5 }} /><i className="dotc" style={{ left: -5, bottom: -5 }} />
+          <div className="handle" aria-label="Resize" onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><Icon name="resize" size={10} /></div>
+        </>
       )}
-      {selected && resizable && !editing && <div className="handle" onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} />}
       {selected && isLine && (
         <div className="handle" style={{ left: (o.x2 - bx) * zoom - 9, top: (o.y2 - by) * zoom - 9, right: 'auto', bottom: 'auto', cursor: 'move' }}
           onPointerDown={start('end')} onPointerMove={move} onPointerUp={end} />
