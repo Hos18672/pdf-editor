@@ -19,6 +19,25 @@ export interface TextEdit {
   fgColor?: string;
   /** free space above / below the baseline (user space) before the neighbouring lines */
   room?: { up: number; down: number };
+  /** look of the text printed in a scan; edits on scans are drawn as a matching picture */
+  scan?: ScanStyle;
+}
+
+export interface ScanStyle {
+  family: 'Carlito' | 'Arimo' | 'Tinos' | 'Roboto';
+  bold: boolean;
+  /** font size / the line's region height */
+  sizeRatio: number;
+  /** horizontal stretch that matches the scan's letter widths */
+  stretch: number;
+  /** blur radius / font size */
+  blur: number;
+  /** how well the font matched (0–1) */
+  score: number;
+  /** where the printed letters start / sit relative to the text layer (× font size; dy > 0 = lower) */
+  dx?: number; dy?: number;
+  /** horizontal extent of the printed letters relative to the layer start (× font size) */
+  inkX0?: number; inkX1?: number;
 }
 
 interface Base {

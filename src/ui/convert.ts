@@ -143,6 +143,12 @@ async function htmlToPdf(doc: PDFDocument, html: string, css: string, opt: Conve
     }
     const n = cuts.length - 1;
     const scale = 2;
+    // the text as laid out (lines with position and size), written as an invisible layer so the
+    // converted PDF can be searched and edited like an OCR'd scan
+    const lines = layoutLines(root);
+    const { addTextLayer } = await import('../engine/textLayer');
+    const { StandardFonts } = await import('pdf-lib');
+    const helv = await doc.embedFont(StandardFonts.Helvetica);
     // print each page through a window the size of the page
     host.style.overflow = 'hidden';
     for (let i = 0; i < n; i++) {
@@ -154,11 +160,57 @@ async function htmlToPdf(doc: PDFDocument, html: string, css: string, opt: Conve
       const img = await doc.embedJpg(new Uint8Array(await jpg.arrayBuffer()));
       const page = doc.addPage([pw, ph]);
       page.drawImage(img, { x: m, y: ph - m - h / PX, width: cw / PX, height: h / PX });
+      const onPage = lines.filter((l) => l.base >= y0 && l.base < y0 + h);
+      await addTextLayer(doc, page, onPage.map((l) => ({
+        text: l.text, size: l.size / PX,
+        x0: m + l.x0 / PX, x1: m + l.x1 / PX, y0: ph - m - (l.base - y0) / PX, y1: ph - m - (l.base - y0) / PX,
+      })), helv);
       progress(0.3 + 0.65 * ((i + 1) / n));
     }
   } finally {
     host.remove();
   }
+}
+
+/** Lines of text as laid out in the conversion box (CSS px, relative to its top-left; scaled boxes included). */
+function layoutLines(root: HTMLElement): { text: string; x0: number; x1: number; base: number; size: number }[] {
+  const r0 = root.getBoundingClientRect();
+  type W = { t: string; x0: number; x1: number; top: number; bottom: number; size: number; block: Element | null };
+  const words: W[] = [];
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const range = document.createRange();
+  for (let node = walker.nextNode() as Text | null; node; node = walker.nextNode() as Text | null) {
+    const el = node.parentElement;
+    if (!el || !node.data.trim()) continue;
+    const cs = getComputedStyle(el);
+    if (cs.visibility === 'hidden' || cs.display === 'none') continue;
+    const k = el.getBoundingClientRect().height && el.offsetHeight ? el.getBoundingClientRect().height / el.offsetHeight : 1;
+    const size = parseFloat(cs.fontSize) * (k || 1);
+    const block = el.closest('p,li,td,th,h1,h2,h3,h4,h5,h6,pre,blockquote,dt,dd,figcaption,div');
+    for (const m of node.data.matchAll(/\S+/g)) {
+      range.setStart(node, m.index!);
+      range.setEnd(node, m.index! + m[0].length);
+      const rects = range.getClientRects();
+      const rc = rects[0];
+      if (!rc || !rc.width) continue;
+      words.push({ t: m[0], x0: rc.left - r0.left, x1: rc.right - r0.left, top: rc.top - r0.top, bottom: rc.bottom - r0.top, size, block });
+    }
+  }
+  // words on the same visual line of the same block, close together → one line
+  words.sort((a, b) => a.top - b.top || a.x0 - b.x0);
+  const lines: { ws: W[] }[] = [];
+  for (const w of words) {
+    const l = lines.find((x) => {
+      const last = x.ws[x.ws.length - 1];
+      return last.block === w.block && Math.abs(last.bottom - w.bottom) < w.size * 0.4 && w.x0 >= last.x1 - 1 && w.x0 - last.x1 < w.size * 1.5;
+    });
+    if (l) l.ws.push(w); else lines.push({ ws: [w] });
+  }
+  return lines.map(({ ws }) => {
+    const size = Math.max(...ws.map((w) => w.size));
+    const bottom = Math.max(...ws.map((w) => w.bottom));
+    return { text: ws.map((w) => w.t).join(' '), x0: ws[0].x0, x1: ws[ws.length - 1].x1, base: bottom - size * 0.22, size };
+  });
 }
 
 /** Prefix every selector so a document's own CSS stays inside the conversion box. */

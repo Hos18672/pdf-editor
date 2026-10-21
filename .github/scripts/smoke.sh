@@ -37,6 +37,8 @@ print('' if not m else f'{(int(m[1])+int(m[3]))//2} {(int(m[2])+int(m[4]))//2}')
     adb forward tcp:9222 "localabstract:$sock2"
     node .github/scripts/cdp-eval.mjs "JSON.stringify({ runs: document.querySelectorAll('.run').length, file: document.querySelector('.fname')?.textContent, errors: window.__pageErrors })" | tee -a out/flow.txt
     node .github/scripts/cdp-eval.mjs "JSON.stringify({ safeT: getComputedStyle(document.documentElement).getPropertyValue('--safe-t'), safeB: getComputedStyle(document.documentElement).getPropertyValue('--safe-b'), h: innerHeight, dpr: devicePixelRatio })" | tee -a out/flow.txt
+    # text recognition prerequisites inside the WebView: bundled files over XHR (file://) and a blob worker
+    node .github/scripts/cdp-eval.mjs "new Promise((r) => { const x = new XMLHttpRequest(); x.open('GET', location.href.replace(/[^/]*$/, '') + 'tesseract/deu.traineddata.gz'); x.responseType = 'arraybuffer'; x.onload = () => { const w = new Worker(URL.createObjectURL(new Blob(['postMessage(typeof WebAssembly)']))); w.onmessage = (e) => r('xhr ' + x.status + ' ' + x.response.byteLength + ' worker ' + e.data); w.onerror = () => r('worker error'); }; x.onerror = () => r('xhr error'); x.send(); })" | tee -a out/flow.txt
     # tap the first text line with a real touch and check the page shrinks above the on-screen keyboard
     adb shell settings put secure show_ime_with_hard_keyboard 1
     pos=$(node .github/scripts/cdp-eval.mjs "(() => { const r = document.querySelector('.run').getBoundingClientRect(); return Math.round((r.left + 6) * devicePixelRatio) + ' ' + Math.round((r.top + r.height / 2) * devicePixelRatio); })()" | tr -d '"')

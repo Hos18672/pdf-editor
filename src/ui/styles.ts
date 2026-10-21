@@ -747,4 +747,15 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
   .frow .range-in { width: 84px; }
 }
 .tscreen > .tbody:last-child .tmain { padding-bottom: calc(24px + var(--safe-b)); }
+.ocrbar { position: absolute; z-index: 9; top: calc(88px + var(--safe-t)); left: 50%; transform: translateX(-50%); width: min(620px, calc(100% - 32px)); display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 12px 12px 14px; border-radius: 22px; background: var(--surface); box-shadow: var(--shadow-lift); animation: pe-in .26s var(--ease); }
+.bp-tablet .ocrbar, .bp-desktop .ocrbar { left: calc(50% + 50px); width: min(620px, calc(100% - 148px)); }
+.ocrbar .oi { width: 44px; height: 44px; flex: none; border-radius: 14px; background: var(--tint-change); color: var(--on-tint); display: grid; place-items: center; }
+.ocrbar .ot { flex: 1 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 2px; padding-right: 28px; }
+.ocrbar .ot b { font-weight: 700; font-size: 15px; }
+.ocrbar .ot span { font-size: 13px; color: var(--muted); line-height: 1.4; }
+.ocrbar .oa { display: flex; gap: 8px; margin-left: auto; }
+.ocrbar .oa .btn { height: 42px; }
+.ocrbar .x { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; }
+.bp-mobile .ocrbar { top: calc(76px + var(--safe-t)); }
+.bp-mobile .ocrbar .oa { width: 100%; } .bp-mobile .ocrbar .oa .btn { flex: 1; }
 `;

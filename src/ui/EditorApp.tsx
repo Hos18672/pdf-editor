@@ -28,6 +28,8 @@ const fontFaces = () => {
     `@font-face{font-family:"${family}";src:url("${u}${file}") format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
   return [
     ...[400, 500, 600, 700, 800].map((w) => face('Schibsted Grotesk', `schibsted-grotesk-latin-${w}-normal.woff2`, w)),
+    // lettering for edits on scans / picture pages (matched to the scan)
+    ...['carlito', 'arimo', 'tinos', 'roboto'].flatMap((f) => [400, 700].map((w) => face(`PE ${f[0].toUpperCase()}${f.slice(1)}`, `${f}-latin-${w}-normal.woff2`, w))),
     face('Caveat', 'caveat-latin-600-normal.woff2', 400),
     face('Dancing Script', 'dancing-script-latin-600-normal.woff2', 400),
     face('Great Vibes', 'great-vibes-latin-400-normal.woff2', 400),
@@ -134,6 +136,12 @@ export default function EditorApp(host: HostProps) {
       if (r) open(r.name, fromB64(r.base64));
     } else inputRef.current?.click();
   };
+  // the same document with new bytes (e.g. after text recognition): keeps the edit history
+  const replaceBytes = useCallback(async (bytes: Uint8Array) => {
+    const doc = await openPdf(bytes);
+    setPdf((old: any) => { if (old && old !== doc) setTimeout(() => old.destroy?.(), 2000); return doc; });
+    setFile((f) => (f ? { name: f.name, bytes } : f));
+  }, []);
   const close = () => { setFile(null); setPdf(null); setInfos([]); setRoute({ name: 'home' }); };
   const openTools = (back: 'home' | 'editor') => { startAfterOpen.current = undefined; setRoute({ name: 'tools', tool: 'hub', back }); };
   const quick = (q: QuickAction) => {
@@ -148,7 +156,7 @@ export default function EditorApp(host: HostProps) {
       {route.name === 'editor' && file && pdf ? (
         <Editor key={file.name + file.bytes.length} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
-          toast={setToastMsg} setBusy={setBusy} />
+          toast={setToastMsg} setBusy={setBusy} onReplace={replaceBytes} />
       ) : route.name === 'tools' ? (
         <Tools initial={route.tool} bp={bp} host={host} toast={setToastMsg} setBusy={setBusy}
           current={file && pdf ? { name: file.name, bytes: file.bytes, pdf, pages: hist.snap.pages, changed: hist.past > 0 } : null}

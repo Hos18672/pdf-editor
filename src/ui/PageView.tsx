@@ -10,6 +10,7 @@ import { gesture } from './gesture';
 import { Icon } from './icons';
 import { isRefocusing, editingHeld } from './hooks';
 import { FormLayer, FormField } from './Fields';
+import { matchScanStyle, scanStyles } from './scanStyle';
 
 export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
 
@@ -170,6 +171,24 @@ export function PageView(p: Props) {
   }, [visible, zoom, p.pdf, p.src, source, sourceKey]);
   // the canvas already shows the edited text with the document's real glyphs
   const live = p.editKey !== '' && shownKey === p.editKey;
+
+  // Opening a line for editing: note the look of its letters on the page (font, weight, width,
+  // softness), so the edit can be drawn to match when the text is part of a scan / picture.
+  useEffect(() => {
+    const key = p.editing;
+    if (!key || !key.startsWith(p.src + ':') || scanStyles.has(key) || p.edits[key] || source !== p.pdf) return;
+    const run = p.data?.runs.find((r) => r.key === key);
+    const canvas = canvasRef.current;
+    const colors = p.data?.colors[key];
+    if (!run || !canvas || !colors || !canvas.width) return;
+    const b = runBox(run, info.vm);
+    if (Math.abs(b.angle) > 0.02) return;
+    const k = canvas.width / info.w;
+    matchScanStyle(canvas, { x: b.x * k, y: b.y * k, w: b.w * k, size: b.h * k }, run.str, colors)
+      .then((st) => { if (st) scanStyles.set(key, st); })
+      .catch(() => null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [p.editing]);
 
   const local = (e: { clientX: number; clientY: number }) =>
     toLocal(e.clientX, e.clientY, pageRef.current!, info.w, info.h, zoom, rotation);

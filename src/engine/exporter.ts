@@ -5,6 +5,7 @@ import {
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
+import { renderScanText } from './scanText';
 import type { ExportInput, EditorObject, FontFamily, TextEdit } from './types';
 
 const f = fmtNum;
@@ -145,6 +146,22 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         const a = hexToRgb(e.fgColor), b = hexToRgb(e.bgColor);
         return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 0.6 ? e.fgColor : '#000000';
       };
+      // Scans / picture pages: draw the new text as a picture that matches the scan's own lettering
+      if (hidden && e.scan) {
+        const img = await renderScanText(lines, e.scan, e.region.height * e.scan.sizeRatio * e.sizeScale, e.color ?? inkOf()).catch(() => null);
+        if (img) {
+          const ref = (await doc.embedPng(img.png)).ref;
+          const key = leaf.newXObject('ImT', ref).asString();
+          const [ux, uy] = e.region.u;
+          // the printed letters' own start and baseline (the hidden layer can be a little off)
+          const sh = e.region.height, dx = (e.scan.dx ?? 0) * sh, dy = (e.scan.dy ?? 0) * sh;
+          const ox = e.region.o[0] + ux * dx + uy * dy, oy = e.region.o[1] + uy * dx - ux * dy;
+          // bottom-left corner of the picture: left of the baseline start, below the last line
+          const bx = ox - ux * img.left + uy * img.below, by = oy - uy * img.left - ux * img.below;
+          add += `q ${f(ux * img.w)} ${f(uy * img.w)} ${f(-uy * img.h)} ${f(ux * img.h)} ${f(bx)} ${f(by)} cm ${key} Do Q\n`;
+          continue;
+        }
+      }
       if (hits.length && !glyphless) {
         // first glyph along the reading direction
         const [ux, uy] = e.region.u;
@@ -305,9 +322,13 @@ function whiteoutRegion(e: TextEdit, scan = false): string {
     desc = Math.min(h * 0.42, e.room?.down ?? h * 0.42);
     asc = Math.min(h * 1.05, e.room?.up ?? h * 1.05);
   }
+  // on a scan, cover the printed letters themselves (the hidden layer can be shorter or offset)
+  const l = Math.min(0, scan && e.scan?.inkX0 !== undefined ? e.scan.inkX0 * h : 0) - pad;
+  const r = Math.max(w, scan && e.scan?.inkX1 !== undefined ? e.scan.inkX1 * h : w) + pad;
   const pts: [number, number][] = [
-    [-pad, -desc], [w + pad, -desc], [w + pad, asc], [-pad, asc],
-  ].map(([t, s]) => [ox + t * ux - s * uy, oy + t * uy + s * ux]);
+    [l, -desc], [r, -desc], [r, asc], [l, asc],
+  ].map(([t, s]) => [t, s - (scan && e.scan?.dy ? e.scan.dy * h : 0)]) // follow the printed baseline
+    .map(([t, s]) => [ox + t * ux - s * uy, oy + t * uy + s * ux]);
   return `q ${rgb(e.bgColor, 'rg')} ${pts.map(([x, y], i) => `${f(x)} ${f(y)} ${i ? 'l' : 'm'}`).join(' ')} h f Q\n`;
 }
 

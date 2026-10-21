@@ -11,6 +11,8 @@ import { Thumb } from './Thumb';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, OBJ_TITLE, Stepper, toolHasProps, fontLabel, Toggle } from './Panel';
 import { readFields, FormField, isFilled } from './Fields';
 import { exportPdf } from '../engine/exporter';
+import { pageNeedsText } from '../engine/textLayer';
+import { scanStyles } from './scanStyle';
 import type { EditorObject, TextEdit, FontFamily } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
@@ -102,13 +104,17 @@ const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', '
 /** What the editor opens with when started from the tools page. */
 export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages';
 
-export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start }: {
+export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onReplace }: {
   host: HostProps; file: { name: string; bytes: Uint8Array }; pdf: any; infos: PageInfo[];
   hist: ReturnType<typeof useHistory>; onClose: () => void; onTools: () => void;
   theme: Theme; onTheme: () => void; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
   start?: EditorStart;
+  /** reload the same document from new bytes (keeps the edit history) */
+  onReplace?: (bytes: Uint8Array) => Promise<void>;
 }) {
   const { snap, commit } = hist;
+  // looks of scanned lines belong to this document
+  useState(() => { scanStyles.clear(); return 0; });
   const mobile = bp === 'mobile', tablet = bp === 'tablet', large = bp === 'large', desk = bp === 'desktop' || large;
   const [tool, setTool] = useState<Tool>('edit');
   const [style, setStyle] = useState<ToolStyle>({
@@ -453,6 +459,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         bgColor: pageData[page]?.colors[key]?.bg ?? '#ffffff',
         fgColor: pageData[page]?.colors[key]?.fg,
         room: (rooms[page] ??= lineRooms(pageData[page].runs))[key],
+        scan: scanStyles.get(key),
       });
     }
     return out;
@@ -523,6 +530,65 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const runs = pageData[order[pi]]?.runs ?? [];
       const i = order[pi] === page ? runs.findIndex((r) => r.key === key) + 1 : 0;
       if (runs[i]) { setSelected(runs[i].key); setEditing(runs[i].key); return; }
+    }
+  };
+
+  // ----- pages that are only a picture (scans, image-only exports): offer text recognition -----
+  const [pictureOnly, setPictureOnly] = useState<number[]>([]);
+  const [ocrHidden, setOcrHidden] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      const OPS = (window as any).pdfjsLib?.OPS ?? {};
+      const imgOps = new Set([OPS.paintImageXObject, OPS.paintInlineImageXObject, OPS.paintImageXObjectRepeat, OPS.paintJpegXObject].filter((x) => x !== undefined));
+      const noText: number[] = [];
+      for (let i = 0; i < pdf.numPages && alive; i++) {
+        try {
+          const tc = await (await pdf.getPage(i + 1)).getTextContent();
+          if (pageNeedsText(tc.items)) noText.push(i);
+        } catch { /* skip */ }
+      }
+      // a few text-less pages may just be blank: check those for a picture (decoding is slow, so only then)
+      let found = noText;
+      if (noText.length && noText.length <= 3) {
+        found = [];
+        for (const i of noText) {
+          try {
+            const ol = await (await pdf.getPage(i + 1)).getOperatorList();
+            if (ol.fnArray.some((fn: number) => imgOps.has(fn))) found.push(i);
+          } catch { /* skip */ }
+        }
+      }
+      if (alive) setPictureOnly(found);
+    })();
+    return () => { alive = false; };
+  }, [pdf]);
+  const recognize = async (pages: number[]) => {
+    if (!onReplace || !pages.length) return;
+    const title = 'Recognising text';
+    setBusy({ title, detail: 'Starting text recognition on this device…', progress: 0 });
+    try {
+      const [{ loadOcr, recognizePage }, { addTextLayer }, { PDFDocument, StandardFonts }] =
+        await Promise.all([import('./ocr'), import('../engine/textLayer'), import('pdf-lib')]);
+      const worker = await loadOcr((p) => setBusy({ title, detail: 'Starting text recognition on this device…', progress: p * 0.08 }));
+      const doc = await PDFDocument.load(file.bytes, { ignoreEncryption: true, updateMetadata: false });
+      const helv = await doc.embedFont(StandardFonts.Helvetica);
+      let lines = 0;
+      for (let k = 0; k < pages.length; k++) {
+        setBusy({ title, detail: `Page ${pages[k] + 1} · ${k + 1} of ${pages.length}. Nothing is uploaded.`, progress: 0.08 + 0.9 * (k / pages.length) });
+        const found = await recognizePage(worker, pdf, pages[k]);
+        lines += found.length;
+        await addTextLayer(doc, doc.getPage(pages[k]), found, helv);
+      }
+      setBusy({ title, detail: 'Preparing the editable pages…', progress: 0.99 });
+      const bytes = await doc.save({ useObjectStreams: true });
+      await onReplace(bytes);
+      toast(lines ? { msg: `Text recognised (${lines} lines). Tap a line to edit it.` } : { msg: 'No text found on these pages.', kind: 'err' });
+    } catch (e: any) {
+      console.warn('ocr failed', e);
+      toast({ msg: 'Text recognition failed on this device.', kind: 'err' });
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -829,6 +895,22 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           {view === 'pages' && (
             <Organizer pdf={pdf} pages={snap.pages} mobile={mobile} onDone={() => setView('doc')}
               onChange={(pages) => commit((s) => ({ ...s, pages }))} />
+          )}
+          {pictureOnly.length > 0 && !ocrHidden && view === 'doc' && onReplace && (
+            <div className="ocrbar" role="region" aria-label="Text recognition">
+              <span className="oi"><Icon name="text-t:duotone" size={22} /></span>
+              <div className="ot">
+                <b>{pictureOnly.length === snap.pages.length ? 'This PDF is made of pictures' : `${pictureOnly.length} ${pictureOnly.length === 1 ? 'page is a picture' : 'pages are pictures'}`}</b>
+                <span>Its text can't be edited yet. Recognise it on this device; nothing is uploaded.</span>
+              </div>
+              <div className="oa">
+                {pictureOnly.length > 1 && pictureOnly.includes(curPage) && (
+                  <button className="btn outline" onClick={() => recognize([curPage])}>This page</button>
+                )}
+                <button className="btn primary" onClick={() => recognize(pictureOnly)}>{pictureOnly.length > 1 ? `All ${pictureOnly.length} pages` : 'Recognise text'}</button>
+              </div>
+              <button className="ibtn muted x" aria-label="Hide" onClick={() => setOcrHidden(true)}><Icon name="close" size={18} /></button>
+            </div>
           )}
           {!mobile && view === 'doc' && (
             <div className="pagepill" aria-live="polite"><b>{Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1)}</b>&nbsp;/ {snap.pages.length}</div>
