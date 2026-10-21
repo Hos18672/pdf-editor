@@ -287,10 +287,18 @@ export class PageReader {
     if (y1 - y0 < 4) return;
     const { data } = await w.recognize(toPgm(img.gray, img.w, img.h, y0, y1), {}, { blocks: true, text: false, hocr: false, tsv: false });
     const bandH = y1 - y0;
-    const lines = linesOf(data, (x, y) => img.toPdf(x, y + y0), 1 / img.s)
+    const all = linesOf(data, (x, y) => img.toPdf(x, y + y0), 1 / img.s);
+    if ((globalThis as any).__ocrDebug) console.log('ocr band', src, y0, y1, all.map((l) => `${Math.round(l.conf)} ${l.text}`));
+    const lines = all.filter((l: OcrLine) => {
+      // specks, rules and table borders read as stray symbols
+      const t = l.text.replace(/\s/g, '');
+      const an = (t.match(/[\p{L}\p{N}]/gu) ?? []).length;
+      if (an < 2 || an < t.length * 0.5) return false;
       // a line cut by the band's edge reads as noise
-      .filter((l: OcrLine) => l.conf >= 55 || (l.box.y0 > 1 && l.box.y1 < bandH - 2))
-      .filter((l: OcrLine) => !tap || l.conf >= 30);
+      if (l.conf < 55 && (l.box.y0 <= 1 || l.box.y1 >= bandH - 2)) return false;
+      // in the background only lines read with confidence; a tap shows what is there
+      return l.conf >= (tap ? 30 : 50);
+    });
     this.add(src, img, lines);
   }
 
