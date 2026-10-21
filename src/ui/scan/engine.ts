@@ -1,7 +1,8 @@
 // Scanner plumbing on the main thread: decode photos, find the document, render pages in a worker.
-import { detectQuad, luminance, refineQuad, type Rgba } from './detect';
+import { detectKernels, luminance } from './detect';
+import { orientKernels, type Orientation } from './orient';
 import { aspectOf, dist, FORMATS, fullQuad, snapRatio, type Quad } from './geom';
-import { scanKernels, type Filter, type Job, type JobResult, type Kernels } from './kernels';
+import { scanKernels, type Filter, type JobResult, type Kernels } from './kernels';
 
 export type ScanMode = 'doc' | 'id' | 'passport' | 'receipt';
 export type Quality = 'small' | 'standard' | 'high';
@@ -95,19 +96,124 @@ export function pixelsOf(src: CanvasImageSource, max: number, region?: { x: numb
   return { w: W, h: H, data, scale };
 }
 
+// ---------------------------------------------------------------- workers
+// A small pool of workers does all pixel work (finding the page, cropping, cleaning, orientation),
+// so the screen never freezes and two pages are processed at the same time. Photos are handed over
+// as ImageBitmaps (resized off the main thread) when the browser can read them in a worker.
+
+type Img = { w: number; h: number; data: Uint8ClampedArray };
+type Src = { bmp: ImageBitmap } | { img: Img };
+interface Task { msg: any; transfer: Transferable[]; ok: (r: any) => void; fail: (e: any) => void; low: boolean }
+
+const workers: { w: Worker; busy: Task | null }[] = [];
+let poolBroken = false;
+const queue: Task[] = [];
+let seq = 0;
+let local: { K: Kernels; D: ReturnType<typeof detectKernels>; O: ReturnType<typeof orientKernels> } | null = null;
+const canBitmap = typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap === 'function';
+
+function workerCode() {
+  return `var K=(${scanKernels.toString()})(),D=(${detectKernels.toString()})(),O=(${orientKernels.toString()})();
+function px(s){if(s.img)return s.img;var b=s.bmp,c=new OffscreenCanvas(b.width,b.height),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(b,0,0);b.close();return{w:c.width,h:c.height,data:x.getImageData(0,0,c.width,c.height).data};}
+function shrink(im,max){var k=Math.max(1,Math.ceil(Math.max(im.w,im.h)/max));if(k===1)return im;var w=Math.floor(im.w/k),h=Math.floor(im.h/k),o=new Uint8ClampedArray(w*h*4);for(var y=0;y<h;y++)for(var x=0;x<w;x++){var i=((y*k)*im.w+x*k)*4,j=(y*w+x)*4;o[j]=im.data[i];o[j+1]=im.data[i+1];o[j+2]=im.data[i+2];o[j+3]=255;}return{w:w,h:h,data:o};}
+self.onmessage=function(e){var m=e.data;try{
+if(m.type==='process'){m.job.src=px(m.src);var r=K.process(m.job);var o=m.orient?O.textOrientation(shrink(r.img,1000)):undefined;self.postMessage({id:m.id,r:{img:r.img,blur:r.blur,times:r.times,orient:o}},[r.img.data.buffer]);}
+else if(m.type==='find'){var s=px(m.small),d=D.detectQuad(s,m.opts),q=null;if(d){var md=px(m.mid),k=md.w/s.w;q=D.refineQuad(D.luminance(md),md.w,md.h,d.quad.map(function(p){return{x:p.x*k,y:p.y*k};}));q=q.map(function(p){return{x:p.x/md.w,y:p.y/md.h};});}else if(m.mid.bmp)m.mid.bmp.close();self.postMessage({id:m.id,r:{det:d,quad:q}});}
+}catch(err){self.postMessage({id:m.id,err:String(err&&err.stack||err)});}};`;
+}
+
+function startPool() {
+  if (workers.length || poolBroken) return;
+  try {
+    const url = URL.createObjectURL(new Blob([workerCode()], { type: 'application/javascript' }));
+    const n = (navigator.hardwareConcurrency ?? 2) >= 4 ? 2 : 1;
+    for (let i = 0; i < n; i++) {
+      const w = new Worker(url);
+      const slot = { w, busy: null as Task | null };
+      w.onmessage = (e) => {
+        const t = slot.busy; slot.busy = null;
+        if (t) { if (e.data.err) t.fail(new Error(e.data.err)); else t.ok(e.data.r); }
+        pump();
+      };
+      w.onerror = (e) => {
+        console.warn('scan worker failed', e.message);
+        poolBroken = true;
+        for (const s of workers) { s.w.terminate(); s.busy?.fail(new Error('worker')); }
+        workers.length = 0;
+        for (const t of queue.splice(0)) t.fail(new Error('worker'));
+      };
+      workers.push(slot);
+    }
+  } catch (e) { console.warn('scan workers unavailable', e); poolBroken = true; }
+}
+
+function pump() {
+  for (const slot of workers) {
+    if (slot.busy) continue;
+    const i = queue.findIndex((t) => !t.low);
+    const t = i >= 0 ? queue.splice(i, 1)[0] : queue.shift();
+    if (!t) return;
+    slot.busy = t;
+    slot.w.postMessage(t.msg, t.transfer);
+  }
+}
+
+function post<T>(msg: any, transfer: Transferable[], low = false): Promise<T> {
+  startPool();
+  if (!workers.length) return Promise.reject(new Error('no workers'));
+  return new Promise<T>((ok, fail) => { queue.push({ msg: { ...msg, id: ++seq }, transfer, ok, fail, low }); pump(); });
+}
+
+const localKernels = () => (local ??= { K: scanKernels(), D: detectKernels(), O: orientKernels() });
+
+/** a region of the photo at a given size, as a transferable bitmap (or pixels when that's not possible) */
+async function sourceOf(bmp: ImageBitmap | HTMLCanvasElement, region: { x: number; y: number; w: number; h: number }, W: number, H: number): Promise<Src> {
+  if (canBitmap && !workers.length && !poolBroken) startPool();
+  if (canBitmap && workers.length) {
+    try {
+      const b = await createImageBitmap(bmp, region.x, region.y, region.w, region.h, { resizeWidth: W, resizeHeight: H, resizeQuality: 'high' } as any);
+      return { bmp: b };
+    } catch { /* fall back */ }
+  }
+  const p = pixelsOf(bmp, Math.max(W, H), region);
+  return { img: { w: p.w, h: p.h, data: p.data } };
+}
+const transferOf = (s: Src): Transferable[] => ('bmp' in s ? [s.bmp] : [s.img.data.buffer]);
+
 // ---------------------------------------------------------------- finding the page
 export interface Found { quad: Quad; sure: boolean; format: string | null; ratio: number }
 
-/** Finds the document in a photo (corners refined on a 1600 px copy). */
+/** timing log for tuning (window.__scanDebug = 1) */
+export const tlog = (label: string, t0: number) => { if ((window as any).__scanDebug) console.log(`scan ${label} ${Math.round(performance.now() - t0)}ms`); };
+
+/** Finds the document in a photo (corners refined on a 1600 px copy), in a worker when possible. */
 export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: ScanMode): Promise<Found> {
   const { w, h } = sizeOf(bmp);
-  const small = pixelsOf(bmp, 512);
-  const det = detectQuad(small, { ratios: MODE_RATIOS[mode] });
-  if (!det) return { quad: fullQuad(w, h), sure: false, ...shapeOf(fullQuad(w, h), w, h, mode) };
-  const mid = pixelsOf(bmp, 1600);
-  const k = mid.w / small.w;
-  const q = refineQuad(luminance(mid), mid.w, mid.h, det.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad);
-  const quad = q.map((p) => ({ x: p.x / mid.scale, y: p.y / mid.scale })) as Quad;
+  const t0 = performance.now();
+  const full = { x: 0, y: 0, w, h };
+  const ks = Math.min(1, 512 / Math.max(w, h)), km = Math.min(1, 1600 / Math.max(w, h));
+  const sw = Math.max(1, Math.round(w * ks)), sh = Math.max(1, Math.round(h * ks));
+  const mw = Math.max(1, Math.round(w * km)), mh = Math.max(1, Math.round(h * km));
+  let det: { score: number; support: number[] } | null = null, rel: { x: number; y: number }[] | null = null;
+  try {
+    const small = await sourceOf(bmp, full, sw, sh), mid = await sourceOf(bmp, full, mw, mh);
+    const r = await post<{ det: any; quad: { x: number; y: number }[] | null }>({ type: 'find', small, mid, opts: { ratios: MODE_RATIOS[mode] } }, [...transferOf(small), ...transferOf(mid)]);
+    det = r.det; rel = r.quad;
+  } catch {
+    // no workers: same work here
+    const { D } = localKernels();
+    const small = pixelsOf(bmp, 512);
+    const d = D.detectQuad(small, { ratios: MODE_RATIOS[mode] });
+    det = d;
+    if (d) {
+      const mid = pixelsOf(bmp, 1600), k = mid.w / small.w;
+      const q = D.refineQuad(D.luminance(mid), mid.w, mid.h, d.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad);
+      rel = q.map((p) => ({ x: p.x / mid.w, y: p.y / mid.h }));
+    }
+  }
+  tlog('find', t0);
+  if (!det || !rel) return { quad: fullQuad(w, h), sure: false, ...shapeOf(fullQuad(w, h), w, h, mode) };
+  const quad = rel.map((p) => ({ x: p.x * w, y: p.y * h })) as Quad;
   const sure = det.score > 0.78 && Math.min(...det.support) > 0.45;
   return { quad, sure, ...shapeOf(quad, w, h, mode) };
 }
@@ -146,70 +252,30 @@ export function outputSize(p: ScanPage, quality: Quality): { w: number; h: numbe
 }
 
 // ---------------------------------------------------------------- rendering
-let worker: Worker | null = null;
-let workerBroken = false;
-let local: Kernels | null = null;
-let seq = 0;
-const waiting = new Map<number, { ok: (r: JobResult) => void; fail: (e: any) => void }>();
-
-function getWorker(): Worker | null {
-  if (worker || workerBroken) return worker;
-  try {
-    const code = `var K=(${scanKernels.toString()})();self.onmessage=function(e){try{var r=K.process(e.data.job);self.postMessage({id:e.data.id,r:r},[r.img.data.buffer]);}catch(err){self.postMessage({id:e.data.id,err:String(err&&err.stack||err)});}};`;
-    const url = URL.createObjectURL(new Blob([code], { type: 'application/javascript' }));
-    worker = new Worker(url);
-    worker.onmessage = (e) => {
-      const w = waiting.get(e.data.id);
-      if (!w) return;
-      waiting.delete(e.data.id);
-      if (e.data.err) w.fail(new Error(e.data.err)); else w.ok(e.data.r);
-    };
-    worker.onerror = (e) => {
-      console.warn('scan worker failed', e.message);
-      workerBroken = true; worker?.terminate(); worker = null;
-      for (const [, w] of waiting) w.fail(new Error('worker'));
-      waiting.clear();
-    };
-  } catch (e) { console.warn('scan worker unavailable', e); workerBroken = true; worker = null; }
-  return worker;
-}
-
-/** Runs one pixel job in the worker (or here, if workers can't start). */
-export function runJob(job: Job): Promise<JobResult> {
-  const w = getWorker();
-  if (!w) {
-    local ??= scanKernels();
-    return new Promise((res) => setTimeout(() => res(local!.process(job)), 0));
-  }
-  return new Promise((ok, fail) => {
-    const id = ++seq;
-    waiting.set(id, { ok, fail });
-    w.postMessage({ id, job }, [job.src.data.buffer]);
-  }).catch(() => { local ??= scanKernels(); return local.process(job); }) as Promise<JobResult>;
-}
-
 /** corners after `rot` clockwise quarter turns of the output */
 export const turnQuad = (q: Quad, rot: number): Quad => {
   const r = ((rot % 4) + 4) % 4;
   return [0, 1, 2, 3].map((i) => q[(i - r + 4) % 4]) as Quad;
 };
 
-export interface Rendered { blob: Blob; url: string; w: number; h: number; blur: number }
+export interface Rendered { blob: Blob; url: string; w: number; h: number; blur: number; orient?: Orientation | null }
+export interface RenderOpt { quality: Quality; long?: number; filter?: Filter; jpeg?: number; orient?: boolean; low?: boolean }
 
 /**
  * Crops, straightens and filters a page. `long` caps the output's longest side (previews);
- * otherwise the quality setting decides.
+ * otherwise the quality setting decides. `orient` also reads the text direction (on rot 0 only).
  */
-export async function renderPage(p: ScanPage, opt: { quality: Quality; long?: number; filter?: Filter; jpeg?: number }): Promise<Rendered> {
+export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered> {
   const res = await renderRaw(p, opt);
   const card = p.format === 'id1' || p.format === 'id3';
   const filter = opt.filter ?? p.filter;
   const blob = await toJpeg(res.img, opt.jpeg ?? (card ? 0.9 : filter === 'bw' ? 0.82 : 0.85));
-  return { blob, url: URL.createObjectURL(blob), w: res.img.w, h: res.img.h, blur: res.blur };
+  return { blob, url: URL.createObjectURL(blob), w: res.img.w, h: res.img.h, blur: res.blur, orient: res.orient };
 }
 
 /** The cropped, filtered page as pixels. */
-export async function renderRaw(p: ScanPage, opt: { quality: Quality; long?: number; filter?: Filter }): Promise<JobResult> {
+export async function renderRaw(p: ScanPage, opt: RenderOpt): Promise<JobResult & { orient?: Orientation | null }> {
+  const t0 = performance.now();
   const bmp = await decode(p.blob);
   let { w: ow, h: oh } = outputSize(p, opt.quality);
   if (opt.long && Math.max(ow, oh) > opt.long) { const k = opt.long / Math.max(ow, oh); ow = Math.round(ow * k); oh = Math.round(oh * k); }
@@ -221,36 +287,41 @@ export async function renderRaw(p: ScanPage, opt: { quality: Quality; long?: num
   const srcLong = Math.max(dist(q[0], q[1]), dist(q[3], q[2]), dist(q[0], q[3]), dist(q[1], q[2]));
   const k = Math.min(1, (Math.max(ow, oh) * 1.25) / srcLong);
   const region = { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
-  const px = pixelsOf(bmp, Math.max(region.w, region.h) * k, region);
-  const sx = px.w / region.w, sy = px.h / region.h;
+  const RW = Math.max(1, Math.round(region.w * k)), RH = Math.max(1, Math.round(region.h * k));
+  const sx = RW / region.w, sy = RH / region.h;
   const tq = turnQuad(q, p.rot);
   const odd = p.rot % 2 !== 0;
   const outW = odd ? oh : ow, outH = odd ? ow : oh;
   const filter = opt.filter ?? p.filter;
-  const card = p.format === 'id1' || p.format === 'id3';
   // ISO ID-1 corner radius 3.18 mm on 85.6 mm; passport pages are square-cut
   const radius = p.format === 'id1' && filter !== 'original' ? (Math.max(outW, outH) * 3.18) / 85.6 : 0;
-  void card;
-  return runJob({
-    src: { w: px.w, h: px.h, data: px.data },
-    quad: tq.flatMap((c) => [(c.x - x0) * sx, (c.y - y0) * sy]),
-    outW, outH, filter, sharpen: 'auto', radius,
-  });
+  const job = { quad: tq.flatMap((c) => [(c.x - x0) * sx, (c.y - y0) * sy]), outW, outH, filter, sharpen: 'auto' as const, radius };
+  const orient = !!opt.orient && p.rot === 0;
+  let res: JobResult & { orient?: Orientation | null };
+  try {
+    const src = await sourceOf(bmp, region, RW, RH);
+    res = await post({ type: 'process', src, job, orient }, transferOf(src), opt.low);
+  } catch {
+    const { K, O } = localKernels();
+    const px = pixelsOf(bmp, Math.max(RW, RH), region);
+    await new Promise((r) => setTimeout(r, 0));
+    const r = K.process({ ...job, src: { w: px.w, h: px.h, data: px.data } });
+    res = { ...r, orient: orient ? O.textOrientation(r.img) : undefined };
+  }
+  tlog(`render ${opt.long ?? opt.quality} ${filter} ${outW}x${outH} ${JSON.stringify(res.times)}`, t0);
+  return res;
 }
 
 /**
- * Quarter turns that put the page's text upright (null: leave it). Cards and passport pages that came
- * out portrait are turned to landscape even without readable text.
+ * Quarter turns that put the page's text upright (null: leave it), from a reading of the text
+ * direction. Cards and passport pages that came out portrait are turned to landscape.
  */
-export async function orientPage(p: ScanPage): Promise<number | null> {
-  const { textOrientation } = await import('./orient');
-  const res = await renderRaw({ ...p, rot: 0 }, { quality: 'small', long: 900, filter: 'gray' });
-  const o = textOrientation(res.img);
+export function turnsFor(p: ScanPage, o: Orientation | null | undefined): number | null {
   const card = p.format === 'id1' || p.format === 'id3';
   if (o?.sure) {
     // a card's text may run sideways in places (vertical strips); trust only turns that make it landscape
     if (card && ((p.ratio < 1) !== (o.turns % 2 === 1))) return p.ratio < 1 ? 1 : 0;
-    return o.turns;
+    return o.turns || null;
   }
   return card && p.ratio < 1 ? 1 : null;
 }

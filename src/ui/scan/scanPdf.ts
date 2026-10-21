@@ -10,6 +10,8 @@ export interface PdfOpts {
   /** ID cards and passports: on an A4 sheet at actual size, or each on a page of its own size */
   cardLayout: 'sheet' | 'card';
   ocr: boolean;
+  /** pages already rendered at this quality (done in the background while you review) */
+  ready?: (p: ScanPage) => Blob | undefined;
   progress?: (f: number, msg: string) => void;
 }
 
@@ -30,6 +32,9 @@ export function physicalMm(p: ScanPage): [number, number] {
   // an unknown sheet: as big as A4's long side allows
   return r < 1 ? [297 * r, 297] : [297, 297 / r];
 }
+
+/** JPEG quality per output quality (undefined: the filter's default) */
+export const jpegFor = (q: Quality) => (q === 'small' ? 0.72 : q === 'high' ? 0.92 : undefined);
 
 const isCard = (p: ScanPage) => p.format === 'id1' || p.format === 'id3';
 
@@ -87,9 +92,14 @@ export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Ui
     for (let s = 0; s < sheet.length; s++) {
       const p = sheet[s];
       opts.progress?.(0.05 + 0.9 * (done / total), `Page ${done + 1} of ${total}: straightening and cleaning…`);
-      const r = await renderPage(p, { quality: opts.quality, jpeg: opts.quality === 'small' ? 0.72 : opts.quality === 'high' ? 0.92 : undefined });
-      URL.revokeObjectURL(r.url);
-      const img = await doc.embedJpg(new Uint8Array(await r.blob.arrayBuffer()));
+      let blob = opts.ready?.(p);
+      if (!blob) {
+        const r = await renderPage(p, { quality: opts.quality, jpeg: jpegFor(opts.quality) });
+        URL.revokeObjectURL(r.url);
+        blob = r.blob;
+      }
+      const r = { blob };
+      const img = await doc.embedJpg(new Uint8Array(await blob.arrayBuffer()));
       const sl = slots[s];
       const x = sl.x * PT, y = (ph - sl.y - sl.h) * PT, w = sl.w * PT, h = sl.h * PT;
       page.drawImage(img, { x, y, width: w, height: h });

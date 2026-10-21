@@ -54,7 +54,10 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
         const s = await navigator.mediaDevices.getUserMedia({
           audio: false,
           // a preview-sized stream keeps the camera fast; the photo itself is taken at full resolution
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 }, frameRate: { ideal: 30 }, advanced: [{ focusMode: 'continuous' } as any] } as any,
+          // (without ImageCapture the photo is a video frame: then ask for the largest stream)
+          video: (window as any).ImageCapture
+            ? { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 }, frameRate: { ideal: 30 }, advanced: [{ focusMode: 'continuous' } as any] }
+            : { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 }, advanced: [{ focusMode: 'continuous' } as any] } as any,
         });
         if (!alive) { s.getTracks().forEach((t) => t.stop()); return; }
         stream.current = s;
@@ -90,7 +93,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       const g = poly.current;
       if (g) {
         if (target) {
-          shown = shown ? shown.map((p, i) => ({ x: p.x + (target![i].x - p.x) * 0.4, y: p.y + (target![i].y - p.y) * 0.4 })) : target.map((p) => ({ ...p }));
+          shown = shown ? shown.map((p, i) => ({ x: p.x + (target![i].x - p.x) * 0.6, y: p.y + (target![i].y - p.y) * 0.6 })) : target.map((p) => ({ ...p }));
           const pts = shown.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
           g.style.display = '';
           g.querySelector('polygon')!.setAttribute('points', pts);
@@ -105,7 +108,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       const v = video.current, b = box.current;
       if (!v || !b || !v.videoWidth || busyRef.current) { timer = window.setTimeout(tick, 120); return; }
       const vw = v.videoWidth, vh = v.videoHeight;
-      const k0 = Math.min(1, 320 / Math.max(vw, vh));
+      const k0 = Math.min(1, 360 / Math.max(vw, vh));
       const fw = Math.round(vw * k0), fh = Math.round(vh * k0);
       if (frame.width !== fw || frame.height !== fh) { frame.width = fw; frame.height = fh; }
       fctx.drawImage(v, 0, 0, fw, fh);

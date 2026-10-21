@@ -11,8 +11,8 @@ import type { Quad } from './geom';
 import type { Filter } from './kernels';
 import { Camera, MODES } from './Camera';
 import { CropEditor } from './CropEditor';
-import { DEFAULT_FILTER, decode, findDocument, forget, newId, orientPage, outputSize, renderPage, shapeOf, type Quality, type ScanMode, type ScanPage } from './engine';
-import { buildScanPdf, sheetsOf, type PaperOpt } from './scanPdf';
+import { DEFAULT_FILTER, decode, findDocument, forget, newId, outputSize, renderPage, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
+import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'auto', label: 'Auto' }, { id: 'color', label: 'Photo' }, { id: 'gray', label: 'Grey' }, { id: 'bw', label: 'B & W' }, { id: 'original', label: 'Original' },
@@ -76,9 +76,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
         // a card photographed in document mode keeps its photo and colours
         filter: kind === 'doc' && (found.format === 'id1' || found.format === 'id3') ? 'color' : DEFAULT_FILTER[kind], kind, side, format: found.format, ratio: found.ratio, ver: 1,
       };
+      // pages photographed sideways or upside down are turned upright after their first render
       setPages((ps) => [...ps, page]);
-      // pages photographed sideways or upside down: turn them so the text reads upright
-      orientPage(page).then((t) => { if (t) setPages((ps) => ps.map((x) => (x.id === id && x.ver === 1 ? { ...x, rot: t, ver: 2 } : x))); }).catch(() => null);
       setSaved(false);
       return page;
     } catch (e) {
@@ -111,34 +110,56 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
     setCur(start);
   }, [add, mode]);
 
-  // ---- rendering (one at a time; the page on screen first)
-  const busyRender = useRef(false);
+  // ---- rendering: the page on screen first, then the others, the filter previews, and finally the
+  // pages at saving quality in the background (so Save only has to put the PDF together).
+  // Two jobs run at once (the worker pool has two workers on most phones).
+  const inflight = useRef(new Set<string>());
+  const finals = useRef(new Map<string, Blob>());
   const [kick, setKick] = useState(0);
+  const done = () => setKick((n) => n + 1);
   useEffect(() => {
-    if (busyRender.current) return;
     const list = pagesRef.current;
-    const order = [list[curRef.current], ...list].filter(Boolean) as ScanPage[];
-    const todo = order.find((p) => renders[p.id]?.key !== keyOf(p));
+    const busy = inflight.current;
     const long = mobile ? 1200 : 1600;
-    if (todo) {
-      busyRender.current = true;
-      const key = keyOf(todo);
-      renderPage(todo, { quality: 'standard', long }).then((r) => {
-        setRenders((rs) => { const old = rs[todo.id]; if (old) URL.revokeObjectURL(old.url); return { ...rs, [todo.id]: { key, url: r.url, w: r.w, h: r.h } }; });
-      }).catch((e) => console.warn('scan render failed', e)).finally(() => { busyRender.current = false; setKick((n) => n + 1); });
-      return;
+    const start = (key: string, run: () => Promise<unknown>) => { busy.add(key); run().catch((e) => console.warn('scan render failed', e)).finally(() => { busy.delete(key); done(); }); };
+    const order = [list[curRef.current], ...list].filter(Boolean) as ScanPage[];
+    for (const p of order) {
+      if (busy.size >= 2) return;
+      const key = keyOf(p);
+      if (renders[p.id]?.key === key || busy.has('v' + key)) continue;
+      // the first look at a fresh page also reads which way its text runs
+      const orient = p.ver === 1;
+      start('v' + key, () => renderPage(p, { quality: 'standard', long, orient }).then((r) => {
+        setRenders((rs) => { const old = rs[p.id]; if (old) URL.revokeObjectURL(old.url); return { ...rs, [p.id]: { key, url: r.url, w: r.w, h: r.h } }; });
+        const t = orient ? turnsFor(p, r.orient) : null;
+        if (t) setPages((ps) => ps.map((x) => (x.id === p.id && x.ver === p.ver ? { ...x, rot: t, ver: x.ver + 1 } : x)));
+      }));
     }
+    if (order.some((p) => renders[p.id]?.key !== keyOf(p))) return;
     // filter previews of the page on screen
     const p = list[curRef.current];
-    if (view !== 'review' || !p) return;
-    const missing = FILTERS.find((f) => !previews[`${geoKey(p)}:${f.id}`]);
-    if (!missing) return;
-    busyRender.current = true;
-    const k = `${geoKey(p)}:${missing.id}`;
-    renderPage(p, { quality: 'small', long: 220, filter: missing.id, jpeg: 0.8 }).then((r) => setPreviews((pv) => ({ ...pv, [k]: r.url })))
-      .catch(() => setPreviews((pv) => ({ ...pv, [k]: '' })))
-      .finally(() => { busyRender.current = false; setKick((n) => n + 1); });
-  }, [pages, cur, renders, previews, view, kick, mobile]);
+    if (view === 'review' && p) {
+      for (const f of FILTERS) {
+        if (busy.size >= 2) return;
+        const k = `${geoKey(p)}:${f.id}`;
+        if (previews[k] !== undefined || busy.has(k)) continue;
+        start(k, () => renderPage(p, { quality: 'small', long: 220, filter: f.id, jpeg: 0.8 })
+          .then((r) => setPreviews((pv) => ({ ...pv, [k]: r.url })), () => setPreviews((pv) => ({ ...pv, [k]: '' }))));
+      }
+      if (FILTERS.some((f) => previews[`${geoKey(p)}:${f.id}`] === undefined)) return;
+    }
+    // pages at saving quality, ready for Save
+    for (const q of list) {
+      if (busy.size >= 1) return; // keep a worker free for whatever you do next
+      const k = `f${keyOf(q)}:${quality}`;
+      if (finals.current.has(k)) continue;
+      start(k, () => renderPage(q, { quality, low: true, jpeg: jpegFor(quality) }).then((r) => {
+        URL.revokeObjectURL(r.url);
+        for (const old of [...finals.current.keys()]) if (old.startsWith(`f${q.id}:`)) finals.current.delete(old);
+        finals.current.set(k, r.blob);
+      }));
+    }
+  }, [pages, cur, renders, previews, view, kick, mobile, quality]);
 
   // tidy up object URLs when leaving
   useEffect(() => () => {
@@ -186,6 +207,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
     try {
       return await buildScanPdf(pages, {
         quality, paper, ocr, cardLayout: cardSheet ? 'sheet' : 'card',
+        ready: (p) => finals.current.get(`f${keyOf(p)}:${quality}`),
         progress: (f, msg) => setBusy({ title, detail: msg, progress: f }),
       });
     } finally { setBusy(null); }
