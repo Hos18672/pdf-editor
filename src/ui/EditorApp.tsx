@@ -1,14 +1,21 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { css } from './styles';
 import { Icon } from './icons';
 import { openPdf, loadPdfjs } from './pdfjs';
 import { useHistory } from './store';
 import type { PageInfo } from './PageView';
 import { appBase } from './assets';
-import { Editor, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
+import type { HostProps, ToastMsg, BusyMsg, EditorStart } from './Editor';
 import { Start, OpenState, type QuickAction } from './Start';
-import { Tools, ToolId } from './Tools';
-import { Scanner } from './scan/Scanner';
+import type { ToolId } from './Tools';
+
+// Only the start screen loads up front; the editor, tools and scanner arrive as separate chunks
+// (fetched in the background right after start-up, so opening a file doesn't wait for them).
+const loadScreens = () => import('./screens');
+const Editor = lazy(() => loadScreens().then((m) => ({ default: m.Editor })));
+const Tools = lazy(() => loadScreens().then((m) => ({ default: m.Tools })));
+const Scanner = lazy(() => loadScreens().then((m) => ({ default: m.Scanner })));
+import { useBackButton } from './back';
 import { useBp, useEdgeColors, useNativeInsets, useTheme, useVisualViewportHeight } from './hooks';
 import type { M } from '../engine/types';
 
@@ -98,8 +105,14 @@ export default function EditorApp(host: HostProps) {
   useVisualViewportHeight();
   useEdgeColors(host.isNative ? host.onChrome : undefined, [host.isNative, !!host.onChrome]);
   useNativeInsets(host.isNative ? host.getInsets : undefined);
+  useBackButton(!!host.isNative, host.exitApp);
 
-  useEffect(() => { loadPdfjs().catch(() => null); if (!host.isNative) registerServiceWorker(); }, [host.isNative]);
+  useEffect(() => {
+    loadPdfjs().catch(() => null);
+    if (!host.isNative) registerServiceWorker();
+    const t = setTimeout(() => { loadScreens().catch(() => null); }, 600);
+    return () => clearTimeout(t);
+  }, [host.isNative]);
   useEffect(() => {
     if (!toastMsg) return;
     const t = setTimeout(() => setToastMsg(null), 4000);
@@ -170,6 +183,7 @@ export default function EditorApp(host: HostProps) {
   return (
     <>
       <style>{fontFaces() + css}</style>
+      <Suspense fallback={<div className="lazy-wait" role="status" aria-label="Loading"><span className="spinner" /></div>}>
       {route.name === 'editor' && file && pdf ? (
         <Editor key={file.name + file.bytes.length} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
@@ -191,6 +205,7 @@ export default function EditorApp(host: HostProps) {
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
           onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme} />
       )}
+      </Suspense>
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { readFile(e.target.files?.[0]); e.target.value = ''; }} />
       {busy && (
         <div className="busy" role="status" aria-live="polite">

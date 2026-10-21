@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { useBack } from './back';
 import { Icon } from './icons';
 
 export interface Stamp { src: string; w: number; h: number; }
@@ -46,6 +47,7 @@ const stampFromSrc = (src: string): Promise<Stamp> => new Promise((res) => {
 });
 
 export function SignatureModal({ onClose, onPick, sheet }: { onClose: () => void; onPick: (s: Stamp) => void; sheet?: boolean }) {
+  useBack(onClose);
   const [tab, setTab] = useState<'draw' | 'type' | 'upload'>('draw');
   const [ink, setInk] = useState(INKS[1]);
   const [saved, setSaved] = useState<string[]>(loadSaved);

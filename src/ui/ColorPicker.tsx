@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useBack } from './back';
 import { HexColorInput, HexColorPicker } from 'react-colorful';
 import { Icon } from './icons';
 import { holdEditing } from './hooks';
@@ -32,6 +33,7 @@ const norm = (c: string) => {
 export function ColorPicker({ value, onApply, onClose, sheet, title = 'Colour' }: {
   value: string; onApply: (c: string) => void; onClose: () => void; sheet?: boolean; title?: string;
 }) {
+  useBack(onClose);
   if (sheet === undefined) sheet = typeof matchMedia !== 'undefined' && matchMedia('(max-width: 599px)').matches;
   const start = norm(value);
   const [draft, setDraft] = useState(start);

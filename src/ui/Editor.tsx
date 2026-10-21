@@ -14,6 +14,7 @@ import { exportPdf } from '../engine/exporter';
 import { pageNeedsText } from '../engine/textLayer';
 import { scanStyles } from './scanStyle';
 import { ConfirmClose } from './ConfirmClose';
+import { useBack } from './back';
 import { cloneLineText, pageGlyphs, PageCtx } from './scanGlyphs';
 import type { EditorObject, TextEdit, FontFamily } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
@@ -29,6 +30,8 @@ export interface HostProps {
   onChrome?: (c: import('./hooks').ChromeColors) => void;
   /** Android: sizes of the status / navigation bars the page draws under */
   getInsets?: () => Promise<{ top: number; bottom: number; left: number; right: number }>;
+  /** Android: leave the app (back button with nothing left to close) */
+  exitApp?: () => void;
 }
 export interface ToastMsg { msg: string; kind?: 'ok' | 'err'; action?: { label: string; run: () => void } }
 export interface BusyMsg { title: string; detail?: string; progress?: number }
@@ -829,13 +832,26 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const fieldNav = !desk && tool === 'fill' && activeField && fillable.length > 0;
   const sheetObj = sheetFor ? snap.objects.find((o) => o.id === sheetFor) : undefined;
 
+  // phone / browser back: finish typing, then close what's open, then leave the document
+  const requestClose = () => (editCount && savedSnap.current !== snap ? setAskClose(true) : onClose());
+  useBack(() => {
+    const el = document.activeElement as HTMLElement | null;
+    if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) { el.blur(); return; }
+    if (view === 'pages' || selected || flyout || moreOpen || sheetFor || slimOpen) {
+      if (view === 'pages') setView('doc');
+      setSelected(null); setFlyout(null); setMoreOpen(false); setSheetFor(null); setSlimOpen(false);
+      return;
+    }
+    requestClose();
+  });
+
   return (
     <div className={`app bp-${bp}`}>
       {askClose && <ConfirmClose changes={editCount} sheet={mobile} onCancel={() => setAskClose(false)}
         onDiscard={() => { setAskClose(false); onClose(); }}
         onDownload={async () => { setAskClose(false); if (await download()) onClose(); }} />}
       <header className="topbar float">
-        <button className="ibtn" onClick={() => (editCount && savedSnap.current !== snap ? setAskClose(true) : onClose())} aria-label="Close document" title="Close"><Icon name="back" /></button>
+        <button className="ibtn" onClick={requestClose} aria-label="Close document" title="Close"><Icon name="back" /></button>
         <div className="doc">
           <div className="names">
             <div className="fname" title={file.name}>{file.name}</div>

@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { Icon } from '../icons';
 import { fullQuad, isConvex, type Pt, type Quad } from './geom';
 import { decode, type ScanPage } from './engine';
+import { useBack } from '../back';
 
 const LOUPE = 128, ZOOM = 2.6;
 
@@ -19,6 +20,7 @@ export function CropEditor({ page, onApply, onCancel }: { page: ScanPage; onAppl
   const [q, setQ] = useState<Quad>(page.quad);
   const [drag, setDrag] = useState<{ handle: number; at: Pt } | null>(null);
   const start = useRef<{ x: number; y: number; q: Quad } | null>(null);
+  useBack(onCancel);
 
   useEffect(() => { decode(page.blob).then(setBmp).catch(() => null); }, [page.blob]);
   useLayoutEffect(() => {

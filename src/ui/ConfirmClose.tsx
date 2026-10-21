@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Icon } from './icons';
+import { useBack } from './back';
 
 /** Asked when leaving a document with unsaved changes (replaces the browser's confirm box). */
 export function ConfirmClose({ changes, sheet, onDownload, onDiscard, onCancel, title, body, keepLabel, saveLabel }: {
@@ -8,6 +9,7 @@ export function ConfirmClose({ changes, sheet, onDownload, onDiscard, onCancel, 
   title?: string; body?: string; keepLabel?: string; saveLabel?: string;
 }) {
   const keep = useRef<HTMLButtonElement>(null);
+  useBack(onCancel);
   useEffect(() => {
     keep.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.preventDefault(); onCancel(); } };

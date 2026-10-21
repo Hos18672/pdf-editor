@@ -4,6 +4,7 @@ import { Icon } from '../icons';
 import { Seg, Toggle } from '../Panel';
 import { saveFile, type BusyMsg, type HostProps, type ToastMsg } from '../Editor';
 import { ConfirmClose } from '../ConfirmClose';
+import { useBack } from '../back';
 import { SortableArea, useSortableItem } from '../sortable';
 import type { Bp } from '../hooks';
 import type { Quad } from './geom';
@@ -208,7 +209,13 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
   };
   const close = () => (pages.length && !saved ? setAskClose(true) : onClose());
 
-  // Android back / Escape
+  // phone / browser back: sheet → camera → leave (asks first when pages aren't saved)
+  useBack(() => {
+    if (sheetOpen) setSheetOpen(false);
+    else if (view === 'camera' && pages.length) setView('review');
+    else close();
+  });
+  // Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || crop || askClose || sheetOpen) return;

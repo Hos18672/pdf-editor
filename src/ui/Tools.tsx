@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
+import { useBack } from './back';
 import { openPdf } from './pdfjs';
 import { Thumb } from './Thumb';
 import { Seg, Stepper, Toggle } from './Panel';
@@ -33,6 +34,7 @@ export function Tools(p: Props) {
   const [convertKind, setConvertKind] = useState<string>('');
   const mobile = p.bp === 'mobile', desk = p.bp === 'desktop' || p.bp === 'large';
   const back = () => (tool === 'hub' ? p.onBack() : setTool('hub'));
+  useBack(back);
   const meta: Record<ToolId, [string, string]> = {
     hub: ['All tools', 'Every tool runs on this device'],
     combine: ['Combine PDFs', 'Merge files and images into one PDF'],

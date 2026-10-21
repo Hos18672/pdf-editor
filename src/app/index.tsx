@@ -1,5 +1,5 @@
-import { useCallback, useRef, useState } from 'react';
-import { Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View, useColorScheme } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationBar } from 'expo-navigation-bar';
@@ -81,6 +81,18 @@ function NativeShell({ dark }: { dark: boolean }) {
   const [chrome, setChrome] = useState<Chrome | null>(null);
   const desk = dark ? '#0F1118' : '#ECEEF3'; // page background until the page has painted
   const topDark = chrome ? chrome.topDark : dark, bottomDark = chrome ? chrome.bottomDark : dark;
+  // The phone's back button goes to the page: it closes the open dialog or screen, and only when
+  // nothing is left does the page ask to leave the app (exitApp).
+  const dom = useRef<any>(null);
+  useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (!dom.current?.injectJavaScript) return false;
+      dom.current.injectJavaScript("window.dispatchEvent(new Event('pe-back'));true;");
+      return true;
+    });
+    return () => sub.remove();
+  }, []);
+  const exitApp = useCallback(() => { BackHandler.exitApp(); }, []);
   const getInsets = useCallback(async () => {
     const i = latest.current;
     // with the keyboard up the page ends at the keyboard: no navigation-bar gap
@@ -91,6 +103,8 @@ function NativeShell({ dark }: { dark: boolean }) {
       <StatusBar style={topDark ? 'light' : 'dark'} />
       <NavigationBar style={bottomDark ? 'light' : 'dark'} />
       <PdfEditorDom
+        ref={dom}
+        exitApp={exitApp}
         isNative
         pickPdf={pickPdf}
         savePdf={savePdf}

@@ -15,7 +15,7 @@ if (bridge) {
     let injected: any = null;
     try { injected = JSON.parse(bridge.injectedObjectJson?.() ?? 'null'); } catch { /* not there yet */ }
     w.$$EXPO_DOM_HOST_OS ??= injected?.EXPO_DOM_HOST_OS ?? 'android';
-    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets'], props: { isNative: true } };
+    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets', 'exitApp'], props: { isNative: true } };
   }
 }
 
@@ -44,6 +44,7 @@ const native = bridge ? {
   savePdf: (base64: string, name: string) => callNative<string | void>('savePdf', [base64, name]),
   onChrome: (c: ChromeColors) => { callNative('onChrome', [c]).catch(() => null); },
   getInsets: () => callNative<{ top: number; bottom: number; left: number; right: number }>('getInsets', []),
+  exitApp: () => { callNative('exitApp', []).catch(() => null); },
 } : null;
 
 // The whole editor is a DOM component: on the web it renders directly, on
@@ -55,6 +56,9 @@ export default function PdfEditorDom(props: {
   savePdf?: (base64: string, name: string) => Promise<string | void>;
   onChrome?: (c: ChromeColors) => void;
   getInsets?: () => Promise<{ top: number; bottom: number; left: number; right: number }>;
+  exitApp?: () => void;
+  /** Android: the WebView handle (the shell sends the back button through it) */
+  ref?: React.Ref<unknown>;
 }) {
   if (native) return <EditorApp {...native} />;
   return <EditorApp isNative={props.isNative} pickPdf={props.pickPdf} savePdf={props.savePdf} onChrome={props.onChrome} />;

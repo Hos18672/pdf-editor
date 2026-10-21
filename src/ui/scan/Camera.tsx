@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons';
-import { detectQuad } from './detect';
-import { FORMATS, quadArea, type Quad } from './geom';
-import { MODE_RATIOS, pixelsOf, sharpness, type ScanMode } from './engine';
+import { FORMATS, quadArea, type Pt, type Quad } from './geom';
+import { liveDetect, stopLive } from './live';
+import { MODE_RATIOS, sharpness, type ScanMode } from './engine';
 
 export const MODES: { id: ScanMode; label: string; icon: string }[] = [
   { id: 'doc', label: 'Document', icon: 'file-text' },
@@ -35,7 +35,8 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
   const [torch, setTorch] = useState<{ can: boolean; on: boolean }>({ can: false, on: false });
   const [auto, setAuto] = useState(readAuto);
   const [hint, setHint] = useState('Point the camera at a document');
-  const [poly, setPoly] = useState<string | null>(null);
+  const poly = useRef<SVGGElement>(null);
+  const [found, setFound] = useState(false);
   const [hold, setHold] = useState(0); // 0…1 progress of holding still
   const [flash, setFlash] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -52,7 +53,8 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       try {
         const s = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 }, advanced: [{ focusMode: 'continuous' } as any] } as any,
+          // a preview-sized stream keeps the camera fast; the photo itself is taken at full resolution
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 }, frameRate: { ideal: 30 }, advanced: [{ focusMode: 'continuous' } as any] } as any,
         });
         if (!alive) { s.getTracks().forEach((t) => t.stop()); return; }
         stream.current = s;
@@ -72,58 +74,79 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
   }, []);
 
   // ---- live outline + auto-capture
+  // The page is found in a worker on a small frame; the outline on screen glides towards the latest
+  // result every animation frame (no React re-render per frame).
   useEffect(() => {
     if (status !== 'live') return;
-    let stop = false, timer = 0;
+    let stop = false, timer = 0, raf = 0;
     let last: Quad | null = null, stableSince = 0, lostSince = 0, armed = true, shotQuad: Quad | null = null;
+    let target: Pt[] | null = null, shown: Pt[] | null = null;
     const frame = document.createElement('canvas');
-    const tick = () => {
+    const fctx = frame.getContext('2d', { willReadFrequently: true })!;
+    const say = (h: string) => setHint((o) => (o === h ? o : h));
+    const holdTo = (v: number) => setHold((o) => (Math.abs(o - v) < 0.04 && !(v === 0 && o !== 0) ? o : v));
+    const draw = () => {
+      if (stop) return;
+      const g = poly.current;
+      if (g) {
+        if (target) {
+          shown = shown ? shown.map((p, i) => ({ x: p.x + (target![i].x - p.x) * 0.4, y: p.y + (target![i].y - p.y) * 0.4 })) : target.map((p) => ({ ...p }));
+          const pts = shown.map((p) => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' ');
+          g.style.display = '';
+          g.querySelector('polygon')!.setAttribute('points', pts);
+          g.querySelectorAll('circle').forEach((c, i) => { c.setAttribute('cx', shown![i].x.toFixed(1)); c.setAttribute('cy', shown![i].y.toFixed(1)); });
+        } else { g.style.display = 'none'; shown = null; }
+      }
+      raf = requestAnimationFrame(draw);
+    };
+    raf = requestAnimationFrame(draw);
+    const tick = async () => {
       if (stop) return;
       const v = video.current, b = box.current;
       if (!v || !b || !v.videoWidth || busyRef.current) { timer = window.setTimeout(tick, 120); return; }
       const vw = v.videoWidth, vh = v.videoHeight;
-      const px = pixelsOf(v, 360);
-      // light check
-      let sum = 0;
-      for (let i = 0; i < px.data.length; i += 16) sum += px.data[i] * 0.3 + px.data[i + 1] * 0.59 + px.data[i + 2] * 0.11;
-      const mean = sum / (px.data.length / 16);
-      const det = detectQuad(px, { live: true, ratios: MODE_RATIOS[modeRef.current] });
-      const k = vw / px.w;
+      const k0 = Math.min(1, 320 / Math.max(vw, vh));
+      const fw = Math.round(vw * k0), fh = Math.round(vh * k0);
+      if (frame.width !== fw || frame.height !== fh) { frame.width = fw; frame.height = fh; }
+      fctx.drawImage(v, 0, 0, fw, fh);
+      const img = { w: fw, h: fh, data: fctx.getImageData(0, 0, fw, fh).data };
+      const { det, mean } = await liveDetect(img, { ratios: MODE_RATIOS[modeRef.current] });
+      if (stop) return;
+      const k = vw / fw;
       const now = performance.now();
       // where the video is drawn (object-fit: cover)
       const cw = b.clientWidth, ch = b.clientHeight, sc = Math.max(cw / vw, ch / vh);
       const ox = (cw - vw * sc) / 2, oy = (ch - vh * sc) / 2;
+      setFound(!!det && det.score > 0.62);
       if (det && det.score > 0.62) {
-        let q = det.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad;
+        const q = det.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad;
         const diag = Math.hypot(vw, vh);
         const move = last ? Math.max(...q.map((p, i) => Math.hypot(p.x - last![i].x, p.y - last![i].y))) / diag : 1;
-        // smooth small jitter, follow big moves at once
-        if (last && move < 0.03) q = q.map((p, i) => ({ x: last![i].x * 0.55 + p.x * 0.45, y: last![i].y * 0.55 + p.y * 0.45 })) as Quad;
         if (move > 0.02 || !stableSince) stableSince = now;
         last = q; lostSince = 0;
         if (!armed && shotQuad && Math.max(...q.map((p, i) => Math.hypot(p.x - shotQuad![i].x, p.y - shotQuad![i].y))) / diag > 0.12) armed = true;
-        setPoly(q.map((p) => `${(ox + p.x * sc).toFixed(1)},${(oy + p.y * sc).toFixed(1)}`).join(' '));
+        target = q.map((p) => ({ x: ox + p.x * sc, y: oy + p.y * sc }));
         const area = quadArea(q) / (vw * vh);
         const held = Math.min(1, (now - stableSince) / 900);
-        if (mean < 45) setHint('Too dark: add light or turn on the torch');
-        else if (area < 0.12) setHint('Move closer');
-        else if (!armed) setHint('Got it. Next page, or tap Done');
-        else setHint(autoRef.current ? (held < 1 ? 'Hold still…' : 'Scanning…') : 'Tap the button to scan');
-        setHold(autoRef.current && armed && area >= 0.12 ? held : 0);
+        if (mean < 45) say('Too dark: add light or turn on the torch');
+        else if (area < 0.12) say('Move closer');
+        else if (!armed) say('Got it. Next page, or tap Done');
+        else say(autoRef.current ? (held < 1 ? 'Hold still…' : 'Scanning…') : 'Tap the button to scan');
+        holdTo(autoRef.current && armed && area >= 0.12 ? held : 0);
         if (autoRef.current && armed && held >= 1 && area >= 0.12 && det.score > 0.78 && mean >= 45) {
-          armed = false; shotQuad = q; stableSince = 0; setHold(0);
+          armed = false; shotQuad = q; stableSince = 0; holdTo(0);
           shotRef.current();
         }
       } else {
         if (!lostSince) lostSince = now;
-        if (now - lostSince > 250) { setPoly(null); last = null; stableSince = 0; setHold(0); }
+        if (now - lostSince > 250) { target = null; last = null; stableSince = 0; holdTo(0); }
         if (now - lostSince > 700) armed = true;
-        setHint(mean < 45 ? 'Too dark: add light or turn on the torch' : 'Point the camera at a document');
+        say(mean < 45 ? 'Too dark: add light or turn on the torch' : 'Point the camera at a document');
       }
-      timer = window.setTimeout(tick, 70);
+      timer = window.setTimeout(tick, 16);
     };
     tick();
-    return () => { stop = true; clearTimeout(timer); frame.width = 0; };
+    return () => { stop = true; clearTimeout(timer); cancelAnimationFrame(raf); frame.width = 0; stopLive(); };
   }, [status]);
 
   // ---- taking the picture
@@ -158,7 +181,13 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       if (IC && !torch.on) {
         try {
           const ic = new IC(track);
-          blob = await Promise.race([ic.takePhoto() as Promise<Blob>, new Promise<null>((r) => setTimeout(() => r(null), 2500))]);
+          const shot = (async () => {
+            // ask for the sensor's largest photo size
+            let settings: any;
+            try { const c = await ic.getPhotoCapabilities(); if (c?.imageWidth?.max) settings = { imageWidth: c.imageWidth.max, imageHeight: c.imageHeight?.max }; } catch { /* defaults */ }
+            return (await ic.takePhoto(settings)) as Blob;
+          })();
+          blob = await Promise.race([shot, new Promise<null>((r) => setTimeout(() => r(null), 3000))]);
           if (blob && blob.size < 20000) blob = null;
         } catch { blob = null; }
       }
@@ -188,13 +217,13 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
     <div className="scam" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
       <div className="scam-view" ref={box}>
         <video ref={video} playsInline muted autoPlay aria-label="Camera preview" />
-        {status === 'live' && ratio && !poly && <div className="scam-guide" style={{ aspectRatio: String(ratio) }}><span>{mode === 'id' ? 'Place the card inside the frame' : 'Open the photo page and fit it in the frame'}</span></div>}
-        {poly && (
-          <svg className="scam-svg" aria-hidden="true">
-            <polygon points={poly} className={hold >= 1 ? 'go' : ''} />
-            {poly.split(' ').map((p, i) => { const [x, y] = p.split(','); return <circle key={i} cx={x} cy={y} r="7" />; })}
-          </svg>
-        )}
+        {status === 'live' && ratio && !found && <div className="scam-guide" style={{ aspectRatio: String(ratio) }}><span>{mode === 'id' ? 'Place the card inside the frame' : 'Open the photo page and fit it in the frame'}</span></div>}
+        <svg className="scam-svg" aria-hidden="true">
+          <g ref={poly} style={{ display: 'none' }}>
+            <polygon className={hold >= 1 ? 'go' : ''} />
+            {[0, 1, 2, 3].map((i) => <circle key={i} r="7" />)}
+          </g>
+        </svg>
         <div key={flash} className={flash ? 'scam-flash' : ''} />
         {status !== 'live' && status !== 'starting' && (
           <div className="scam-msg">

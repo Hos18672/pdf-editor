@@ -769,13 +769,16 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .bp-mobile .ocrbar { top: calc(76px + var(--safe-t)); }
 .bp-mobile .ocrbar .oa { width: 100%; } .bp-mobile .ocrbar .oa .btn { flex: 1; }
 
+/* ---------- lazy screens ---------- */
+.lazy-wait { height: var(--app-h, 100%); width: 100%; display: grid; place-items: center; color: var(--muted); background: var(--desk); }
+
 /* ---------- document scanner ---------- */
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; display: inline-block; animation: spin .8s linear infinite; flex: none; opacity: .75; }
 .scam { position: fixed; inset: 0; z-index: 40; background: #07080C; color: #fff; display: flex; flex-direction: column; overflow: hidden; user-select: none; -webkit-user-select: none; }
 .scam-view { position: absolute; inset: 0; }
 .scam-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #07080C; }
 .scam-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
-.scam-svg polygon { fill: rgba(255,225,77,.16); stroke: #FFE14D; stroke-width: 3; stroke-linejoin: round; transition: fill .2s; filter: drop-shadow(0 0 6px rgba(0,0,0,.45)); }
+.scam-svg polygon { fill: rgba(255,225,77,.16); stroke-opacity: .98; stroke: #FFE14D; stroke-width: 3; stroke-linejoin: round; transition: fill .2s; }
 .scam-svg polygon.go { fill: rgba(91,214,154,.22); stroke: #5BD69A; }
 .scam-svg circle { fill: #fff; stroke: #FFE14D; stroke-width: 3; }
 .scam-guide { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); width: min(78vw, 560px); border: 2.5px dashed rgba(255,255,255,.75); border-radius: 18px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.35); display: flex; align-items: flex-end; justify-content: center; pointer-events: none; }
@@ -784,15 +787,15 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 @keyframes scam-flash { from { opacity: .85; } to { opacity: 0; } }
 .scam-top { position: absolute; left: 0; right: 0; top: 0; padding: calc(14px + var(--safe-t)) calc(14px + var(--safe-r)) 14px calc(14px + var(--safe-l)); display: flex; align-items: center; gap: 10px; background: linear-gradient(rgba(0,0,0,.5), transparent); z-index: 2; }
 .scam-top .sp { flex: 1; }
-.scam-round { width: 46px; height: 46px; border-radius: 50%; border: 0; background: rgba(20,22,32,.55); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: #fff; display: grid; place-items: center; }
+.scam-round { width: 46px; height: 46px; border-radius: 50%; border: 0; background: rgba(20,22,32,.72); color: #fff; display: grid; place-items: center; }
 .scam-round.on { background: #FFE14D; color: #1E2559; }
-.scam-pill { height: 40px; padding: 0 14px; border-radius: 999px; border: 0; background: rgba(20,22,32,.55); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); color: rgba(255,255,255,.85); font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
+.scam-pill { height: 40px; padding: 0 14px; border-radius: 999px; border: 0; background: rgba(20,22,32,.72); color: rgba(255,255,255,.85); font-weight: 600; font-size: 13.5px; display: flex; align-items: center; gap: 6px; }
 .scam-pill.on { color: #FFE14D; }
-.scam-hint { position: absolute; left: 50%; top: calc(80px + var(--safe-t)); transform: translateX(-50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 18px; border-radius: 18px; background: rgba(20,22,32,.62); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); text-align: center; max-width: calc(100% - 32px); pointer-events: none; }
+.scam-hint { position: absolute; left: 50%; top: calc(80px + var(--safe-t)); transform: translateX(-50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 9px 18px; border-radius: 18px; background: rgba(20,22,32,.78); text-align: center; max-width: calc(100% - 32px); pointer-events: none; }
 .scam-hint b { font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #FFE14D; }
 .scam-hint span { font-size: 14.5px; font-weight: 600; }
 .scam-bottom { position: absolute; left: 0; right: 0; bottom: 0; z-index: 2; padding: 26px calc(16px + var(--safe-r)) calc(22px + var(--safe-b)) calc(16px + var(--safe-l)); background: linear-gradient(transparent, rgba(0,0,0,.66) 30%); display: flex; flex-direction: column; align-items: center; gap: 18px; }
-.scam-modes { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(20,22,32,.55); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.scam-modes { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(20,22,32,.72); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
 .scam-modes::-webkit-scrollbar { display: none; }
 .scam-modes button { height: 36px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; color: rgba(255,255,255,.78); font-weight: 600; font-size: 13.5px; white-space: nowrap; }
 .scam-modes button.on { background: #FFE14D; color: #1E2559; }
