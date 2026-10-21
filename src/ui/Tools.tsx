@@ -22,6 +22,7 @@ interface Props {
   onBack: () => void; onEdit: (start: EditorStart) => void;
   onOpenInEditor: (name: string, bytes: Uint8Array) => void;
   onApplyPages: (pages: PageState[]) => void;
+  onScan: () => void;
 }
 
 const TILE = { edit: '#FFE14D', org: '#DDE2FF', conv: '#E3F1E9' };
@@ -46,6 +47,11 @@ export function Tools(p: Props) {
       { name: 'Edit PDF', desc: 'Retype text, add text, images and shapes', icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
       { name: 'Fill a form', desc: 'Type in fields, tick boxes, pick options', icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
       { name: 'Sign', desc: 'Draw, type or upload a signature', icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
+    ] },
+    { name: 'Scan', items: [
+      { name: 'Scan a document', desc: 'Camera or photos: auto-crop, straighten and clean up', icon: 'scan:duotone', tile: '#DDF1E4', go: p.onScan },
+      { name: 'Scan an ID card', desc: 'Front and back on one page, actual size', icon: 'identification-card:duotone', tile: '#DDF1E4', go: () => { try { localStorage.setItem('pe.scan.mode', 'id'); } catch { /* private */ } p.onScan(); } },
+      { name: 'Scan a receipt or invoice', desc: 'Long receipts and bills, sharp and white', icon: 'receipt:duotone', tile: '#DDF1E4', go: () => { try { localStorage.setItem('pe.scan.mode', 'receipt'); } catch { /* private */ } p.onScan(); } },
     ] },
     { name: 'Organize pages', items: [
       { name: 'Combine PDFs', desc: 'Merge several files into one', icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },

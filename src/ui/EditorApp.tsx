@@ -8,6 +8,7 @@ import { appBase } from './assets';
 import { Editor, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { Start, OpenState, type QuickAction } from './Start';
 import { Tools, ToolId } from './Tools';
+import { Scanner } from './scan/Scanner';
 import { useBp, useEdgeColors, useNativeInsets, useTheme, useVisualViewportHeight } from './hooks';
 import type { M } from '../engine/types';
 
@@ -86,7 +87,7 @@ export default function EditorApp(host: HostProps) {
   const [openState, setOpenState] = useState<OpenState>({ kind: 'idle' });
   const [busy, setBusy] = useState<BusyMsg | null>(null);
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
-  const [route, setRoute] = useState<{ name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' }>({ name: 'home' });
+  const [route, setRoute] = useState<{ name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' } | { name: 'scan'; back: 'home' | 'tools' }>({ name: 'home' });
   // a tools card asked for a file first: where to land once it is open
   const startAfterOpen = useRef<EditorStart | undefined>(undefined);
   const pending = useRef<{ name: string; bytes: Uint8Array } | null>(null);
@@ -162,6 +163,7 @@ export default function EditorApp(host: HostProps) {
   const quick = (q: QuickAction) => {
     if (q === 'sign' || q === 'fill') { startAfterOpen.current = q; pick(); }
     else if (q === 'tools') openTools('home');
+    else if (q === 'scan') setRoute({ name: 'scan', back: 'home' });
     else { startAfterOpen.current = undefined; setRoute({ name: 'tools', tool: q, back: 'home' }); }
   };
 
@@ -172,13 +174,18 @@ export default function EditorApp(host: HostProps) {
         <Editor key={file.name + file.bytes.length} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
           toast={setToastMsg} setBusy={setBusy} onReplace={replaceBytes} />
+      ) : route.name === 'scan' ? (
+        <Scanner host={host} bp={bp} toast={setToastMsg} setBusy={setBusy}
+          onClose={() => setRoute(route.back === 'tools' ? { name: 'tools', tool: 'hub', back: 'home' } : { name: 'home' })}
+          onOpenInEditor={(name, bytes) => open(name, bytes)} />
       ) : route.name === 'tools' ? (
         <Tools initial={route.tool} bp={bp} host={host} toast={setToastMsg} setBusy={setBusy}
           current={file && pdf ? { name: file.name, bytes: file.bytes, pdf, pages: hist.snap.pages, changed: hist.past > 0 } : null}
           onBack={() => { startAfterOpen.current = undefined; setRoute(route.back === 'editor' && file ? { name: 'editor' } : { name: 'home' }); }}
           onOpenInEditor={(name, bytes) => open(name, bytes)}
           onEdit={(start) => { if (file) setRoute({ name: 'editor', start }); else { startAfterOpen.current = start; pick(); } }}
-          onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }} />
+          onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }}
+          onScan={() => setRoute({ name: 'scan', back: 'tools' })} />
       ) : (
         <Start state={openState} onFile={(f) => readFile(f)} onPick={pick} mobile={bp === 'mobile'}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}

@@ -67,6 +67,33 @@ export async function stopOcr() {
 }
 
 /**
+ * Recognises the text on a canvas. `toPdf` maps canvas pixels to PDF user space and `ptPerPx` is the
+ * scale between them; lines come back ready for an invisible text layer.
+ */
+export async function recognizeCanvas(worker: Worker, canvas: HTMLCanvasElement, toPdf: (x: number, y: number) => [number, number], ptPerPx: number): Promise<LayerLine[]> {
+  const { data } = await worker.recognize(canvas, {}, { blocks: true, text: false, hocr: false, tsv: false });
+  const out: LayerLine[] = [];
+  for (const block of data.blocks ?? []) for (const para of block.paragraphs ?? []) for (const line of para.lines ?? []) {
+    const words = (line.words ?? []).filter((w: any) => w.text?.trim() && w.confidence > 25);
+    if (!words.length) continue;
+    const text = words.map((w: any) => w.text.trim()).join(' ');
+    // baseline (image px): tesseract's line baseline, else the bottom of letters without descenders
+    const bl = line.baseline && line.baseline.x1 > line.baseline.x0 ? line.baseline : null;
+    const left = Math.min(...words.map((w: any) => w.bbox.x0)), right = Math.max(...words.map((w: any) => w.bbox.x1));
+    const yAt = (x: number) => (bl ? bl.y0 + ((bl.y1 - bl.y0) * (x - bl.x0)) / (bl.x1 - bl.x0) : line.bbox.y1);
+    // size from the cap / ascender height: the top of words with capitals, digits or tall letters
+    const tall = words.filter((w: any) => /[A-ZÄÖÜ0-9bdfhklß]/.test(w.text));
+    const tops = (tall.length ? tall : words).map((w: any) => w.bbox.y0).sort((a: number, b: number) => a - b);
+    const top = tops[Math.floor(tops.length / 2)];
+    const capPx = Math.max(4, yAt((left + right) / 2) - top);
+    const [x0, y0] = toPdf(left, yAt(left));
+    const [x1, y1] = toPdf(right, yAt(right));
+    out.push({ text, x0, y0, x1, y1, size: (capPx / 0.72) * ptPerPx });
+  }
+  return out;
+}
+
+/**
  * Recognises one page and returns its lines in PDF user space, ready for an invisible text layer.
  * The page is rendered at about 300 dpi (capped for memory on phones).
  */
@@ -83,25 +110,7 @@ export async function recognizePage(worker: Worker, pdf: any, pageNo: number): P
   ctx.fillStyle = '#fff';
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   await page.render({ canvasContext: ctx, viewport: vp }).promise;
-  const { data } = await worker.recognize(canvas, {}, { blocks: true, text: false, hocr: false, tsv: false });
+  const out = await recognizeCanvas(worker, canvas, (x, y) => vp.convertToPdfPoint(x, y), 1 / scale);
   canvas.width = canvas.height = 0;
-  const out: LayerLine[] = [];
-  for (const block of data.blocks ?? []) for (const para of block.paragraphs ?? []) for (const line of para.lines ?? []) {
-    const words = (line.words ?? []).filter((w: any) => w.text?.trim() && w.confidence > 25);
-    if (!words.length) continue;
-    const text = words.map((w: any) => w.text.trim()).join(' ');
-    // baseline (image px): tesseract's line baseline, else the bottom of letters without descenders
-    const bl = line.baseline && line.baseline.x1 > line.baseline.x0 ? line.baseline : null;
-    const left = Math.min(...words.map((w: any) => w.bbox.x0)), right = Math.max(...words.map((w: any) => w.bbox.x1));
-    const yAt = (x: number) => (bl ? bl.y0 + ((bl.y1 - bl.y0) * (x - bl.x0)) / (bl.x1 - bl.x0) : line.bbox.y1);
-    // size from the cap / ascender height: the top of words with capitals, digits or tall letters
-    const tall = words.filter((w: any) => /[A-ZÄÖÜ0-9bdfhklß]/.test(w.text));
-    const tops = (tall.length ? tall : words).map((w: any) => w.bbox.y0).sort((a: number, b: number) => a - b);
-    const top = tops[Math.floor(tops.length / 2)];
-    const capPx = Math.max(4, yAt((left + right) / 2) - top);
-    const [x0, y0] = vp.convertToPdfPoint(left, yAt(left));
-    const [x1, y1] = vp.convertToPdfPoint(right, yAt(right));
-    out.push({ text, x0, y0, x1, y1, size: capPx / 0.72 / scale });
-  }
   return out;
 }

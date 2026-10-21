@@ -104,6 +104,11 @@ function NativeShell({ dark }: { dark: boolean }) {
           allowFileAccessFromFileURLs: true,
           allowUniversalAccessFromFileURLs: true,
           setBuiltInZoomControls: false,
+          // the document scanner's live camera (getUserMedia): Android asks for the camera permission
+          // when the page first requests it; the preview video must play without a tap
+          mediaPlaybackRequiresUserAction: false,
+          allowsInlineMediaPlayback: true,
+          mediaCapturePermissionGrantType: 'grant',
           injectedJavaScriptBeforeContentLoaded: CATCH_PAGE_ERRORS,
           onMessage: onPageMessage,
           // only in the CI smoke-test build: lets the test read the page through DevTools

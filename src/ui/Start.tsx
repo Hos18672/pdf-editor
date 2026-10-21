@@ -8,7 +8,7 @@ export type OpenState =
   | { kind: 'password'; name: string; wrong: boolean }
   | { kind: 'error'; message: string };
 
-export type QuickAction = 'sign' | 'fill' | 'combine' | 'convert' | 'tools';
+export type QuickAction = 'scan' | 'sign' | 'fill' | 'combine' | 'convert' | 'tools';
 
 const ANDROID_URL = 'https://github.com/Hos18672/pdf-editor/releases/latest';
 
@@ -26,6 +26,7 @@ export function LogoMark({ size = 40 }: { size?: number }) {
 }
 
 const QUICK: [QuickAction, string, string, string][] = [
+  ['scan', 'Scan', 'scan:duotone', '#DDF1E4'],
   ['sign', 'Sign', 'signature:duotone', '#FFE14D'],
   ['fill', 'Fill a form', 'textbox:duotone', '#DDE2FF'],
   ['combine', 'Combine', 'stack:duotone', '#E3F1E9'],
@@ -130,7 +131,7 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, the
         <div className="s2-copy">
           <div className="s2-pill"><span className="lk"><Icon name="lock" size={13} /></span>Files never leave your device</div>
           <h1>Edit any PDF.<br /><span className="mk">Right here.</span></h1>
-          <p className="s2-lead">Retype existing text in its original font, sign, fill forms, merge and convert. All in your browser, all offline.</p>
+          <p className="s2-lead">Retype existing text in its original font, sign, fill forms, scan, merge and convert. All in your browser, all offline.</p>
           {card}
           {idle && !over && (
             <div className="s2-chips" role="list" aria-label="Quick tools">
