@@ -1,0 +1,77 @@
+name: Android smoke test
+
+# Builds an x86_64 APK, starts it on an emulator and saves a screenshot + logcat.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: android-smoke
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: npm ci
+
+      - name: Generate the native Android project
+        env:
+          CI: '1'
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build release APK (x86_64 for the emulator)
+        working-directory: android
+        env:
+          CI: '1'
+          NODE_ENV: production
+        run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=x86_64
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: |
+            mkdir -p out
+            adb install -r android/app/build/outputs/apk/release/app-release.apk
+            adb logcat -c
+            adb shell am start -n com.rezahossaini.pdfeditor/.MainActivity
+            sleep 30
+            adb exec-out screencap -p > out/start.png
+            adb shell uiautomator dump /sdcard/ui.xml || true
+            adb pull /sdcard/ui.xml out/ui.xml || true
+            adb shell "cmd uimode night yes" || true
+            sleep 8
+            adb exec-out screencap -p > out/start-dark.png
+            adb logcat -d > out/logcat.txt
+            adb shell dumpsys webviewupdate > out/webview.txt || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-smoke
+          path: out/
