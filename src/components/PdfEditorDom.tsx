@@ -15,7 +15,7 @@ if (bridge) {
     let injected: any = null;
     try { injected = JSON.parse(bridge.injectedObjectJson?.() ?? 'null'); } catch { /* not there yet */ }
     w.$$EXPO_DOM_HOST_OS ??= injected?.EXPO_DOM_HOST_OS ?? 'android';
-    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome'], props: { isNative: true } };
+    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets'], props: { isNative: true } };
   }
 }
 
@@ -43,6 +43,7 @@ const native = bridge ? {
   pickPdf: () => callNative<{ name: string; base64: string } | null>('pickPdf', []),
   savePdf: (base64: string, name: string) => callNative<string | void>('savePdf', [base64, name]),
   onChrome: (c: ChromeColors) => { callNative('onChrome', [c]).catch(() => null); },
+  getInsets: () => callNative<{ top: number; bottom: number; left: number; right: number }>('getInsets', []),
 } : null;
 
 // The whole editor is a DOM component: on the web it renders directly, on
@@ -53,6 +54,7 @@ export default function PdfEditorDom(props: {
   pickPdf?: () => Promise<{ name: string; base64: string } | null>;
   savePdf?: (base64: string, name: string) => Promise<string | void>;
   onChrome?: (c: ChromeColors) => void;
+  getInsets?: () => Promise<{ top: number; bottom: number; left: number; right: number }>;
 }) {
   if (native) return <EditorApp {...native} />;
   return <EditorApp isNative={props.isNative} pickPdf={props.pickPdf} savePdf={props.savePdf} onChrome={props.onChrome} />;

@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Platform, StyleSheet, View, useColorScheme } from 'react-native';
+import { useCallback, useRef, useState } from 'react';
+import { Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationBar } from 'expo-navigation-bar';
@@ -69,40 +69,48 @@ export default function Index() {
 
 type Chrome = { top: string; bottom: string; topDark: boolean; bottomDark: boolean };
 
-/** Android: the page runs edge to edge; the status / navigation bar areas take the page's own edge colours. */
+/**
+ * Android: the page runs edge to edge, under the status and navigation bars (they stay transparent).
+ * The page asks for the bar sizes (`getInsets`) and pads its own content; it also reports the colours
+ * at its edges so the bar icons stay readable. KeyboardAvoidingView keeps the page above the keyboard.
+ */
 function NativeShell({ dark }: { dark: boolean }) {
   const insets = useSafeAreaInsets();
-  const desk = dark ? '#0F1118' : '#ECEEF3'; // page background until the page reports its colours
+  const latest = useRef(insets);
+  latest.current = insets;
   const [chrome, setChrome] = useState<Chrome | null>(null);
-  const c: Chrome = chrome ?? { top: desk, bottom: desk, topDark: dark, bottomDark: dark };
+  const desk = dark ? '#0F1118' : '#ECEEF3'; // page background until the page has painted
+  const topDark = chrome ? chrome.topDark : dark, bottomDark = chrome ? chrome.bottomDark : dark;
+  const getInsets = useCallback(async () => {
+    const i = latest.current;
+    // with the keyboard up the page ends at the keyboard: no navigation-bar gap
+    return { top: i.top, bottom: Keyboard.isVisible() ? 0 : i.bottom, left: i.left, right: i.right };
+  }, []);
   return (
-    <View style={[styles.fill, { backgroundColor: c.bottom }]}>
-      <StatusBar style={c.topDark ? 'light' : 'dark'} />
-      <NavigationBar style={c.bottomDark ? 'light' : 'dark'} />
-      <View style={{ height: insets.top, backgroundColor: c.top }} />
-      <View style={[styles.fill, { backgroundColor: c.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
-        <PdfEditorDom
-          isNative
-          pickPdf={pickPdf}
-          savePdf={savePdf}
-          onChrome={setChrome}
-          dom={{
-            style: { flex: 1 },
-            // react-native-webview supports <input type="file"> (signature photos, images) on Android
-            useExpoDOMWebView: false,
-            allowFileAccess: true,
-            allowFileAccessFromFileURLs: true,
-            allowUniversalAccessFromFileURLs: true,
-            setBuiltInZoomControls: false,
-            injectedJavaScriptBeforeContentLoaded: CATCH_PAGE_ERRORS,
-            onMessage: onPageMessage,
-            // only in the CI smoke-test build: lets the test read the page through DevTools
-            webviewDebuggingEnabled: process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1',
-          } as any}
-        />
-      </View>
-      <View style={{ height: insets.bottom, backgroundColor: c.bottom }} />
-    </View>
+    <KeyboardAvoidingView behavior="padding" style={[styles.fill, { backgroundColor: chrome?.bottom ?? desk }]}>
+      <StatusBar style={topDark ? 'light' : 'dark'} />
+      <NavigationBar style={bottomDark ? 'light' : 'dark'} />
+      <PdfEditorDom
+        isNative
+        pickPdf={pickPdf}
+        savePdf={savePdf}
+        onChrome={setChrome}
+        getInsets={getInsets}
+        dom={{
+          style: { flex: 1, backgroundColor: desk },
+          // react-native-webview supports <input type="file"> (signature photos, images) on Android
+          useExpoDOMWebView: false,
+          allowFileAccess: true,
+          allowFileAccessFromFileURLs: true,
+          allowUniversalAccessFromFileURLs: true,
+          setBuiltInZoomControls: false,
+          injectedJavaScriptBeforeContentLoaded: CATCH_PAGE_ERRORS,
+          onMessage: onPageMessage,
+          // only in the CI smoke-test build: lets the test read the page through DevTools
+          webviewDebuggingEnabled: process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1',
+        } as any}
+      />
+    </KeyboardAvoidingView>
   );
 }
 

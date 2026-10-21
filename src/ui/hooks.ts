@@ -157,3 +157,32 @@ export function useEdgeColors(report: ((c: ChromeColors) => void) | undefined, d
     return () => { mo.disconnect(); document.removeEventListener('animationend', late, true); window.removeEventListener('resize', soon); cancelAnimationFrame(raf); clearTimeout(t); };
   }, deps); // eslint-disable-line react-hooks/exhaustive-deps
 }
+
+/** Status-bar height the page draws under (Android app), in CSS px. */
+export const safeTop = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--safe-t')) || 0;
+
+/**
+ * Android app: the page runs edge to edge. Ask the app for the status / navigation bar sizes and expose
+ * them as --safe-t / --safe-b / --safe-l / --safe-r (env(safe-area-inset-*) is not reliable in a WebView).
+ */
+export function useNativeInsets(get: (() => Promise<{ top: number; bottom: number; left: number; right: number }>) | undefined) {
+  useEffect(() => {
+    if (!get) return;
+    let alive = true, t = 0;
+    const apply = () => {
+      get().then((i) => {
+        if (!alive || !i) return;
+        const s = document.documentElement.style;
+        s.setProperty('--safe-t', `${Math.round(i.top)}px`);
+        s.setProperty('--safe-b', `${Math.round(i.bottom)}px`);
+        s.setProperty('--safe-l', `${Math.round(i.left)}px`);
+        s.setProperty('--safe-r', `${Math.round(i.right)}px`);
+      }).catch(() => null);
+    };
+    // the keyboard and rotation resize the page; ask again once things settle
+    const again = () => { apply(); clearTimeout(t); t = window.setTimeout(apply, 350); };
+    again();
+    window.addEventListener('resize', again);
+    return () => { alive = false; clearTimeout(t); window.removeEventListener('resize', again); };
+  }, [get]);
+}

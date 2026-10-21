@@ -437,17 +437,33 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
   const mapped = !!font && !font.editFamily && !identity;
   // put the baseline of the first line exactly on the original baseline
   const lineTop = b.asc * zoom - baselineInLine(fontCss, size, lineH);
+  // Edited text can be longer (or have more lines) than the original line: the tap target grows with
+  // it, measured against the original line so it follows the real font's widths.
+  const shown = edit && !editing ? edit.text : null;
+  const grown = useMemo(() => {
+    if (shown === null || shown === run.str) return null;
+    const ls = shown.split('\n');
+    const base = textWidth(run.str, fontCss) || 1;
+    const widest = Math.max(...ls.map((l) => textWidth(l, fontCss)));
+    return { w: Math.max(b.w, (b.w * widest * scale) / base), lines: ls.length };
+  }, [shown, run.str, fontCss, b.w, scale]);
   const style: React.CSSProperties = {
-    left: b.x * zoom, top: b.top * zoom, width: b.w * zoom, height: b.height * zoom,
+    left: b.x * zoom, top: b.top * zoom, width: (grown?.w ?? b.w) * zoom,
+    height: (b.height + (grown && grown.lines > 1 ? (grown.lines - 1) * b.h * scale * 1.2 : 0)) * zoom,
     transform: b.angle ? `rotate(${b.angle}rad)` : undefined,
     transformOrigin: `0 ${b.asc * zoom}px`,
   };
 
   if ((!edit || live) && !editing) {
-    return <div className={`run${selected ? ' selected' : ''}`} data-key={run.key} style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }} />;
+    return <div className={`run${selected ? ' selected' : ''}${edit ? ' changed' : ''}`} data-key={run.key} style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }} />;
   }
   const lines = (editing ? value : edit!.text).split('\n');
-  const textStyle: React.CSSProperties = { fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop };
+  // letters the embedded font lacks fall back to a system font: give them the line's weight and slant,
+  // without faking bold on the embedded font itself
+  const textStyle: React.CSSProperties = {
+    fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop,
+    fontWeight: font?.fallback.bold ? 700 : 400, fontStyle: font?.fallback.italic ? 'italic' : 'normal', fontSynthesis: 'none',
+  };
   return (
     <div className={`run edited${editing ? ' editing' : ''}${selected ? ' selected' : ''}`} data-key={run.key} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
       <div className="cover" style={{
@@ -494,6 +510,13 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
 }
 
 let measureCtx: CanvasRenderingContext2D | null = null;
+/** Width of a string at 100px in the given CSS font family. */
+function textWidth(text: string, fontCss: string) {
+  measureCtx ??= document.createElement('canvas').getContext('2d');
+  if (!measureCtx) return text.length * 50;
+  measureCtx.font = `100px ${fontCss}`;
+  return measureCtx.measureText(text).width;
+}
 /** Character index closest to a distance along the line (first line only). */
 function caretIndex(text: string, t: number | null, fontCss: string, size: number, actualWidth: number | null) {
   const first = text.split('\n')[0];

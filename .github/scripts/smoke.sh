@@ -39,6 +39,15 @@ print('' if not m else f'{(int(m[1])+int(m[3]))//2} {(int(m[2])+int(m[4]))//2}')
     sock2=$(adb shell cat /proc/net/unix | grep -o 'webview_devtools_remote_[0-9]*' | head -1)
     adb forward tcp:9222 "localabstract:$sock2"
     node .github/scripts/cdp-eval.mjs "JSON.stringify({ runs: document.querySelectorAll('.run').length, file: document.querySelector('.fname')?.textContent, errors: window.__pageErrors })" | tee -a out/flow.txt
+    node .github/scripts/cdp-eval.mjs "JSON.stringify({ safeT: getComputedStyle(document.documentElement).getPropertyValue('--safe-t'), safeB: getComputedStyle(document.documentElement).getPropertyValue('--safe-b'), h: innerHeight, dpr: devicePixelRatio })" | tee -a out/flow.txt
+    # tap the first text line with a real touch and check the page shrinks above the on-screen keyboard
+    adb shell settings put secure show_ime_with_hard_keyboard 1
+    pos=$(node .github/scripts/cdp-eval.mjs "(() => { const r = document.querySelector('.run').getBoundingClientRect(); return Math.round((r.left + 6) * devicePixelRatio) + ' ' + Math.round((r.top + r.height / 2) * devicePixelRatio); })()" | tr -d '"')
+    echo "tap at $pos" | tee -a out/flow.txt
+    adb shell input tap $pos
+    sleep 4
+    adb exec-out screencap -p > out/keyboard.png
+    node .github/scripts/cdp-eval.mjs "JSON.stringify({ editing: !!document.querySelector('.run.editing'), h: innerHeight, slimbarBottom: Math.round(document.querySelector('.slimbar')?.getBoundingClientRect().bottom ?? -1), safeB: getComputedStyle(document.documentElement).getPropertyValue('--safe-b') })" | tee -a out/flow.txt
   else
     adb shell input keyevent BACK
   fi

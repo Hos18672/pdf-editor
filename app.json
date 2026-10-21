@@ -26,7 +26,13 @@
     },
     "scheme": "pdfeditor",
     "plugins": [
-      "expo-router"
+      "expo-router",
+      [
+        "expo-navigation-bar",
+        {
+          "enforceContrast": false
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

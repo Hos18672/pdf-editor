@@ -14,7 +14,7 @@ import { exportPdf } from '../engine/exporter';
 import type { EditorObject, TextEdit, FontFamily } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
-import { setSoftKeyboard } from './hooks';
+import { setSoftKeyboard, safeTop } from './hooks';
 import { ThemeButton } from './Start';
 
 export interface HostProps {
@@ -23,6 +23,8 @@ export interface HostProps {
   savePdf?: (base64: string, name: string) => Promise<string | void>;
   /** Android: colours at the page's top / bottom edge, for the system bars */
   onChrome?: (c: import('./hooks').ChromeColors) => void;
+  /** Android: sizes of the status / navigation bars the page draws under */
+  getInsets?: () => Promise<{ top: number; bottom: number; left: number; right: number }>;
 }
 export interface ToastMsg { msg: string; kind?: 'ok' | 'err'; action?: { label: string; run: () => void } }
 export interface BusyMsg { title: string; detail?: string; progress?: number }
@@ -644,7 +646,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   };
   const goToPage = (src: number) => {
     const el = wrapRef.current?.querySelector<HTMLElement>(`.pageOuter[data-src="${src}"]`);
-    if (el && wrapRef.current) wrapRef.current.scrollTo({ top: el.offsetTop - 100, behavior: 'smooth' });
+    if (el && wrapRef.current) wrapRef.current.scrollTo({ top: el.offsetTop - 100 - safeTop(), behavior: 'smooth' });
   };
   const focusField = (f?: FormField) => {
     if (!f) return;
@@ -664,7 +666,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const el = wrap?.querySelector(sel);
       if (!wrap || !el) return;
       const wr = wrap.getBoundingClientRect(), r = el.getBoundingClientRect();
-      const top = wr.top + 76; // below the floating top bar
+      const top = wr.top + 76 + safeTop(); // below the floating top bar
       const h = wr.bottom - top;
       const target = top + h * 0.28;
       if (r.top > top + h * 0.45 || r.top < top + 8) wrap.scrollBy({ top: r.top - target, behavior: 'smooth' });
