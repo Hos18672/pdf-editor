@@ -68,6 +68,10 @@ interface Props {
   onNextRun: (key: string) => void;
   /** phone: open the properties sheet of an object */
   onMore: (id: string) => void;
+  /** picture page: a tap on it reads the text there */
+  onPictureTap?: (x: number, y: number) => void;
+  /** picture page: text being read (whole page in the background, a tapped line) */
+  reading?: { page: boolean; band: { y0: number; y1: number } | null; at: { x: number; y: number } | null };
 }
 
 export function PageView(p: Props) {
@@ -214,6 +218,9 @@ export function PageView(p: Props) {
       }
       return;
     }
+    // a picture page (scan): tapping its text reads it, then opens the line for editing
+    // (a tap that only ends editing or clears a selection does not)
+    if (p.onPictureTap && p.tool === 'edit') { if (!hadSelection.current) p.onPictureTap(pt.x, pt.y); return; }
     // new text boxes are placed on click (tap), so scrolling or a two-finger gesture never adds one
     if (p.tool !== 'text') return;
     p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - p.style.fontSize * 0.6, w: 20, h: p.style.fontSize * 1.2,
@@ -222,7 +229,9 @@ export function PageView(p: Props) {
     p.onEditing(id);
     p.onTextPlaced();
   };
+  const hadSelection = useRef(false);
   const onLayerDown = (e: React.PointerEvent) => {
+    hadSelection.current = p.selected !== null || p.editing !== null;
     if (e.button !== 0 || gesture.multi) return;
     if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
@@ -338,8 +347,17 @@ export function PageView(p: Props) {
           {draft && <Draft d={draft} zoom={zoom} tool={p.tool} style={p.style} />}
           {guides.v.map((x) => <div key={'v' + x} className="guide v" style={{ left: x * zoom }} />)}
           {guides.h.map((y) => <div key={'h' + y} className="guide h" style={{ top: y * zoom }} />)}
+          {p.reading?.band && <div className="ocr-band" style={{ top: p.reading.band.y0 * zoom, height: (p.reading.band.y1 - p.reading.band.y0) * zoom }} />}
+          {p.reading?.at && (
+            <div className="ocr-tap" style={{ left: p.reading.at.x * zoom, top: p.reading.at.y * zoom }} role="status">
+              <span className="spinner" />Reading text…
+            </div>
+          )}
         </div>
       </div>
+      {p.reading?.page && !p.reading.at && (
+        <div className="ocr-page" role="status"><span className="spinner" />Reading this page</div>
+      )}
       <div className="pageNum">{p.index + 1}</div>
     </div>
   );

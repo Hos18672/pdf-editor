@@ -1,4 +1,4 @@
-import { PDFDocument, PDFFont, PDFPage, StandardFonts, pushGraphicsState, popGraphicsState, beginText, endText,
+import { PDFDocument, PDFFont, PDFPage, StandardFonts, PDFArray, PDFName, pushGraphicsState, popGraphicsState, beginText, endText,
   setFontAndSize, setTextRenderingMode, TextRenderingMode, setTextMatrix, setCharacterSqueeze, showText } from 'pdf-lib';
 
 /** One line of recognised (or laid-out) text, in PDF user space of its page. */
@@ -19,6 +19,9 @@ export async function addTextLayer(doc: PDFDocument, page: PDFPage, lines: Layer
   const helv = font ?? (await doc.embedFont(StandardFonts.Helvetica));
   // keep whatever the page's own content leaves on the graphics state away from the layer
   page.node.normalize();
+  // the page may have been rewritten with a single content stream since: appending needs an array
+  const contents = page.node.get(PDFName.of('Contents'));
+  if (contents && !(page.node.lookup(PDFName.of('Contents')) instanceof PDFArray)) page.node.set(PDFName.of('Contents'), doc.context.obj([contents]));
   const key = page.node.newFontDictionary('OcrF', helv.ref);
   const charset = new Set(helv.getCharacterSet());
   const ops: any[] = [pushGraphicsState(), beginText(), setTextRenderingMode(TextRenderingMode.Invisible)];

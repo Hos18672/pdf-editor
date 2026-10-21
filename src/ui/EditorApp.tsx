@@ -166,11 +166,6 @@ export default function EditorApp(host: HostProps) {
     } else inputRef.current?.click();
   };
   // the same document with new bytes (e.g. after text recognition): keeps the edit history
-  const replaceBytes = useCallback(async (bytes: Uint8Array) => {
-    const doc = await openPdf(bytes);
-    setPdf((old: any) => { if (old && old !== doc) setTimeout(() => old.destroy?.(), 2000); return doc; });
-    setFile((f) => (f ? { name: f.name, bytes } : f));
-  }, []);
   const close = () => { setFile(null); setPdf(null); setInfos([]); setRoute({ name: 'home' }); };
   const openTools = (back: 'home' | 'editor') => { startAfterOpen.current = undefined; setRoute({ name: 'tools', tool: 'hub', back }); };
   const quick = (q: QuickAction) => {
@@ -187,7 +182,7 @@ export default function EditorApp(host: HostProps) {
       {route.name === 'editor' && file && pdf ? (
         <Editor key={file.name + file.bytes.length} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
-          toast={setToastMsg} setBusy={setBusy} onReplace={replaceBytes} />
+          toast={setToastMsg} setBusy={setBusy} />
       ) : route.name === 'scan' ? (
         <Scanner host={host} bp={bp} toast={setToastMsg} setBusy={setBusy}
           onClose={() => setRoute(route.back === 'tools' ? { name: 'tools', tool: 'hub', back: 'home' } : { name: 'home' })}

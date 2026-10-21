@@ -6,6 +6,7 @@ import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
+import { addTextLayer } from './textLayer';
 import type { ExportInput, EditorObject, FontFamily, TextEdit } from './types';
 
 const f = fmtNum;
@@ -128,16 +129,16 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     let add = '';
 
     for (const e of edits) {
-      const hits = glyphsInRegion(glyphs, e).filter((g) => !remove.has(g));
+      const hits = e.ocr ? [] : glyphsInRegion(glyphs, e).filter((g) => !remove.has(g));
       hits.forEach((g) => remove.add(g));
+      // Invisible text (OCR layer of a scan, or a line recognised in the editor): the letters people
+      // see are part of an image, so cover them with the paper colour and draw the new text visibly.
+      const hidden = !!e.ocr || (hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length);
       if (!e.text.trim()) {
-        if (!hits.length) add += whiteoutRegion(e);
+        if (!hits.length || hidden) add += whiteoutRegion(e, hidden);
         continue;
       }
       const lines = e.text.split('\n');
-      // Invisible text (OCR layer of a scan): the letters people see are part of an image,
-      // so cover them with the paper colour and draw the new text visibly.
-      const hidden = hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length;
       const glyphless = hits.length > 0 && hits.every((g) => /GlyphLess/i.test(baseFontOf(fontDict, g.style.fontRes)));
       // Scans / picture pages: the new text made of the page's own letters
       if (hidden && input.scanImage) {
@@ -243,6 +244,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     merged.set(tail, head.length + body.length);
     const stream = doc.context.flateStream(merged);
     leaf.set(PDFName.of('Contents'), doc.context.register(stream));
+  }
+
+  // recognised text of picture pages: searchable and selectable in the saved file
+  if (input.ocrLayer) {
+    const helv = await doc.embedFont(StandardFonts.Helvetica);
+    for (const [pi, lines] of Object.entries(input.ocrLayer)) if (pages[+pi] && lines.length) await addTextLayer(doc, pages[+pi], lines, helv);
   }
 
   if (input.forms && Object.keys(input.forms).length) await fillForm(doc, input.forms, !!input.flatten);

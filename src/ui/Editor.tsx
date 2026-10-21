@@ -11,7 +11,7 @@ import { Thumb } from './Thumb';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, OBJ_TITLE, Stepper, toolHasProps, fontLabel, Toggle } from './Panel';
 import { readFields, FormField, isFilled } from './Fields';
 import { exportPdf } from '../engine/exporter';
-import { pageNeedsText } from '../engine/textLayer';
+import { pageNeedsText, LayerLine } from '../engine/textLayer';
 import { scanStyles } from './scanStyle';
 import { ConfirmClose } from './ConfirmClose';
 import { useBack } from './back';
@@ -109,13 +109,11 @@ const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', '
 /** What the editor opens with when started from the tools page. */
 export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages';
 
-export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onReplace }: {
+export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start }: {
   host: HostProps; file: { name: string; bytes: Uint8Array }; pdf: any; infos: PageInfo[];
   hist: ReturnType<typeof useHistory>; onClose: () => void; onTools: () => void;
   theme: Theme; onTheme: () => void; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
   start?: EditorStart;
-  /** reload the same document from new bytes (keeps the edit history) */
-  onReplace?: (bytes: Uint8Array) => Promise<void>;
 }) {
   const { snap, commit } = hist;
   // looks of scanned lines belong to this document
@@ -467,6 +465,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         fgColor: pageData[page]?.colors[key]?.fg,
         room: (rooms[page] ??= lineRooms(pageData[page].runs))[key],
         scan: scanStyles.get(key),
+        ocr: run.fontName === 'ocr' || undefined,
       });
     }
     return out;
@@ -519,6 +518,22 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   // ----- export -----
   const editCount = Object.keys(snap.edits).length + snap.objects.length + Object.keys(snap.forms).length;
+  // lines recognised on picture pages (with their edits) for the saved file's text layer
+  const ocrLayer = () => {
+    const out: Record<number, LayerLine[]> = {};
+    for (const [src, d] of Object.entries(pageData)) {
+      const lines: LayerLine[] = [];
+      for (const r of d.runs) {
+        if (r.fontName !== 'ocr') continue;
+        const text = (snap.edits[r.key]?.text ?? r.str).replace(/\s+/g, ' ').trim();
+        if (!text) continue;
+        const [ox, oy] = r.region.o, [ux, uy] = r.region.u;
+        lines.push({ text, x0: ox, y0: oy, x1: ox + ux * r.region.width, y1: oy + uy * r.region.width, size: r.region.height * (snap.edits[r.key]?.sizeScale ?? 1) });
+      }
+      if (lines.length) out[+src] = lines;
+    }
+    return out;
+  };
   const download = async (): Promise<boolean> => {
     setEditing(null);
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -528,6 +543,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
         viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage,
+        ocrLayer: ocrLayer(),
       });
       const name = file.name.replace(/\.pdf$/i, '') + '-edited.pdf';
       setBusy(null);
@@ -587,34 +603,70 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     })();
     return () => { alive = false; };
   }, [pdf]);
-  const recognize = async (pages: number[]) => {
-    if (!onReplace || !pages.length) return;
-    const title = 'Recognising text';
-    setBusy({ title, detail: 'Starting text recognition on this device…', progress: 0 });
+  // Their text is read on this device when needed: a tap reads the line under the finger at once,
+  // and the page on screen is read in the background. Lines stay in memory as editable runs and
+  // become an invisible (searchable) text layer when the PDF is saved.
+  const reader = useRef<import('./ocrReader').PageReader | null>(null);
+  const [ocr, setOcr] = useState<import('./ocrReader').ReaderState | null>(null);
+  const [ocrAll, setOcrAll] = useState(false);
+  const pictureSet = useMemo(() => new Set(pictureOnly), [pictureOnly]);
+  const getReader = async () => {
+    if (reader.current) return reader.current;
+    const { PageReader, OCR_FONT, OCR_FONT_INFO } = await import('./ocrReader');
+    if (reader.current) return reader.current;
+    setFonts((m) => ({ ...m, [OCR_FONT]: OCR_FONT_INFO }));
+    reader.current = new PageReader(pdf, (src) => infos[src].vm,
+      (src, runs, colors) => setPageData((m) => ({ ...m, [src]: { runs: [...(m[src]?.runs ?? []), ...runs], colors: { ...m[src]?.colors, ...colors } } })),
+      setOcr);
+    return reader.current;
+  };
+  useEffect(() => () => { reader.current?.dispose(); reader.current = null; }, [pdf]);
+  // the page on screen is read in the background (after a moment, so scrolling past costs nothing)
+  useEffect(() => {
+    if (!pictureSet.has(curPage) || view !== 'doc') return;
+    const t = setTimeout(() => {
+      getReader().then((r) => {
+        r.demote(1, ocrAll ? 3 : 2);
+        r.want(curPage, 1);
+      }).catch(() => null);
+    }, reader.current ? 500 : 1200);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [curPage, pictureSet, view]);
+  const readAll = async () => {
+    const r = await getReader();
+    setOcrAll(true);
+    const order = [...pictureOnly].sort((a, b) => Math.abs(a - curPage) - Math.abs(b - curPage) || a - b);
+    order.forEach((src, i) => r.want(src, src === curPage ? 1 : 3 + i / 1000));
+  };
+  const stopAll = () => { reader.current?.stop(curPage); setOcrAll(false); };
+  const [tapAt, setTapAt] = useState<{ src: number; x: number; y: number } | null>(null);
+  const readTap = async (src: number, x: number, y: number) => {
+    setTapAt({ src, x, y });
     try {
-      const [{ loadOcr, recognizePage }, { addTextLayer }, { PDFDocument, StandardFonts }] =
-        await Promise.all([import('./ocr'), import('../engine/textLayer'), import('pdf-lib')]);
-      const worker = await loadOcr((p) => setBusy({ title, detail: 'Starting text recognition on this device…', progress: p * 0.08 }));
-      const doc = await PDFDocument.load(file.bytes, { ignoreEncryption: true, updateMetadata: false });
-      const helv = await doc.embedFont(StandardFonts.Helvetica);
-      let lines = 0;
-      for (let k = 0; k < pages.length; k++) {
-        setBusy({ title, detail: `Page ${pages[k] + 1} · ${k + 1} of ${pages.length}. Nothing is uploaded.`, progress: 0.08 + 0.9 * (k / pages.length) });
-        const found = await recognizePage(worker, pdf, pages[k]);
-        lines += found.length;
-        await addTextLayer(doc, doc.getPage(pages[k]), found, helv);
+      const r = await getReader();
+      const key = await r.tap(src, x, y);
+      if (key) {
+        setTool('edit'); setSelected(key); setEditing(key);
+        // on a phone the hint has done its job once a line opens: give the page the room
+        if (mobile && !ocrAll) setOcrHidden(true);
       }
-      setBusy({ title, detail: 'Preparing the editable pages…', progress: 0.99 });
-      const bytes = await doc.save({ useObjectStreams: true });
-      await onReplace(bytes);
-      toast(lines ? { msg: `Text recognised (${lines} lines). Tap a line to edit it.` } : { msg: 'No text found on these pages.', kind: 'err' });
-    } catch (e: any) {
+      else toast({ msg: 'No text found there. Tap right on a line of text.' });
+    } catch (e) {
       console.warn('ocr failed', e);
-      toast({ msg: 'Text recognition failed on this device.', kind: 'err' });
+      toast({ msg: 'Text recognition is not available on this device.', kind: 'err' });
     } finally {
-      setBusy(null);
+      setTapAt((t) => (t && t.src === src && t.x === x && t.y === y ? null : t));
     }
   };
+  const ocrDone = ocr?.done.filter((s) => pictureSet.has(s)).length ?? 0;
+  useEffect(() => {
+    if (ocrAll && pictureOnly.length && ocrDone >= pictureOnly.length) {
+      toast({ msg: 'Text recognised on all pages. Tap a line to edit it.' });
+      setOcrAll(false);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ocrDone]);
 
   // ----- keyboard -----
   useEffect(() => {
@@ -915,12 +967,25 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                 <PageView key={p.src} src={p.src} index={i} rotation={p.rotation} info={infos[p.src]} zoom={zoom} pdf={pdf}
                   tool={tool} style={style} data={pageData[p.src]} fonts={fonts} edits={snap.edits}
                   objects={objectsByPage[p.src] ?? []} selected={selected} editing={editing}
-                  onData={(src, d, f) => { setPageData((m) => ({ ...m, [src]: d })); setFonts((m) => ({ ...m, ...f })); }}
+                  onData={(src, d, f) => {
+                    // keep lines already recognised on a picture page
+                    setPageData((m) => {
+                      const read = m[src]?.runs.filter((r) => r.fontName === 'ocr') ?? [];
+                      return { ...m, [src]: read.length ? { runs: [...d.runs, ...read], colors: { ...m[src].colors, ...d.colors } } : d };
+                    });
+                    setFonts((m) => ({ ...m, ...f }));
+                  }}
                   onSelect={(id) => { setSelected(id); if (id === null) setSheetFor(null); }} onEditing={setEditing} onStopEditing={stopEditing}
                   onRunEdit={setRunEdit} onAdd={addObject} onChange={changeObject}
                   onPlace={() => false}
                   onDelete={removeObject} onDuplicate={duplicateObject}
                   onTextPlaced={() => setTool('edit')}
+                  onPictureTap={pictureSet.has(p.src) ? (x, y) => readTap(p.src, x, y) : undefined}
+                  reading={pictureSet.has(p.src) ? {
+                    page: !!ocr?.reading.includes(p.src),
+                    band: ocr?.tap?.src === p.src ? ocr.tap : null,
+                    at: tapAt?.src === p.src ? tapAt : null,
+                  } : undefined}
                   onVisible={(src, r) => { ratios.current[src] = r; const c = currentPage(); if (c !== curPage) setCurPage(c); }}
                   editKey={editKeyOf(p.src)}
                   onDragInfo={setDragInfo}
@@ -936,19 +1001,23 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             <Organizer pdf={pdf} pages={snap.pages} mobile={mobile} onDone={() => setView('doc')}
               onChange={(pages) => commit((s) => ({ ...s, pages }))} />
           )}
-          {pictureOnly.length > 0 && !ocrHidden && view === 'doc' && onReplace && (
+          {pictureOnly.length > 0 && !ocrHidden && view === 'doc' && (
             <div className="ocrbar" role="region" aria-label="Text recognition">
               <span className="oi"><Icon name="text-t:duotone" size={22} /></span>
               <div className="ot">
-                <b>{pictureOnly.length === snap.pages.length ? 'This PDF is made of pictures' : `${pictureOnly.length} ${pictureOnly.length === 1 ? 'page is a picture' : 'pages are pictures'}`}</b>
-                <span>Its text can't be edited yet. Recognise it on this device; nothing is uploaded.</span>
+                <b>{pictureOnly.length === snap.pages.length ? (pictureOnly.length === 1 ? 'This page is a picture' : 'These pages are pictures') : `${pictureOnly.length} ${pictureOnly.length === 1 ? 'page is a picture' : 'pages are pictures'}`}</b>
+                <span>{ocr?.failed ? 'Text recognition is not available on this device.'
+                  : ocrAll ? `Reading text · ${ocrDone} of ${pictureOnly.length} pages done. You can edit meanwhile.`
+                  : 'Tap any text to edit it. It is read on this device; nothing is uploaded.'}</span>
               </div>
-              <div className="oa">
-                {pictureOnly.length > 1 && pictureOnly.includes(curPage) && (
-                  <button className="btn outline" onClick={() => recognize([curPage])}>This page</button>
-                )}
-                <button className="btn primary" onClick={() => recognize(pictureOnly)}>{pictureOnly.length > 1 ? `All ${pictureOnly.length} pages` : 'Recognise text'}</button>
-              </div>
+              {pictureOnly.length > 1 && !ocr?.failed && ocrDone < pictureOnly.length && (
+                <div className="oa">
+                  {ocrAll
+                    ? <button className="btn outline" onClick={stopAll}>Stop</button>
+                    : <button className="btn outline" onClick={readAll}>Read all {pictureOnly.length} pages</button>}
+                </div>
+              )}
+              {ocrAll && <div className="op" aria-hidden><i style={{ width: `${Math.round((ocrDone / pictureOnly.length) * 100)}%` }} /></div>}
               <button className="ibtn muted x" aria-label="Hide" onClick={() => setOcrHidden(true)}><Icon name="close" size={18} /></button>
             </div>
           )}

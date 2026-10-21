@@ -768,6 +768,14 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .ocrbar .x { position: absolute; top: 6px; right: 6px; width: 36px; height: 36px; }
 .bp-mobile .ocrbar { top: calc(76px + var(--safe-t)); }
 .bp-mobile .ocrbar .oa { width: 100%; } .bp-mobile .ocrbar .oa .btn { flex: 1; }
+.ocrbar .op { position: absolute; left: 18px; right: 18px; bottom: 5px; height: 3px; border-radius: 2px; background: var(--sel-tint); overflow: hidden; }
+.ocrbar .op i { display: block; height: 100%; background: var(--sel); border-radius: 2px; transition: width .4s var(--ease); }
+/* text of picture pages being read */
+.ocr-band { position: absolute; left: 0; right: 0; pointer-events: none; background: linear-gradient(90deg, transparent, var(--sel-tint) 30%, rgba(52,70,201,.18) 50%, var(--sel-tint) 70%, transparent); background-size: 200% 100%; animation: ocr-sweep 1.1s linear infinite; border-radius: 4px; }
+@keyframes ocr-sweep { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+.ocr-tap { position: absolute; transform: translate(-50%, calc(-100% - 14px)); pointer-events: none; display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 999px; background: var(--ink); color: var(--on-ink); font-size: 13px; font-weight: 600; white-space: nowrap; box-shadow: var(--shadow-lift); animation: pe-in .18s var(--ease); z-index: 6; }
+.ocr-tap .spinner, .ocr-page .spinner { width: 14px; height: 14px; border-width: 2px; }
+.ocr-page { position: absolute; top: 10px; right: 10px; pointer-events: none; display: flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 12px; font-weight: 600; box-shadow: var(--shadow-lift); z-index: 4; }
 
 /* ---------- lazy screens ---------- */
 .lazy-wait { height: var(--app-h, 100%); width: 100%; display: grid; place-items: center; color: var(--muted); background: var(--desk); }

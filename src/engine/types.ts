@@ -21,6 +21,8 @@ export interface TextEdit {
   room?: { up: number; down: number };
   /** look of the text printed in a scan; edits on scans are drawn as a matching picture */
   scan?: ScanStyle;
+  /** a line recognised on a picture page (its letters are only in the picture) */
+  ocr?: boolean;
 }
 
 export interface ScanStyle {
@@ -78,6 +80,8 @@ export interface ExportInput {
   forms?: FormValues;
   /** turn form fields into plain page content */
   flatten?: boolean;
+  /** recognised lines of picture pages: saved as an invisible (searchable) text layer */
+  ocrLayer?: Record<number, import('./textLayer').LayerLine[]>;
   /** text edits on scans / picture pages drawn with the page's own letters (null: not possible) */
   scanImage?: (e: TextEdit) => Promise<ClonedText | null>;
 }
