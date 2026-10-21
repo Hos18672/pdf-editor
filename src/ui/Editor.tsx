@@ -14,6 +14,7 @@ import { exportPdf } from '../engine/exporter';
 import type { EditorObject, TextEdit, FontFamily } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
+import { setSoftKeyboard } from './hooks';
 import { ThemeButton } from './Start';
 
 export interface HostProps {
@@ -790,7 +791,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       </div>
 
       {mobile && mobileEditing && (
-        <SlimBar open={slimOpen} onToggle={() => setSlimOpen((v) => !v)} onDone={() => (document.activeElement as HTMLElement | null)?.blur?.()}
+        <SlimBar open={slimOpen} onOpen={setSlimOpen} onDone={() => (document.activeElement as HTMLElement | null)?.blur?.()}
           run={selRun && editing === selRun.key ? { label: fontLabel(fonts[selRun.fontName]), css: fonts[selRun.fontName]?.cssFallback,
             size: selRun.region.height * (snap.edits[selRun.key]?.sizeScale ?? 1),
             color: snap.edits[selRun.key]?.color ?? pageData[+selRun.key.split(':')[0]]?.colors[selRun.key]?.fg ?? '#000',
@@ -846,14 +847,31 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 }
 
 // ---------------- phone: slim properties bar above the keyboard ----------------
-function SlimBar({ open, onToggle, onDone, run, obj, onObj, children }: {
-  open: boolean; onToggle: () => void; onDone: () => void;
+function SlimBar({ open, onOpen, onDone, run, obj, onObj, children }: {
+  open: boolean; onOpen: (v: boolean) => void; onDone: () => void;
   run?: { label: string; css?: string; size: number; color: string; onSize: (v: number) => void };
   obj?: Extract<EditorObject, { type: 'text' }>; onObj: (p: any) => void; children: React.ReactNode;
 }) {
   const fams: FontFamily[] = ['Helvetica', 'Times', 'Courier'];
   const famLabel: Record<FontFamily, string> = { Helvetica: 'Sans', Times: 'Serif', Courier: 'Mono' };
   const famCss: Record<FontFamily, string> = { Helvetica: 'Arial, sans-serif', Times: '"Times New Roman", serif', Courier: '"Courier New", monospace' };
+  const onToggle = () => onOpen(!open);
+  // While the options are open the keyboard stays down (the caret stays), so changing a setting
+  // doesn't bring it back each time. Tapping the text, or closing the options, shows it again.
+  const latestOpen = useRef(onOpen);
+  latestOpen.current = onOpen;
+  useEffect(() => {
+    if (!open) return;
+    const el = document.activeElement;
+    if (!(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)) return;
+    setSoftKeyboard(el, false);
+    const backToTyping = () => latestOpen.current(false);
+    el.addEventListener('pointerdown', backToTyping);
+    return () => {
+      el.removeEventListener('pointerdown', backToTyping);
+      if (el.isConnected) setSoftKeyboard(el, true);
+    };
+  }, [open]);
   return (
     // keep the text field focused while using the bar
     <div className="slimbar" onMouseDown={(e) => { if (!(e.target as HTMLElement).closest('input')) e.preventDefault(); }}>

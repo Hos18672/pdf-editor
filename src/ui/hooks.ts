@@ -65,3 +65,23 @@ export function useVisualViewportHeight() {
     return () => { vv.removeEventListener('resize', fn); vv.removeEventListener('scroll', fn); };
   }, []);
 }
+
+/** True while `setSoftKeyboard` re-focuses a field: that blur is not the user leaving it. */
+export const isRefocusing = (el: EventTarget | null) => !!(el as HTMLElement | null)?.dataset?.refocus;
+
+/**
+ * Show or hide the phone keyboard for a focused text field without leaving it (caret and editing stay).
+ * Android only re-reads `inputmode` on focus, so the field is re-focused quietly.
+ */
+export function setSoftKeyboard(el: HTMLTextAreaElement | HTMLInputElement, show: boolean) {
+  if (show) el.removeAttribute('inputmode');
+  else el.setAttribute('inputmode', 'none');
+  if (document.activeElement !== el) return;
+  const { selectionStart: a, selectionEnd: b } = el;
+  el.dataset.refocus = '1';
+  try {
+    el.blur();
+    el.focus({ preventScroll: true });
+    if (a !== null && b !== null) el.setSelectionRange(a, b);
+  } finally { delete el.dataset.refocus; }
+}

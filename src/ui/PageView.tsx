@@ -8,6 +8,7 @@ import { uid } from './store';
 import { registerEditFont, baselineInLine } from './textFonts';
 import { gesture } from './gesture';
 import { Icon } from './icons';
+import { isRefocusing } from './hooks';
 import { FormLayer, FormField } from './Fields';
 
 export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
@@ -465,7 +466,7 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
           autoCapitalize="off"
           autoCorrect="off"
           onChange={(e) => setValue(e.target.value)}
-          onBlur={commitOnce}
+          onBlur={(e) => { if (!isRefocusing(e.currentTarget)) commitOnce(); }}
           onKeyDown={(e) => {
             const ta = e.target as HTMLTextAreaElement;
             e.stopPropagation();
@@ -690,7 +691,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
           {editing && (
             <textarea ref={taRef} value={o.text} spellCheck={false} style={{ ...ts, touchAction: 'none' }} placeholder="Type here"
               onChange={(e) => onChange({ text: e.target.value } as any, true)}
-              onBlur={() => { if (!drag.current || drag.current.mode === 'pending') onEditing(false); }}
+              onBlur={(e) => { if (isRefocusing(e.currentTarget)) return; if (!drag.current || drag.current.mode === 'pending') onEditing(false); }}
               onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); e.stopPropagation(); }} />
           )}
         </>
