@@ -42,6 +42,7 @@ jobs:
         env:
           CI: '1'
           NODE_ENV: production
+          EXPO_PUBLIC_WEBVIEW_DEBUG: '1'
         run: ./gradlew assembleRelease --no-daemon -PreactNativeArchitectures=x86_64
 
       - name: Enable KVM
@@ -58,20 +59,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: |
-            mkdir -p out
-            adb install -r android/app/build/outputs/apk/release/app-release.apk
-            adb logcat -c
-            adb shell am start -n com.rezahossaini.pdfeditor/.MainActivity
-            sleep 30
-            adb exec-out screencap -p > out/start.png
-            adb shell uiautomator dump /sdcard/ui.xml || true
-            adb pull /sdcard/ui.xml out/ui.xml || true
-            adb shell "cmd uimode night yes" || true
-            sleep 8
-            adb exec-out screencap -p > out/start-dark.png
-            adb logcat -d > out/logcat.txt
-            adb shell dumpsys webviewupdate > out/webview.txt || true
+          script: bash .github/scripts/smoke.sh
 
       - name: Publish results as a pre-release
         if: always()

@@ -24,6 +24,33 @@ async function savePdf(base64: string, name: string) {
   return file.uri;
 }
 
+// Page errors inside the WebView would otherwise be silent in a release build: forward them to the
+// native log (logcat, tag ReactNativeJS) so a blank screen can be diagnosed.
+const CATCH_PAGE_ERRORS = `(function () {
+  window.__pageErrors = [];
+  function send(m) {
+    window.__pageErrors.push(m);
+    try { window.ReactNativeWebView.postMessage(JSON.stringify({ type: '$$page_error', data: String(m).slice(0, 2000) })); } catch (e) {}
+  }
+  window.addEventListener('error', function (e) {
+    var t = e.target && e.target !== window ? (e.target.src || e.target.href || e.target.tagName) : '';
+    send((e.message || 'load error') + ' @ ' + (e.filename || t || '') + ':' + (e.lineno || '') + (e.error && e.error.stack ? '\\n' + e.error.stack : ''));
+  }, true);
+  window.addEventListener('unhandledrejection', function (e) { var r = e.reason; send('unhandled rejection: ' + (r && (r.stack || r.message) || r)); });
+  var ce = console.error;
+  console.error = function () {
+    try { send('console.error: ' + Array.prototype.map.call(arguments, function (a) { return a && a.stack || String(a); }).join(' ')); } catch (_) {}
+    return ce.apply(console, arguments);
+  };
+})(); true;`;
+
+const onPageMessage = (e: { nativeEvent: { data: string } }) => {
+  try {
+    const m = JSON.parse(e.nativeEvent.data);
+    if (m?.type === '$$page_error') console.warn('[page]', m.data);
+  } catch { /* not ours */ }
+};
+
 export default function Index() {
   const dark = useColorScheme() === 'dark';
   if (Platform.OS === 'web') {
@@ -48,6 +75,10 @@ export default function Index() {
           allowFileAccessFromFileURLs: true,
           allowUniversalAccessFromFileURLs: true,
           setBuiltInZoomControls: false,
+          injectedJavaScriptBeforeContentLoaded: CATCH_PAGE_ERRORS,
+          onMessage: onPageMessage,
+          // only in the CI smoke-test build: lets the test read the page through DevTools
+          webviewDebuggingEnabled: process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1',
         } as any}
       />
     </SafeAreaView>
