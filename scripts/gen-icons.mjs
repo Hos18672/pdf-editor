@@ -8,20 +8,20 @@ const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const assets = join(root, 'node_modules/@phosphor-icons/core/assets');
 const R = ['regular'], RF = ['regular', 'fill'], D = ['duotone'], B = ['bold'], F = ['fill'];
 const icons = {
-  'cursor-text': RF, textbox: [...RF, 'duotone'], 'text-t': RF, signature: [...RF, 'bold', 'duotone'], image: [...RF, 'duotone'],
-  eraser: RF, highlighter: RF, shapes: RF, scribble: RF, 'squares-four': [...RF, 'duotone'],
+  'cursor-text': [...RF, 'duotone'], textbox: [...RF, 'duotone'], 'text-t': [...RF, 'duotone'], signature: [...RF, 'bold', 'duotone'], image: [...RF, 'duotone'],
+  eraser: [...RF, 'duotone'], highlighter: [...RF, 'duotone'], shapes: [...RF, 'duotone'], scribble: [...RF, 'duotone'], 'squares-four': [...RF, 'duotone'],
   'arrow-left': R, 'arrow-u-up-left': R, 'arrow-u-up-right': R, minus: R, plus: [...R, 'bold'], 'arrows-horizontal': R,
   'download-simple': B, x: [...R, 'bold'], trash: [...R, 'bold'], copy: R, 'arrows-out-cardinal': R, 'arrows-out-simple': B,
   'caret-down': [...R, 'bold'], 'caret-up': [...R, 'bold'], 'caret-right': R, 'caret-left': R, 'arrow-clockwise': R,
   'arrow-counter-clockwise': R, 'dots-six-vertical': [...R, 'bold'], check: B, 'lock-simple': F, 'lock-key': F,
-  'wifi-slash': F, 'folder-open': B, 'file-arrow-down': F, keyboard: R, 'upload-simple': R, square: R, circle: [...RF],
+  'wifi-slash': F, 'folder-open': B, 'file-arrow-down': [...F, 'duotone'], keyboard: R, 'upload-simple': R, square: R, circle: [...RF],
   'line-segment': R, 'sliders-horizontal': R, info: R, eye: R, 'calendar-blank': R, sun: R, moon: R, export: [...R, 'bold', 'duotone'],
   'dots-three': B, 'pencil-simple': R, 'pencil-simple-line': D, stack: [...D, 'bold'], 'file-minus': D, 'file-plus': D,
-  'file-doc': D, 'file-xls': D, 'file-ppt': D, 'file-html': D, file: D, 'file-pdf': D, camera: D, 'file-arrow-up': R,
+  'file-doc': D, 'file-xls': D, 'file-ppt': D, 'file-html': D, file: D, 'file-pdf': D, camera: D, 'file-arrow-up': [...R, 'bold'],
   'warning-circle': [...R, 'duotone'], 'check-circle': F, 'pencil-circle': F, 'text-b': B, 'text-italic': R,
   'squares-four-fill': [], 'grid-four': R, 'sidebar-simple': R, 'magnifying-glass-plus': R, 'arrows-in-simple': R,
   'hand-pointing': R, 'cursor-click': R, 'list-checks': R, 'check-square': F, 'radio-button': F, 'list': R,
-  'cloud-slash': R, 'device-mobile': R, 'file-text': D, 'files': D, eyedropper: R,
+  'cloud-slash': R, 'device-mobile': R, 'file-text': D, 'files': D, eyedropper: R, 'dots-nine': [...R, 'bold'], 'arrow-right': B, 'android-logo': R, 'hand-grabbing': B, 'clipboard-text': R,
 };
 const out = {};
 for (const [name, weights] of Object.entries(icons)) {

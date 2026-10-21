@@ -31,6 +31,8 @@
             <div style="font-size:16px;font-weight:600;color:#5D637A;">{{ b.label }}</div>
             <div style="{{ b.frame }}">
               <sc-if value="{{ b.isStart }}" hint-placeholder-val="{{ false }}"><dc-import name="Start" bp="{{ b.bp }}" state="{{ b.state }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
+              <sc-if value="{{ b.isStart2 }}" hint-placeholder-val="{{ false }}"><dc-import name="Start v2" bp="{{ b.bp }}" state="{{ b.state }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
+              <sc-if value="{{ b.isMenu2 }}" hint-placeholder-val="{{ false }}"><dc-import name="Editor Menu v2" bp="{{ b.bp }}" open="{{ b.open }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
               <sc-if value="{{ b.isTools }}" hint-placeholder-val="{{ false }}"><dc-import name="Tools" bp="{{ b.bp }}" screen="{{ b.screen }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
               <sc-if value="{{ b.isEditor }}" hint-placeholder-val="{{ false }}"><dc-import name="Editor" bp="{{ b.bp }}" screen="{{ b.screen }}" theme="{{ b.theme }}" style="width:100%;height:100%;" hint-size="100%,100%"></dc-import></sc-if>
             </div>
@@ -49,13 +51,15 @@ class Component extends DCLogic {
     const names = { mobile: 'Mobile 390', tablet: 'Tablet 820', desktop: 'Desktop 1440', large: 'Large 1920' };
     const b = (kind, bp, x, label, theme) => {
       const [w, h] = size[bp];
-      return { label: label || names[bp], bp, isStart: kind === 'start', isEditor: kind === 'editor', isTools: kind === 'tools',
+      return { label: label || names[bp], bp, isStart: kind === 'start', isEditor: kind === 'editor', isTools: kind === 'tools', isStart2: kind === 'start2', isMenu2: kind === 'menu2', open: x === 'open',
         state: x, screen: x, theme: theme || 'light',
         frame: { width: w + 'px', height: h + 'px', borderRadius: bp === 'mobile' ? '44px' : bp === 'tablet' ? '28px' : '12px', overflow: 'hidden', background: '#ECEEF3', boxShadow: '0 2px 6px rgba(20,23,46,.08),0 30px 80px rgba(20,23,46,.14)', outline: bp === 'mobile' || bp === 'tablet' ? '10px solid #151833' : '1px solid #D5D8E0', position: 'relative' } };
     };
     const all = (kind, x) => ['mobile', 'tablet', 'desktop', 'large'].map(bp => b(kind, bp, x));
     const three = x => ['mobile', 'tablet', 'desktop'].map(bp => b('tools', bp, x));
     return { rows: [
+      { no: '15', title: 'Start v2', note: 'Bolder and more alive: oversized headline with a marker stroke that draws itself, a live demo of the editor (caret, highlight sweep, signature writing in, toolbar popping up), a rounded drop card with a moving dashed edge and one-tap tool chips. Drag-over glows navy; opening shows a scanning page and real progress.', boards: [b('start2','mobile','idle'), b('start2','tablet','idle'), b('start2','desktop','idle'), b('start2','large','idle'), b('start2','mobile','loading','Mobile · opening'), b('start2','desktop','dragover','Desktop · drag over'), b('start2','desktop','loading','Desktop · opening')] },
+      { no: '16', title: 'Editor menu v2', note: 'Tools float instead of being docked to the edge. Desktop/tablet: a rounded rail grouped by intent (Change · Add · Mark up · Document); the active tool sits on a marker-yellow chip, and tools with options open a flyout (styles, ink, opacity, shortcut). Mobile: a navy floating dock with your 4 recent tools; the active one expands with its label; “More” opens a sheet with every tool as a rounded tile.', boards: [b('menu2','mobile','closed'), b('menu2','mobile','open','Mobile · all tools'), b('menu2','tablet','x'), b('menu2','desktop','x'), b('menu2','large','x')] },
       { no: '09', title: 'All tools', note: 'New hub reached from Start (“More tools”) and the editor’s back menu. Grouped by intent: edit & sign, organize, convert. Rows on phones, cards from tablet up.', boards: all('tools', 'hub') },
       { no: '10', title: 'Fill a form', note: 'Fillable PDFs: fields are tinted so they read as tappable; the active one gets the selection ring. Mobile: a navy field navigator rides above the keyboard (prev / next / Done) and the page scrolls so the field stays visible. Flat (non-fillable) forms: tap anywhere to drop a tick, cross, dot, text or date.', boards: all('tools', 'fill') },
       { no: '11', title: 'Combine PDFs', note: 'Files are stacked cards; drag to reorder (card 2 is mid-drag), set a page range per file, add more PDFs or images. One action at the bottom.', boards: three('combine') },

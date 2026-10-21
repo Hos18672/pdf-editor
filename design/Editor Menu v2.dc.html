@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+@keyframes m2-in{from{opacity:0;transform:translateX(-8px) scale(.97)}to{opacity:1;transform:none}}
+@keyframes m2-sheet{from{transform:translateY(40px);opacity:0}to{transform:none;opacity:1}}
+@keyframes m2-pop{0%{transform:scale(.6)}60%{transform:scale(1.08)}100%{transform:scale(1)}}
+</style>
+</helmet>
+<div style="position:relative;width:100%;height:100%;overflow:hidden;background:#ECEEF3;color:#151833;font-family:'Schibsted Grotesk',system-ui,sans-serif;">
+  <div style="position:absolute;inset:0;background-image:radial-gradient(#D3D7E2 1px,transparent 1px);background-size:22px 22px;opacity:.6;"></div>
+
+  <div style="position:absolute;left:{{ barX }};right:{{ barX }};top:{{ barTop }};height:60px;border-radius:20px;background:rgba(255,255,255,.88);backdrop-filter:blur(14px);box-shadow:0 1px 2px rgba(20,23,46,.06),0 8px 24px rgba(20,23,46,.08);display:flex;align-items:center;gap:8px;padding:0 8px;z-index:4;">
+    <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph ph-arrow-left"></i></div>
+    <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;">
+      <div style="font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Lease_Agreement_2026.pdf</div>
+      <div style="font-size:12px;color:#5D637A;display:flex;align-items:center;gap:6px;">4 pages<span style="height:18px;padding:0 7px;border-radius:999px;background:#FFF4B8;color:#5C4A00;font-weight:600;display:inline-flex;align-items:center;">3 changes</span></div>
+    </div>
+    <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph ph-arrow-u-up-left"></i></div>
+    <sc-if value="{{ notMobile }}" hint-placeholder-val="{{ true }}">
+      <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:19px;opacity:.35;"><i class="ph ph-arrow-u-up-right"></i></div>
+      <div style="height:40px;display:flex;align-items:center;border-radius:14px;background:#F1F2F6;padding:0 4px;font-size:13px;font-weight:700;font-variant-numeric:tabular-nums;"><span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><i class="ph ph-minus"></i></span>100%<span style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;"><i class="ph ph-plus"></i></span></div>
+    </sc-if>
+    <div style="height:44px;padding:{{ dlPad }};border-radius:14px;background:#1E2559;color:#fff;display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px;box-shadow:0 6px 16px rgba(30,37,89,.3);"><i class="ph-bold ph-download-simple" style="font-size:18px;"></i>{{ dlLabel }}</div>
+  </div>
+
+  <div style="position:absolute;left:{{ pageL }};right:{{ pageR }};top:{{ pageTop }};display:flex;justify-content:center;">
+    <div style="width:100%;max-width:{{ pageMax }};"><dc-import name="PdfPage" mode="highlight" style="width:100%;" hint-size="100%,700px"></dc-import></div>
+  </div>
+
+  <sc-if value="{{ notMobile }}" hint-placeholder-val="{{ true }}">
+    <div style="position:absolute;left:16px;top:0;bottom:0;margin:auto 0;height:max-content;display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:26px;background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.06),0 18px 48px rgba(20,23,46,.14);z-index:3;animation:m2-in .4s cubic-bezier(.2,.8,.2,1) both;">
+      <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:2px;padding-bottom:6px;border-bottom:{{ g.sep }};">
+          <sc-for list="{{ g.items }}" as="t" hint-placeholder-count="3">
+            <div style="position:relative;">
+              <div style="{{ t.btn }}" style-hover="background:#FFF4B8;color:#1E2559;"><i class="{{ t.icon }}" style="font-size:22px;"></i><span style="font-size:10.5px;font-weight:600;letter-spacing:.01em;">{{ t.label }}</span></div>
+              <sc-if value="{{ t.dot }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;right:6px;bottom:6px;width:0;height:0;border-left:5px solid transparent;border-bottom:5px solid currentColor;opacity:.5;"></span></sc-if>
+            </div>
+          </sc-for>
+        </div>
+      </sc-for>
+    </div>
+    <div style="position:absolute;left:104px;top:{{ flyTop }};width:236px;padding:14px;border-radius:22px;background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.06),0 24px 60px rgba(20,23,46,.18);display:flex;flex-direction:column;gap:14px;z-index:5;animation:m2-in .26s .2s cubic-bezier(.2,.8,.2,1) both;">
+      <div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-weight:700;font-size:14px;">Highlight</span><span style="height:22px;padding:0 7px;border-radius:7px;background:#F1F2F6;font-size:11.5px;font-weight:700;color:#5D637A;display:flex;align-items:center;">H</span></div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+        <div style="height:56px;border-radius:14px;background:#1E2559;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600;"><i class="ph-fill ph-highlighter" style="font-size:20px;color:#FFE14D;"></i>Marker</div>
+        <div style="height:56px;border-radius:14px;background:#F1F2F6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600;"><i class="ph ph-text-underline" style="font-size:20px;"></i>Underline</div>
+        <div style="height:56px;border-radius:14px;background:#F1F2F6;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;font-size:11px;font-weight:600;"><i class="ph ph-text-strikethrough" style="font-size:20px;"></i>Strike</div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <sc-for list="{{ inks }}" as="c" hint-placeholder-count="5"><div style="{{ c.s }}"></div></sc-for>
+      </div>
+      <div style="display:flex;align-items:center;gap:10px;font-size:12.5px;color:#5D637A;"><span>Opacity</span><div style="flex:1;height:6px;border-radius:3px;background:#ECEEF3;position:relative;"><div style="width:70%;height:100%;border-radius:3px;background:#1E2559;"></div><div style="position:absolute;left:70%;top:50%;width:18px;height:18px;margin:-9px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #1E2559,0 2px 6px rgba(20,23,46,.2);"></div></div><span style="font-weight:700;color:#151833;font-variant-numeric:tabular-nums;">70%</span></div>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ isMobile }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;left:12px;right:12px;bottom:24px;height:72px;border-radius:26px;background:#1E2559;box-shadow:0 18px 44px rgba(30,37,89,.38);display:flex;align-items:center;justify-content:space-between;padding:0 8px;z-index:4;">
+      <sc-for list="{{ dock }}" as="d" hint-placeholder-count="5">
+        <div style="{{ d.btn }}"><i class="{{ d.icon }}" style="font-size:23px;"></i><sc-if value="{{ d.on }}" hint-placeholder-val="{{ false }}"><span style="font-size:13.5px;font-weight:700;">{{ d.label }}</span></sc-if></div>
+      </sc-for>
+    </div>
+    <sc-if value="{{ moreOpen }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;inset:0;background:rgba(20,23,46,.32);z-index:5;"></div>
+      <div style="position:absolute;left:8px;right:8px;bottom:8px;border-radius:32px;background:#fff;padding:10px 16px 20px;z-index:6;display:flex;flex-direction:column;gap:16px;animation:m2-sheet .32s cubic-bezier(.2,.8,.2,1) both;box-shadow:0 -10px 40px rgba(20,23,46,.2);">
+        <div style="width:40px;height:5px;border-radius:3px;background:#D5D9E2;align-self:center;"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px;"><span style="font-size:20px;font-weight:800;letter-spacing:-.02em;">All tools</span><span style="width:44px;height:44px;border-radius:50%;background:#F1F2F6;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="ph-bold ph-x"></i></span></div>
+        <sc-for list="{{ groups }}" as="g" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            <span style="font-size:11.5px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#5D637A;padding:0 4px;">{{ g.name }}</span>
+            <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;">
+              <sc-for list="{{ g.items }}" as="t" hint-placeholder-count="3">
+                <div style="{{ t.tile }}"><span style="{{ t.chip }}"><i class="{{ t.icon }}"></i></span><span style="font-size:12px;font-weight:600;">{{ t.label }}</span></div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-for>
+      </div>
+    </sc-if>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;bp&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;mobile&quot;,&quot;tablet&quot;,&quot;desktop&quot;,&quot;large&quot;],&quot;default&quot;:&quot;desktop&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;open&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:false,&quot;tsType&quot;:&quot;boolean&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const bp = this.props.bp ?? 'desktop', M = bp === 'mobile', T = bp === 'tablet', L = bp === 'large';
+    const active = 'highlight';
+    const defs = [
+      ['Change', [['edit', 'Edit', 'ph-cursor-text'], ['fill', 'Fill', 'ph-textbox']]],
+      ['Add', [['text', 'Text', 'ph-text-t'], ['sign', 'Sign', 'ph-signature'], ['image', 'Image', 'ph-image']]],
+      ['Mark up', [['whiteout', 'Whiteout', 'ph-eraser'], ['highlight', 'Highlight', 'ph-highlighter'], ['shapes', 'Shapes', 'ph-shapes'], ['draw', 'Draw', 'ph-scribble']]],
+      ['Document', [['pages', 'Pages', 'ph-squares-four']]],
+    ];
+    const tint = { Change: '#DDE2FF', Add: '#FFE14D', 'Mark up': '#FCE3D8', Document: '#E3F1E9' };
+    const groups = defs.map(([name, items], gi) => ({ name, sep: gi < defs.length - 1 ? '1px solid #EEF0F4' : 'none',
+      items: items.map(([k, label, ic]) => { const on = k === active; return { label, dot: k === 'shapes' || k === 'highlight',
+        icon: (on ? 'ph-fill ' : 'ph-duotone ') + ic,
+        btn: { width: '68px', height: '58px', borderRadius: '18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '3px', cursor: 'pointer', transition: 'background .18s,color .18s,transform .18s', background: on ? '#FFE14D' : 'transparent', color: on ? '#1E2559' : '#4A5068', boxShadow: on ? '0 6px 14px rgba(224,180,0,.35)' : 'none' },
+        tile: { height: '84px', borderRadius: '20px', background: on ? '#1E2559' : '#F5F6F9', color: on ? '#fff' : '#151833', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' },
+        chip: { width: '40px', height: '40px', borderRadius: '14px', background: on ? '#FFE14D' : tint[name], color: '#1E2559', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '21px' } }; }) }));
+    const dock = [['edit', 'Edit', 'ph-cursor-text'], ['text', 'Text', 'ph-text-t'], ['highlight', 'Highlight', 'ph-highlighter'], ['sign', 'Sign', 'ph-signature'], ['more', 'More', 'ph-dots-nine']].map(([k, label, ic]) => {
+      const on = k === active;
+      return { label, on, icon: (on ? 'ph-fill ' : 'ph ') + ic,
+        btn: { height: '56px', minWidth: '56px', padding: on ? '0 18px 0 14px' : '0', borderRadius: '20px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', background: on ? '#FFE14D' : 'transparent', color: on ? '#1E2559' : 'rgba(255,255,255,.82)', transition: 'all .25s cubic-bezier(.2,.8,.2,1)' } };
+    });
+    const inks = ['#FFE14D', '#9BE7B4', '#9FD3FF', '#FFB3C7', '#FFC58A'].map((c, i) => ({ s: { width: '30px', height: '30px', borderRadius: '50%', background: c, boxShadow: i === 0 ? '0 0 0 2px #fff,0 0 0 4px #1E2559' : 'inset 0 0 0 1px rgba(20,23,46,.08)' } }));
+    return {
+      isMobile: M, notMobile: !M, groups, dock, inks, moreOpen: M && (this.props.open ?? false),
+      barX: M ? '8px' : '16px', barTop: M ? '48px' : '16px', dlPad: M ? '0 14px' : '0 18px 0 14px', dlLabel: M ? '' : 'Download',
+      pageL: M ? '16px' : '120px', pageR: M ? '16px' : L ? '120px' : '40px', pageTop: M ? '124px' : '100px',
+      pageMax: L ? '780px' : T ? '560px' : '640px', flyTop: 'calc(50% - 5px)',
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=Caveat:wght@600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+@keyframes s2-float{0%,100%{transform:translateY(0) rotate(var(--r))}50%{transform:translateY(-10px) rotate(var(--r))}}
+@keyframes s2-mark{0%,15%{background-size:0% 42%}45%,100%{background-size:100% 42%}}
+@keyframes s2-sweep{0%,20%{width:0}55%,100%{width:78%}}
+@keyframes s2-blink{50%{opacity:0}}
+@keyframes s2-sig{0%,40%{clip-path:inset(0 100% 0 0)}80%,100%{clip-path:inset(0 0 0 0)}}
+@keyframes s2-pop{0%,55%{opacity:0;transform:translate(-50%,6px) scale(.94)}70%,100%{opacity:1;transform:translate(-50%,0) scale(1)}}
+@keyframes s2-dash{to{background-position:40px 0,-40px 100%,0 -40px,100% 40px}}
+@keyframes s2-scan{0%{top:6%}100%{top:90%}}
+@keyframes s2-shim{to{background-position:-200% 0}}
+@keyframes s2-up{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+@keyframes s2-glow{0%,100%{box-shadow:0 0 0 0 rgba(255,225,77,.55),0 30px 60px rgba(30,37,89,.35)}50%{box-shadow:0 0 0 14px rgba(255,225,77,0),0 30px 60px rgba(30,37,89,.35)}}
+</style>
+</helmet>
+<div style="position:relative;width:100%;height:100%;overflow:hidden;background:#ECEEF3;color:#151833;font-family:'Schibsted Grotesk',system-ui,sans-serif;display:flex;flex-direction:column;">
+  <div style="position:absolute;inset:0;background-image:radial-gradient(#C9CEDB 1px,transparent 1px);background-size:22px 22px;opacity:.55;pointer-events:none;"></div>
+  <div style="position:absolute;width:{{ blob }};height:{{ blob }};right:-12%;top:-18%;border-radius:50%;background:#FFE14D;opacity:.35;filter:blur(90px);pointer-events:none;"></div>
+  <div style="position:relative;display:flex;align-items:center;gap:12px;padding:{{ navPad }};">
+    <div style="width:40px;height:40px;border-radius:12px;background:#1E2559;position:relative;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(30,37,89,.3);">
+      <div style="width:16px;height:20px;background:#fff;border-radius:2px 6px 2px 2px;"></div>
+      <div style="position:absolute;right:7px;bottom:7px;width:10px;height:10px;border-radius:50%;background:#FFE14D;border:2px solid #1E2559;"></div>
+    </div>
+    <div style="font-weight:800;font-size:18px;letter-spacing:-.02em;">PDF Editor</div>
+    <div style="flex:1;"></div>
+    <sc-if value="{{ notMobile }}" hint-placeholder-val="{{ true }}">
+      <div style="display:flex;gap:4px;align-items:center;">
+        <div style="height:40px;padding:0 14px;border-radius:999px;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;cursor:pointer;" style-hover="background:rgba(255,255,255,.7);"><i class="ph ph-squares-four"></i>All tools</div>
+        <div style="height:40px;padding:0 14px;border-radius:999px;display:flex;align-items:center;gap:8px;font-weight:600;font-size:14px;cursor:pointer;" style-hover="background:rgba(255,255,255,.7);"><i class="ph ph-android-logo"></i>Android app</div>
+      </div>
+    </sc-if>
+    <div style="width:44px;height:44px;border-radius:999px;background:rgba(255,255,255,.8);display:flex;align-items:center;justify-content:center;font-size:18px;box-shadow:0 1px 2px rgba(20,23,46,.08);"><i class="ph ph-moon"></i></div>
+  </div>
+  <div style="position:relative;flex:1;min-height:0;display:grid;grid-template-columns:{{ heroCols }};gap:{{ heroGap }};align-items:center;align-content:{{ heroAlign }};padding:{{ heroPad }};max-width:1560px;width:100%;margin:0 auto;box-sizing:border-box;">
+    <div style="display:flex;flex-direction:column;gap:{{ colGap }};min-width:0;animation:s2-up .6s cubic-bezier(.2,.8,.2,1) both;">
+      <div style="display:inline-flex;align-self:flex-start;align-items:center;gap:8px;height:34px;padding:0 14px 0 6px;border-radius:999px;background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.06),0 0 0 1px rgba(20,23,46,.05);font-size:13px;font-weight:600;">
+        <span style="width:24px;height:24px;border-radius:50%;background:#E3F1E9;color:#1E7A4C;display:flex;align-items:center;justify-content:center;font-size:13px;"><i class="ph-fill ph-lock-simple"></i></span>Files never leave your device
+      </div>
+      <div style="font-size:{{ h1 }};font-weight:800;letter-spacing:-.045em;line-height:.95;">Edit any PDF.<br><span style="background-image:linear-gradient(#FFE14D,#FFE14D);background-repeat:no-repeat;background-position:0 88%;background-size:100% 42%;animation:s2-mark 1.4s .3s cubic-bezier(.6,0,.2,1) both;padding:0 .06em;margin:0 -.06em;">Right here.</span></div>
+      <div style="font-size:{{ lead }};line-height:1.5;color:#4A5068;max-width:30em;text-wrap:pretty;">Retype existing text in its original font, sign, fill forms, merge and convert. All in your browser, all offline.</div>
+      <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}">
+        <div style="position:relative;border-radius:28px;padding:{{ dropPad }};background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.06),0 24px 60px rgba(20,23,46,.12);display:flex;flex-direction:{{ dropDir }};align-items:{{ dropAlign }};gap:18px;cursor:pointer;">
+          <div style="position:absolute;inset:8px;border-radius:22px;background-image:linear-gradient(90deg,#BFC4D2 50%,transparent 50%),linear-gradient(90deg,#BFC4D2 50%,transparent 50%),linear-gradient(0deg,#BFC4D2 50%,transparent 50%),linear-gradient(0deg,#BFC4D2 50%,transparent 50%);background-repeat:repeat-x,repeat-x,repeat-y,repeat-y;background-size:14px 1.5px,14px 1.5px,1.5px 14px,1.5px 14px;background-position:0 0,0 100%,0 0,100% 0;animation:s2-dash 2.4s linear infinite;pointer-events:none;"></div>
+          <div style="display:flex;align-items:center;gap:16px;flex:1;min-width:0;">
+            <div style="width:60px;height:60px;flex:none;border-radius:20px;background:#1E2559;color:#FFE14D;display:flex;align-items:center;justify-content:center;font-size:28px;box-shadow:0 10px 24px rgba(30,37,89,.3);"><i class="ph-bold ph-file-arrow-up"></i></div>
+            <div style="flex:1;display:flex;flex-direction:column;gap:4px;min-width:0;">
+              <div style="font-size:20px;font-weight:700;letter-spacing:-.01em;">{{ dropTitle }}</div>
+              <div style="font-size:14px;color:#5D637A;">{{ dropSub }}</div>
+            </div>
+          </div>
+          <div style="position:relative;height:52px;padding:0 22px;border-radius:16px;background:#1E2559;color:#fff;font-weight:700;font-size:15px;display:flex;align-items:center;justify-content:center;gap:10px;box-shadow:0 8px 20px rgba(30,37,89,.28);transition:transform .2s,background .2s;" style-hover="background:#2B3478;transform:translateY(-1px);">Choose PDF<i class="ph-bold ph-arrow-right"></i></div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ isDrag }}" hint-placeholder-val="{{ false }}">
+        <div style="border-radius:28px;padding:{{ dropPad }};background:#1E2559;color:#fff;display:flex;align-items:center;gap:20px;transform:scale(1.02);animation:s2-glow 1.6s ease-in-out infinite;">
+          <div style="width:60px;height:60px;flex:none;border-radius:20px;background:#FFE14D;color:#1E2559;display:flex;align-items:center;justify-content:center;font-size:28px;"><i class="ph-bold ph-hand-grabbing"></i></div>
+          <div style="display:flex;flex-direction:column;gap:4px;"><div style="font-size:22px;font-weight:700;">Release to open</div><div style="font-size:14px;color:#C9CEF0;">Lease_Agreement_2026.pdf · 1.2 MB</div></div>
+        </div>
+      </sc-if>
+      <sc-if value="{{ isLoading }}" hint-placeholder-val="{{ false }}">
+        <div style="border-radius:28px;padding:{{ dropPad }};background:#fff;box-shadow:0 24px 60px rgba(20,23,46,.12);display:flex;align-items:center;gap:18px;">
+          <div style="position:relative;width:56px;height:74px;flex:none;border-radius:6px;background:#fff;box-shadow:0 0 0 1px #E1E4EB,0 6px 16px rgba(20,23,46,.12);padding:10px 8px;display:flex;flex-direction:column;gap:5px;overflow:hidden;box-sizing:border-box;">
+            <div style="height:5px;width:70%;background:#1E2559;border-radius:2px;"></div><div style="height:3px;background:#E4E6EC;"></div><div style="height:3px;background:#E4E6EC;"></div><div style="height:3px;width:60%;background:#E4E6EC;"></div><div style="height:3px;background:#E4E6EC;"></div>
+            <div style="position:absolute;left:0;right:0;height:10px;background:linear-gradient(180deg,rgba(255,225,77,0),rgba(255,225,77,.9));animation:s2-scan 1.1s ease-in-out infinite alternate;"></div>
+          </div>
+          <div style="flex:1;display:flex;flex-direction:column;gap:10px;min-width:0;">
+            <div style="display:flex;justify-content:space-between;gap:12px;"><span style="font-weight:700;font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Opening Lease_Agreement_2026.pdf</span><span style="font-size:14px;color:#5D637A;font-variant-numeric:tabular-nums;white-space:nowrap;">3 / 8</span></div>
+            <div style="height:8px;border-radius:4px;background:#ECEEF3;overflow:hidden;"><div style="height:100%;width:38%;border-radius:4px;background:linear-gradient(90deg,#1E2559 0%,#3446C9 50%,#1E2559 100%);background-size:200% 100%;animation:s2-shim 1.2s linear infinite;"></div></div>
+            <div style="font-size:13px;color:#5D637A;">Reading fonts so your edits match the original</div>
+          </div>
+        </div>
+      </sc-if>
+      <div style="display:flex;flex-wrap:{{ chipWrap }};gap:8px;overflow:hidden;">
+        <sc-for list="{{ quick }}" as="q" hint-placeholder-count="5">
+          <div style="flex:none;height:44px;padding:0 16px 0 6px;border-radius:999px;background:rgba(255,255,255,.85);box-shadow:0 1px 2px rgba(20,23,46,.06),0 0 0 1px rgba(20,23,46,.05);display:flex;align-items:center;gap:10px;font-size:14px;font-weight:600;cursor:pointer;transition:transform .2s,box-shadow .2s;white-space:nowrap;" style-hover="transform:translateY(-2px);box-shadow:0 10px 24px rgba(20,23,46,.12);">
+            <span style="width:32px;height:32px;border-radius:50%;background:{{ q.bg }};color:#1E2559;display:flex;align-items:center;justify-content:center;font-size:17px;"><i class="{{ q.icon }}"></i></span>{{ q.t }}
+          </div>
+        </sc-for>
+      </div>
+    </div>
+    <div style="position:relative;height:{{ artH }};animation:s2-up .7s .15s cubic-bezier(.2,.8,.2,1) both;">
+      <div style="--r:-7deg;position:absolute;left:4%;top:12%;width:58%;aspect-ratio:1/1.3;max-height:92%;background:#fff;border-radius:14px;box-shadow:0 20px 50px rgba(20,23,46,.12);animation:s2-float 7s ease-in-out infinite;"></div>
+      <div style="--r:5deg;position:absolute;right:2%;top:4%;width:52%;aspect-ratio:1/1.3;max-height:92%;background:#fff;border-radius:14px;box-shadow:0 20px 50px rgba(20,23,46,.12);animation:s2-float 8s .8s ease-in-out infinite;"></div>
+      <div style="--r:-1.5deg;position:absolute;left:50%;margin-left:-{{ docHalf }};top:8%;width:{{ docW }};aspect-ratio:1/1.25;background:#fff;border-radius:16px;box-shadow:0 2px 4px rgba(20,23,46,.06),0 40px 80px rgba(20,23,46,.20);animation:s2-float 6s .3s ease-in-out infinite;padding:9%;box-sizing:border-box;display:flex;flex-direction:column;gap:3.4%;container-type:inline-size;">
+        <div style="font-size:6cqw;font-weight:800;letter-spacing:-.03em;">Lease Agreement</div>
+        <div style="height:1.6cqw;background:#ECEEF3;border-radius:2px;"></div>
+        <div style="font-size:3.6cqw;color:#2A2E45;display:flex;align-items:center;">and <span style="margin-left:1.4cqw;padding:.4cqw 1.2cqw;border-radius:1.4cqw;outline:2px solid #1E2559;box-shadow:0 0 0 6px rgba(30,37,89,.08);font-weight:600;">Maya R. Okafor</span><span style="width:2px;height:4.4cqw;background:#1E2559;margin-left:2px;animation:s2-blink 1s steps(1) infinite;"></span></div>
+        <div style="height:1.6cqw;background:#ECEEF3;border-radius:2px;width:92%;"></div>
+        <div style="position:relative;height:3.6cqw;"><div style="position:absolute;left:0;right:0;top:1cqw;height:1.6cqw;background:#ECEEF3;border-radius:2px;"></div><div style="position:absolute;left:-1cqw;top:0;height:3.6cqw;background:#FFE14D;opacity:.75;border-radius:1cqw;animation:s2-sweep 4s ease-in-out infinite;mix-blend-mode:multiply;"></div></div>
+        <div style="height:1.6cqw;background:#ECEEF3;border-radius:2px;width:84%;"></div>
+        <div style="height:1.6cqw;background:#ECEEF3;border-radius:2px;width:70%;"></div>
+        <div style="flex:1;"></div>
+        <div style="position:relative;align-self:flex-end;width:52%;">
+          <div style="position:absolute;bottom:calc(100% + 3cqw);left:50%;display:flex;gap:1cqw;padding:1.2cqw;background:#1E2559;border-radius:3cqw;color:#fff;font-size:4cqw;animation:s2-pop 4s ease-in-out infinite;white-space:nowrap;">
+            <span style="width:8cqw;height:7cqw;display:flex;align-items:center;justify-content:center;"><i class="ph ph-arrows-out-cardinal"></i></span><span style="width:8cqw;height:7cqw;display:flex;align-items:center;justify-content:center;"><i class="ph ph-copy"></i></span><span style="width:8cqw;height:7cqw;display:flex;align-items:center;justify-content:center;color:#FF9C8F;"><i class="ph ph-trash"></i></span>
+          </div>
+          <div style="font-family:'Caveat',cursive;font-size:10cqw;color:#1E2559;line-height:1.1;text-align:center;animation:s2-sig 4s ease-in-out infinite;">Jordan Ellis</div>
+          <div style="border-top:1.5px solid #2A2E45;padding-top:1.2cqw;font-size:2.8cqw;color:#5D637A;">Tenant signature</div>
+        </div>
+      </div>
+      <sc-if value="{{ notMobile }}" hint-placeholder-val="{{ true }}">
+        <div style="position:absolute;left:0;bottom:6%;display:flex;align-items:center;gap:10px;padding:10px 16px 10px 10px;border-radius:18px;background:#fff;box-shadow:0 16px 40px rgba(20,23,46,.16);font-size:13px;font-weight:600;animation:s2-up .6s .9s both;">
+          <span style="width:32px;height:32px;border-radius:10px;background:#E3F1E9;color:#1E7A4C;display:flex;align-items:center;justify-content:center;font-size:17px;"><i class="ph-bold ph-check"></i></span><span style="display:flex;flex-direction:column;gap:1px;">Font matched<span style="font-weight:500;color:#5D637A;font-size:12px;">Source Serif · 11 pt</span></span>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:900},&quot;bp&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;mobile&quot;,&quot;tablet&quot;,&quot;desktop&quot;,&quot;large&quot;],&quot;default&quot;:&quot;desktop&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;state&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;idle&quot;,&quot;dragover&quot;,&quot;loading&quot;],&quot;default&quot;:&quot;idle&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const bp = this.props.bp ?? 'desktop', st = this.props.state ?? 'idle';
+    const M = bp === 'mobile', T = bp === 'tablet', L = bp === 'large';
+    const quick = [['Sign', 'ph-duotone ph-signature', '#FFE14D'], ['Fill a form', 'ph-duotone ph-textbox', '#DDE2FF'], ['Combine', 'ph-duotone ph-stack', '#E3F1E9'], ['Convert to PDF', 'ph-duotone ph-file-arrow-down', '#FCE3D8'], ['More tools', 'ph-duotone ph-squares-four', '#ECEEF3']].map(([t, icon, bg]) => ({ t, icon, bg }));
+    return {
+      notMobile: !M, quick, isIdle: st === 'idle', isDrag: st === 'dragover', isLoading: st === 'loading',
+      navPad: M ? '54px 20px 0' : '24px 40px',
+      heroCols: M || T ? 'minmax(0,1fr)' : 'minmax(0,1.05fr) minmax(0,1fr)', heroAlign: M || T ? 'start' : 'center',
+      heroGap: M ? '0' : T ? '24px' : '64px',
+      heroPad: M ? '16px 20px 0' : T ? '24px 56px 48px' : L ? '0 120px 48px' : '0 72px 40px',
+      colGap: M ? '16px' : '26px', chipWrap: M ? 'nowrap' : 'wrap',
+      h1: M ? '46px' : T ? '84px' : L ? '112px' : '88px', lead: M ? '16px' : L ? '21px' : '19px',
+      dropPad: M ? '20px' : '28px', dropDir: M ? 'column' : 'row', dropAlign: M ? 'stretch' : 'center', btnAlign: M ? 'stretch' : 'center',
+      dropTitle: M ? 'Open a PDF' : 'Drop a PDF anywhere', dropSub: M ? 'Or share one to this app' : 'PDF up to 200 MB · or paste with Ctrl+V',
+      artH: M ? '250px' : T ? '440px' : L ? '720px' : '600px', blob: M ? '360px' : '720px',
+      docW: M ? '180px' : T ? '400px' : L ? '600px' : '470px', docHalf: M ? '90px' : T ? '200px' : L ? '300px' : '235px',
+    };
+  }
+}
+</script>
+</body>
+</html>

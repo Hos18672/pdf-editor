@@ -6,7 +6,7 @@ import { useHistory } from './store';
 import type { PageInfo } from './PageView';
 import { appBase } from './assets';
 import { Editor, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
-import { Start, OpenState } from './Start';
+import { Start, OpenState, type QuickAction } from './Start';
 import { Tools, ToolId } from './Tools';
 import { useBp, useEdgeColors, useTheme, useVisualViewportHeight } from './hooks';
 import type { M } from '../engine/types';
@@ -104,7 +104,7 @@ export default function EditorApp(host: HostProps) {
         const pg = await doc.getPage(i);
         const vp = pg.getViewport({ scale: 1 });
         list.push({ w: vp.width, h: vp.height, vm: vp.transform as M });
-        if (i % 5 === 0 || i === doc.numPages) setOpenState({ kind: 'loading', name, progress: 0.2 + 0.8 * (i / doc.numPages), detail: `Reading fonts and text on ${doc.numPages} ${doc.numPages === 1 ? 'page' : 'pages'}…` });
+        if (i % 2 === 0 || i === doc.numPages || doc.numPages < 20) setOpenState({ kind: 'loading', name, progress: 0.2 + 0.8 * (i / doc.numPages), detail: `Reading fonts and text on ${doc.numPages} ${doc.numPages === 1 ? 'page' : 'pages'}…`, done: i, total: doc.numPages });
       }
       setInfos(list);
       setPdf(doc);
@@ -135,6 +135,11 @@ export default function EditorApp(host: HostProps) {
   };
   const close = () => { setFile(null); setPdf(null); setInfos([]); setRoute({ name: 'home' }); };
   const openTools = (back: 'home' | 'editor') => { startAfterOpen.current = undefined; setRoute({ name: 'tools', tool: 'hub', back }); };
+  const quick = (q: QuickAction) => {
+    if (q === 'sign' || q === 'fill') { startAfterOpen.current = q; pick(); }
+    else if (q === 'tools') openTools('home');
+    else { startAfterOpen.current = undefined; setRoute({ name: 'tools', tool: q, back: 'home' }); }
+  };
 
   return (
     <>
@@ -153,7 +158,7 @@ export default function EditorApp(host: HostProps) {
       ) : (
         <Start state={openState} onFile={(f) => readFile(f)} onPick={pick} mobile={bp === 'mobile'}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
-          onTools={() => openTools('home')} theme={theme} onTheme={toggleTheme} />
+          onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme} />
       )}
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { readFile(e.target.files?.[0]); e.target.value = ''; }} />
       {busy && (

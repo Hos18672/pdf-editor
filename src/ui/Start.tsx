@@ -1,97 +1,175 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
 import type { Theme } from './hooks';
 
 export type OpenState =
   | { kind: 'idle' }
-  | { kind: 'loading'; name: string; progress: number; detail: string }
+  | { kind: 'loading'; name: string; progress: number; detail: string; done?: number; total?: number }
   | { kind: 'password'; name: string; wrong: boolean }
   | { kind: 'error'; message: string };
 
-export function ThemeButton({ theme, onToggle }: { theme: Theme; onToggle: () => void }) {
+export type QuickAction = 'sign' | 'fill' | 'combine' | 'convert' | 'tools';
+
+const ANDROID_URL = 'https://github.com/Hos18672/pdf-editor/releases/latest';
+
+export function ThemeButton({ theme, onToggle, round }: { theme: Theme; onToggle: () => void; round?: boolean }) {
   return (
-    <button className="ibtn muted" onClick={onToggle} aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
-      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={19} />
+    <button className={round ? 's2-round' : 'ibtn muted'} onClick={onToggle} aria-label={theme === 'dark' ? 'Use light theme' : 'Use dark theme'} title={theme === 'dark' ? 'Light theme' : 'Dark theme'}>
+      <Icon name={theme === 'dark' ? 'sun' : 'moon'} size={round ? 18 : 19} />
     </button>
   );
 }
 
-export function Start({ state, onFile, onPick, onPassword, onTools, theme, onTheme, mobile }: {
+/** The app mark: navy tile, white sheet, yellow dot. */
+export function LogoMark({ size = 40 }: { size?: number }) {
+  return <span className="logo2" style={{ width: size, height: size }} aria-hidden="true"><i /><b /></span>;
+}
+
+const QUICK: [QuickAction, string, string, string][] = [
+  ['sign', 'Sign', 'signature:duotone', '#FFE14D'],
+  ['fill', 'Fill a form', 'textbox:duotone', '#DDE2FF'],
+  ['combine', 'Combine', 'stack:duotone', '#E3F1E9'],
+  ['convert', 'Convert to PDF', 'file-arrow-down:duotone', '#FCE3D8'],
+  ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
+];
+
+export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, theme, onTheme, mobile, isNative }: {
   state: OpenState; onFile: (f: File) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
-  theme: Theme; onTheme: () => void; mobile: boolean;
+  onQuick: (q: QuickAction) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
 }) {
   const [over, setOver] = useState(false);
   const [pw, setPw] = useState('');
   const depth = useRef(0);
+  const isFile = (e: React.DragEvent) => [...(e.dataTransfer?.types ?? [])].includes('Files');
   const drop = {
-    onDragEnter: (e: React.DragEvent) => { e.preventDefault(); depth.current++; setOver(true); },
-    onDragOver: (e: React.DragEvent) => e.preventDefault(),
+    onDragEnter: (e: React.DragEvent) => { if (!isFile(e)) return; e.preventDefault(); depth.current++; setOver(true); },
+    onDragOver: (e: React.DragEvent) => { if (isFile(e)) e.preventDefault(); },
     onDragLeave: () => { depth.current = Math.max(0, depth.current - 1); if (!depth.current) setOver(false); },
     onDrop: (e: React.DragEvent) => { e.preventDefault(); depth.current = 0; setOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); },
   };
-  return (
-    <div className="start" {...drop}>
-      <header className="brandbar">
-        <div className="logo" aria-hidden="true" />
-        <div className="brand">PDF Editor</div>
-        <div className="sp" />
-        {!mobile && <div className="offline"><Icon name="offline" size={15} /><span>Works offline</span></div>}
-        <button className="btn ghost" onClick={onTools}><Icon name="tools" size={18} />{mobile ? 'Tools' : 'All tools'}</button>
-        <ThemeButton theme={theme} onToggle={onTheme} />
-      </header>
-      <main className="hero">
-        <div className="hero-grid">
-          <div className="hero-copy">
-            <div className="chip"><Icon name="lock" size={14} />Processed on your device</div>
-            <h1>Edit any PDF <mark>without uploading it.</mark></h1>
-            <p className="lead">Retype existing text in its original font, sign, fill forms, highlight and reorder pages — all in your browser. Your file never leaves this device.</p>
-            <div className="feats">
-              <span><Icon name="edit" size={18} />Edit existing text</span>
-              <span><Icon name="sign" size={18} />Sign &amp; fill</span>
-              <span><Icon name="pages" size={18} />Organize pages</span>
-            </div>
-          </div>
-          <div className={`zone${over ? ' over' : ''}`} aria-live="polite">
-            {(state.kind === 'idle') && (
-              <>
-                <div className="paper-ill" aria-hidden="true"><i /><i /><i /><i /><i /></div>
-                <div className="zt">
-                  <h2>{over ? 'Drop to open' : mobile ? 'Open a PDF' : 'Drop a PDF here'}</h2>
-                  <p>{over ? 'Release anywhere on the page' : mobile ? 'From Files, Drive or Downloads' : 'or choose one from your computer'}</p>
-                </div>
-                <button className="btn primary xl" onClick={onPick}><Icon name="open" size={19} />Open PDF</button>
-                <button className="more-tools" onClick={onTools}>More tools: combine, extract, convert<Icon name="right" size={16} /></button>
-              </>
-            )}
-            {state.kind === 'loading' && (
-              <>
-                <div className="spinner" role="progressbar" aria-label="Opening" />
-                <div className="zt"><h2 style={{ wordBreak: 'break-word' }}>Opening {state.name}</h2><p>{state.detail}</p></div>
-                <div className="progress"><div style={{ width: `${Math.round(state.progress * 100)}%` }} /></div>
-              </>
-            )}
-            {state.kind === 'password' && (
-              <form className="zt" style={{ gap: 18 }} onSubmit={(e) => { e.preventDefault(); if (pw) onPassword(pw); }}>
-                <div className="err-ic"><Icon name="lock-key:fill" size={28} /></div>
-                <div className="zt"><h2>This PDF is password-protected</h2>
-                  <p>{state.wrong ? 'That password didn’t work. Try again.' : `Enter the password for ${state.name}. It’s checked on this device only.`}</p></div>
-                <div className="pw">
-                  <input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Password" autoFocus aria-label="Password" />
-                  <button className="btn primary" style={{ height: 44 }} type="submit" disabled={!pw}>Unlock</button>
-                </div>
-                <button type="button" className="btn ghost" onClick={onPick}><Icon name="open" size={17} />Choose another file</button>
-              </form>
-            )}
-            {state.kind === 'error' && (
-              <>
-                <div className="err-ic"><Icon name="warning-circle" size={28} /></div>
-                <div className="zt"><h2>This file couldn’t be opened</h2><p>{state.message}</p></div>
-                <div className="acts"><button className="btn primary lg" onClick={onPick}><Icon name="open" size={18} />Choose another file</button></div>
-              </>
-            )}
-          </div>
+
+  // paste a PDF (Ctrl+V) anywhere on the start screen
+  useEffect(() => {
+    const onPaste = (e: ClipboardEvent) => {
+      const f = [...(e.clipboardData?.files ?? [])].find((x) => x.type === 'application/pdf' || /\.pdf$/i.test(x.name));
+      if (f) { e.preventDefault(); onFile(f); }
+    };
+    window.addEventListener('paste', onPaste);
+    return () => window.removeEventListener('paste', onPaste);
+  }, [onFile]);
+
+  const idle = state.kind === 'idle';
+  let card: React.ReactNode;
+  if (over) {
+    card = (
+      <div className="s2-card over" aria-live="polite">
+        <div className="s2-tile y"><Icon name="hand-grabbing:bold" size={28} /></div>
+        <div className="s2-ct"><b>Release to open</b><span>Drop your PDF anywhere on this page</span></div>
+      </div>
+    );
+  } else if (state.kind === 'loading') {
+    const pct = Math.round(state.progress * 100);
+    card = (
+      <div className="s2-card row" role="status" aria-live="polite">
+        <div className="s2-mini" aria-hidden="true"><i className="t" /><i /><i /><i className="s" /><i /><span className="scan" /></div>
+        <div className="s2-load">
+          <div className="top"><b>Opening {state.name}</b>{state.total ? <span className="num">{state.done ?? 0} / {state.total}</span> : <span className="num">{pct}%</span>}</div>
+          <div className="s2-bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Opening"><div style={{ width: `${Math.max(4, pct)}%` }} /></div>
+          <span className="sub">{state.done !== undefined ? 'Reading fonts so your edits match the original' : state.detail}</span>
         </div>
+      </div>
+    );
+  } else if (state.kind === 'password') {
+    card = (
+      <form className="s2-card stack" onSubmit={(e) => { e.preventDefault(); if (pw) onPassword(pw); }}>
+        <div className="s2-head"><div className="s2-tile warn"><Icon name="lock-key:fill" size={26} /></div>
+          <div className="s2-ct"><b>This PDF is password-protected</b>
+            <span>{state.wrong ? 'That password didn’t work. Try again.' : `Enter the password for ${state.name}. It’s checked on this device only.`}</span></div></div>
+        <div className="pw">
+          <input className="input" type="password" value={pw} onChange={(e) => setPw(e.target.value)} placeholder="Password" autoFocus aria-label="Password" />
+          <button className="btn primary lg" type="submit" disabled={!pw}>Unlock</button>
+        </div>
+        <button type="button" className="btn ghost" onClick={onPick}><Icon name="open" size={17} />Choose another file</button>
+      </form>
+    );
+  } else if (state.kind === 'error') {
+    card = (
+      <div className="s2-card stack" role="alert">
+        <div className="s2-head"><div className="s2-tile err"><Icon name="warning-circle" size={28} /></div>
+          <div className="s2-ct"><b>This file couldn’t be opened</b><span>{state.message}</span></div></div>
+        <button className="btn primary lg" onClick={onPick}><Icon name="open" size={18} />Choose another file</button>
+      </div>
+    );
+  } else {
+    card = (
+      <div className="s2-card drop" onClick={onPick}>
+        <span className="dash" aria-hidden="true" />
+        <div className="s2-head">
+          <div className="s2-tile"><Icon name="file-arrow-up:bold" size={28} /></div>
+          <div className="s2-ct"><b>{mobile ? 'Open a PDF' : 'Drop a PDF anywhere'}</b><span>{mobile ? 'From Files, Drive or Downloads' : 'Or paste one with Ctrl+V'}</span></div>
+        </div>
+        <button className="btn primary xl s2-cta" onClick={(e) => { e.stopPropagation(); onPick(); }}>Choose PDF<Icon name="arrow-right:bold" size={18} /></button>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`start${over ? ' dragging' : ''}`} {...drop}>
+      <div className="s2-glow" aria-hidden="true" />
+      <header className="s2-nav">
+        <LogoMark />
+        <span className="s2-brand">PDF Editor</span>
+        <span className="sp" />
+        {mobile
+          ? <button className="s2-navbtn" onClick={onTools}><Icon name="tools" size={18} />Tools</button>
+          : <button className="s2-navbtn" onClick={onTools}><Icon name="tools" size={18} />All tools</button>}
+        {!mobile && !isNative && <a className="s2-navbtn" href={ANDROID_URL} target="_blank" rel="noopener noreferrer"><Icon name="android-logo" size={18} />Android app</a>}
+        <ThemeButton theme={theme} onToggle={onTheme} round />
+      </header>
+      <main className="s2-hero">
+        <div className="s2-copy">
+          <div className="s2-pill"><span className="lk"><Icon name="lock" size={13} /></span>Files never leave your device</div>
+          <h1>Edit any PDF.<br /><span className="mk">Right here.</span></h1>
+          <p className="s2-lead">Retype existing text in its original font, sign, fill forms, merge and convert. All in your browser, all offline.</p>
+          {card}
+          {idle && !over && (
+            <div className="s2-chips" role="list" aria-label="Quick tools">
+              {QUICK.map(([q, label, icon, bg]) => (
+                <button key={q} role="listitem" className="s2-chip" onClick={() => onQuick(q)}>
+                  <span style={{ background: bg }}><Icon name={icon} size={18} /></span>{label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+        <Demo />
       </main>
+    </div>
+  );
+}
+
+/** Decorative: three floating sheets; the front one shows an edit, a highlight sweep and a signature. */
+function Demo() {
+  return (
+    <div className="s2-art" aria-hidden="true">
+      <div className="sheet back l" />
+      <div className="sheet back r" />
+      <div className="sheet front">
+        <div className="ttl">Lease Agreement</div>
+        <div className="ln" />
+        <div className="edit">and <span className="box">Maya R. Okafor</span><span className="caret" /></div>
+        <div className="ln" style={{ width: '92%' }} />
+        <div className="hl"><span className="ln" /><span className="sweep" /></div>
+        <div className="ln" style={{ width: '84%' }} />
+        <div className="ln" style={{ width: '70%' }} />
+        <div className="sp" />
+        <div className="sig">
+          <div className="bar"><span><Icon name="move" size={14} /></span><span><Icon name="copy" size={14} /></span><span className="del"><Icon name="trash" size={14} /></span></div>
+          <div className="name">Jordan Ellis</div>
+          <div className="lbl">Tenant signature</div>
+        </div>
+      </div>
+      <div className="s2-badge"><span><Icon name="check" size={16} /></span><span className="t">Font matched<small>Source Serif · 11 pt</small></span></div>
     </div>
   );
 }
