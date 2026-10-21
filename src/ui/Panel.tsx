@@ -208,11 +208,11 @@ const TOOL_HINTS: Partial<Record<Tool, string>> = {
 };
 export const toolHasProps = (t: Tool) => !!TOOL_NAMES[t];
 
-export function ToolProps({ tool, style, onChange }: { tool: Tool; style: ToolStyle; onChange: (s: Partial<ToolStyle>) => void }) {
+export function ToolProps({ tool, style, onChange, compact }: { tool: Tool; style: ToolStyle; onChange: (s: Partial<ToolStyle>) => void; compact?: boolean }) {
   return (
-    <div className="props">
-      <div className="head"><div className="t"><div className="kicker">Tool</div><h3>{TOOL_NAMES[tool]}</h3>
-        <div className="hint" style={{ marginTop: 2 }}>{TOOL_HINTS[tool]}</div></div></div>
+    <div className={`props${compact ? ' compact' : ''}`}>
+      {!compact && <div className="head"><div className="t"><div className="kicker">Tool</div><h3>{TOOL_NAMES[tool]}</h3>
+        <div className="hint" style={{ marginTop: 2 }}>{TOOL_HINTS[tool]}</div></div></div>}
       {tool === 'text' && (
         <>
           <div className="field"><div className="label">Font</div><Family value={style.family} onChange={(family) => onChange({ family })} /></div>

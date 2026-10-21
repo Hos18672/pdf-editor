@@ -51,19 +51,50 @@ const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const MIN_Z = 0.25, MAX_Z = 4;
 const clampZ = (z: number) => Math.max(MIN_Z, Math.min(MAX_Z, z));
 
-type RailItem = { t: Tool | 'shapes' | 'pages'; label: string; icon: string };
-const RAIL: RailItem[] = [
-  { t: 'edit', label: 'Edit', icon: 'edit' },
-  { t: 'fill', label: 'Fill form', icon: 'fill' },
-  { t: 'text', label: 'Add text', icon: 'text' },
-  { t: 'sign', label: 'Sign', icon: 'sign' },
-  { t: 'image', label: 'Image', icon: 'image' },
-  { t: 'whiteout', label: 'Whiteout', icon: 'whiteout' },
-  { t: 'highlight', label: 'Highlight', icon: 'highlight' },
-  { t: 'shapes', label: 'Shapes', icon: 'shapes' },
-  { t: 'draw', label: 'Draw', icon: 'draw' },
-  { t: 'pages', label: 'Pages', icon: 'pages' },
+type RailT = Tool | 'shapes' | 'pages';
+type RailItem = { t: RailT; label: string; icon: string; key: string; opts?: boolean };
+/** Tools grouped by intent (rail, mobile "All tools" sheet). `opts`: the tool has a flyout with options. */
+const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
+  { name: 'Change', tint: 'var(--tint-change)', items: [
+    { t: 'edit', label: 'Edit', icon: 'cursor-text', key: 'E' },
+    { t: 'fill', label: 'Fill', icon: 'textbox', key: 'F' }] },
+  { name: 'Add', tint: 'var(--tint-add)', items: [
+    { t: 'text', label: 'Text', icon: 'text-t', key: 'T', opts: true },
+    { t: 'sign', label: 'Sign', icon: 'signature', key: 'S' },
+    { t: 'image', label: 'Image', icon: 'image', key: 'I' }] },
+  { name: 'Mark up', tint: 'var(--tint-markup)', items: [
+    { t: 'whiteout', label: 'Whiteout', icon: 'eraser', key: 'W' },
+    { t: 'highlight', label: 'Highlight', icon: 'highlighter', key: 'H', opts: true },
+    { t: 'shapes', label: 'Shapes', icon: 'shapes', key: 'R', opts: true },
+    { t: 'draw', label: 'Draw', icon: 'scribble', key: 'D', opts: true }] },
+  { name: 'Document', tint: 'var(--tint-doc)', items: [
+    { t: 'pages', label: 'Pages', icon: 'squares-four', key: 'P' }] },
 ];
+const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
+const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line'];
+
+// phone dock: the 4 most recently used tools (slots stay put; a new tool replaces the least recent)
+const RECENT_KEY = 'pe-recent-tools';
+type Recent = { slots: RailT[]; used: Partial<Record<RailT, number>> };
+const readRecent = (): Recent => {
+  try {
+    const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? 'null');
+    if (v && Array.isArray(v.slots) && v.slots.length === 4 && v.slots.every((t: string) => RAIL.some((r) => r.t === t))) return v;
+  } catch { /* storage unavailable */ }
+  return { slots: ['edit', 'text', 'highlight', 'sign'], used: {} };
+};
+const useRecent = (r: Recent, t: RailT): Recent => {
+  const used = { ...r.used, [t]: Date.now() };
+  let slots = r.slots;
+  if (!slots.includes(t)) {
+    let at = 0;
+    slots.forEach((x, i) => { if ((used[x] ?? 0) < (used[slots[at]] ?? 0)) at = i; });
+    slots = slots.map((x, i) => (i === at ? t : x));
+  }
+  const next = { slots, used };
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
+  return next;
+};
 const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'], ['line', 'Line', 'line']];
 
 /** What the editor opens with when started from the tools page. */
@@ -88,7 +119,12 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
   const [showSig, setShowSig] = useState<null | { field?: FormField }>(null);
   const [view, setView] = useState<'doc' | 'pages'>(start === 'pages' ? 'pages' : 'doc');
-  const [shapesOpen, setShapesOpen] = useState(false);
+  // tool flyout beside the rail (tablet / desktop) or above the dock (phone, shapes only)
+  const [flyout, setFlyout] = useState<{ t: RailT; top: number } | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const [recent, setRecent] = useState<Recent>(readRecent);
+  const railBtns = useRef<Partial<Record<RailT, HTMLButtonElement | null>>>({});
+  const lastShape = useRef<Tool>('rect');
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const [slimOpen, setSlimOpen] = useState(false);
   const [dragInfo, setDragInfo] = useState<{ x: number; y: number; id: string; page: number } | null>(null);
@@ -99,7 +135,6 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [flatten, setFlatten] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
   const imgInput = useRef<HTMLInputElement>(null);
-  const shapesBtn = useRef<HTMLButtonElement>(null);
   const ratios = useRef<Record<number, number>>({});
 
   const [fieldsReady, setFieldsReady] = useState(false);
@@ -112,7 +147,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const el = wrapRef.current;
     if (!el) return 1;
     const maxW = Math.max(...infos.map((i) => i.w));
-    const pad = mobile ? 24 : tablet ? 64 : 80;
+    // the page column's own side padding (it leaves room for the floating rail)
+    const cs = el.firstElementChild ? getComputedStyle(el.firstElementChild) : null;
+    const pad = cs ? parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight) : mobile ? 24 : 80;
     const cap = large ? 820 : desk ? 760 : 10000;
     return clampZ(Math.min(el.clientWidth - pad, cap) / maxW);
   };
@@ -511,9 +548,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         const dx = e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0;
         const dy = e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0;
         changeObject(selObj.id, { x: selObj.x + dx, y: selObj.y + dy, ...(selObj.type === 'line' ? { x2: selObj.x2 + dx, y2: selObj.y2 + dy } : {}) } as any, false);
+      } else if (!mod && !e.altKey && e.key.length === 1 && RAIL.some((r) => r.key === e.key.toUpperCase())) {
+        railClick(RAIL.find((r) => r.key === e.key.toUpperCase())!);
       } else if (e.key === 'Escape') {
         if (view === 'pages') setView('doc');
-        setSelected(null); setShapesOpen(false); setSheetFor(null);
+        setSelected(null); setFlyout(null); setMoreOpen(false); setSheetFor(null);
         if (!selected) setTool('edit');
       }
     };
@@ -541,7 +580,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   }, [fields, snap.pages]);
 
   const pickTool = (t: Tool) => {
-    setShapesOpen(false);
+    setFlyout(null);
     setSelected(null);
     setEditing(null);
     setSheetFor(null);
@@ -559,16 +598,41 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (start === 'fill' || start === 'sign') pickTool(start);
   }, [fieldsReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const openFlyout = (t: RailT) => {
+    const btn = railBtns.current[t];
+    const body = btn?.closest('.body');
+    setFlyout({ t, top: btn && body ? btn.getBoundingClientRect().top - body.getBoundingClientRect().top - 6 : 120 });
+  };
   const railClick = (r: RailItem) => {
-    if (r.t === 'shapes') { setShapesOpen((v) => !v); return; }
-    if (r.t === 'pages') { setShapesOpen(false); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }
+    setMoreOpen(false);
+    if (mobile) setRecent((v) => useRecent(v, r.t));
+    if (r.t === 'pages') { setFlyout(null); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }
+    const same = railActive(r);
+    if (r.t === 'shapes') {
+      if (!SHAPE_TOOLS.includes(tool) || view === 'pages') pickTool(lastShape.current);
+      if (same && flyout?.t === 'shapes') setFlyout(null); else openFlyout('shapes');
+      return;
+    }
+    if (same && r.opts && !mobile) { if (flyout?.t === r.t) setFlyout(null); else openFlyout(r.t); return; }
     pickTool(r.t);
+    if (r.opts && !mobile) openFlyout(r.t);
   };
   const railActive = (r: RailItem) => r.t === 'pages' ? view === 'pages'
     : view === 'pages' ? false
-    : r.t === 'shapes' ? ['rect', 'ellipse', 'line'].includes(tool) || shapesOpen
+    : r.t === 'shapes' ? SHAPE_TOOLS.includes(tool)
     : r.t === 'sign' ? !!showSig || selObj?.type === 'signature'
     : r.t === tool;
+  useEffect(() => { if (SHAPE_TOOLS.includes(tool)) lastShape.current = tool; }, [tool]);
+  // the flyout closes on a click outside it (and outside the rail / dock)
+  useEffect(() => {
+    if (!flyout) return;
+    const down = (e: PointerEvent) => {
+      const t = e.target as HTMLElement;
+      if (!t.closest?.('.flyout2, .rail, .dock2, .cp-scrim')) setFlyout(null);
+    };
+    document.addEventListener('pointerdown', down, true);
+    return () => document.removeEventListener('pointerdown', down, true);
+  }, [flyout]);
 
   // ----- focus helpers -----
   const scrollToEl = (el: Element | null | undefined, block: ScrollLogicalPosition = 'center') => el?.scrollIntoView({ block, inline: 'nearest', behavior: 'smooth' });
@@ -580,7 +644,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   };
   const goToPage = (src: number) => {
     const el = wrapRef.current?.querySelector<HTMLElement>(`.pageOuter[data-src="${src}"]`);
-    if (el && wrapRef.current) wrapRef.current.scrollTo({ top: el.offsetTop - 24, behavior: 'smooth' });
+    if (el && wrapRef.current) wrapRef.current.scrollTo({ top: el.offsetTop - 100, behavior: 'smooth' });
   };
   const focusField = (f?: FormField) => {
     if (!f) return;
@@ -600,8 +664,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const el = wrap?.querySelector(sel);
       if (!wrap || !el) return;
       const wr = wrap.getBoundingClientRect(), r = el.getBoundingClientRect();
-      const target = wr.top + wr.height * 0.28;
-      if (r.top > wr.top + wr.height * 0.45 || r.top < wr.top + 8) wrap.scrollBy({ top: r.top - target, behavior: 'smooth' });
+      const top = wr.top + 76; // below the floating top bar
+      const h = wr.bottom - top;
+      const target = top + h * 0.28;
+      if (r.top > top + h * 0.45 || r.top < top + 8) wrap.scrollBy({ top: r.top - target, behavior: 'smooth' });
     };
     const t1 = setTimeout(go, 60), t2 = setTimeout(go, 450);
     return () => { clearTimeout(t1); clearTimeout(t2); };
@@ -668,22 +734,21 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       onPrev={() => focusField(fillable[Math.max(0, fieldIndex - 1)])} onNext={() => focusField(fillable[Math.min(fillable.length - 1, fieldIndex + 1)])} />
   );
   const panel = selRun ? runProps(false) : selObj ? objProps(false) : tool === 'fill' ? fillPanel
-    : toolHasProps(tool) ? <ToolProps tool={tool} style={style} onChange={(s) => setStyle((v) => ({ ...v, ...s }))} /> : null;
+    : null; // tool options live in the rail flyout
 
   const mobileEditing = mobile && editing && (editing.includes(':') || snap.objects.find((o) => o.id === editing)?.type === 'text');
   const fieldNav = !desk && tool === 'fill' && activeField && fillable.length > 0;
   const sheetObj = sheetFor ? snap.objects.find((o) => o.id === sheetFor) : undefined;
 
   return (
-    <div className="app">
-      <header className="topbar">
+    <div className={`app bp-${bp}`}>
+      <header className="topbar float">
         <button className="ibtn" onClick={() => { if (!editCount || confirm('Close this document? Unsaved changes will be lost.')) onClose(); }} aria-label="Close document" title="Close"><Icon name="back" /></button>
         <div className="doc">
-          <div className="pdfchip" aria-hidden="true">PDF</div>
           <div className="names">
             <div className="fname" title={file.name}>{file.name}</div>
             <div className="fmeta"><span>{snap.pages.length} {snap.pages.length === 1 ? 'page' : 'pages'}</span>
-              {editCount > 0 && <><span className="dot" /><span className="chg">{editCount} {editCount === 1 ? 'change' : 'changes'}</span></>}</div>
+              {editCount > 0 && <span className="chg">{editCount} {editCount === 1 ? 'change' : 'changes'}</span>}</div>
           </div>
         </div>
         <div className="group">
@@ -695,29 +760,33 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             <button className="ibtn" onClick={() => zoomStep(-1)} aria-label="Zoom out" title="Zoom out"><Icon name="minus" size={16} /></button>
             <button className="pct" onClick={() => zoomTo(fitZoom())} title="Fit width (Ctrl+0)" aria-label={`Zoom ${Math.round(zoom * 100)}%, fit width`}>{Math.round(zoom * 100)}%</button>
             <button className="ibtn" onClick={() => zoomStep(1)} aria-label="Zoom in" title="Zoom in"><Icon name="plus" size={16} /></button>
-            {desk && <><span className="div" /><button className="ibtn" onClick={() => zoomTo(fitZoom())} aria-label="Fit width" title="Fit width"><Icon name="fit" size={16} /></button></>}
+            {desk && <button className="ibtn" onClick={() => zoomTo(fitZoom())} aria-label="Fit width" title="Fit width"><Icon name="fit" size={16} /></button>}
           </div>
         )}
-        {desk && <ThemeButton theme={theme} onToggle={onTheme} />}
+        {!mobile && <button className="ibtn" onClick={onTools} aria-label="All tools" title="All tools: combine, extract, convert"><Icon name="dots-nine" size={20} /></button>}
+        {!mobile && <ThemeButton theme={theme} onToggle={onTheme} />}
         {mobile
           ? <button className="ibtn primary" onClick={download} aria-label="Download PDF"><Icon name="download" size={20} /></button>
-          : <button className="btn primary dl" onClick={download}><Icon name="download" size={17} />Download</button>}
+          : <button className="btn primary dl" onClick={download}><Icon name="download" size={18} />Download</button>}
       </header>
 
       <div className="body">
         {!mobile && (
           <nav className="rail" aria-label="Tools">
-            {RAIL.map((r) => {
-              const on = railActive(r);
-              return (
-                <button key={r.t} ref={r.t === 'shapes' ? shapesBtn : undefined} className={`tool${on ? ' active' : ''}`} aria-pressed={on} title={r.label} onClick={() => railClick(r)}>
-                  <Icon name={r.icon} size={22} weight={on ? 'fill' : 'regular'} /><span>{r.label}</span>
-                </button>
-              );
-            })}
-            <div style={{ flex: 1 }} />
-            {tablet && <ThemeButton theme={theme} onToggle={onTheme} />}
-            <button className="tool" onClick={onTools} title="All tools"><Icon name="dots-three:bold" size={22} /><span>More</span></button>
+            {GROUPS.map((g) => (
+              <div key={g.name} className="rgroup" role="group" aria-label={g.name}>
+                {g.items.map((r) => {
+                  const on = railActive(r);
+                  return (
+                    <button key={r.t} ref={(el) => { railBtns.current[r.t] = el; }} className={`tool${on ? ' active' : ''}${r.opts ? ' opts' : ''}`}
+                      aria-pressed={on} aria-haspopup={r.opts ? 'true' : undefined} aria-expanded={r.opts ? flyout?.t === r.t : undefined}
+                      title={`${r.label} (${r.key})`} onClick={() => railClick(r)}>
+                      <Icon name={r.icon} size={22} weight={on ? 'fill' : 'duotone'} /><span>{r.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </nav>
         )}
         {large && view === 'doc' && (
@@ -779,17 +848,26 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         {tablet && view === 'doc' && panel && !(tool === 'fill' && activeField) && (
           <aside ref={cardRef} className={`floatcard ${cardLeft ? 'l' : 'r'}`} aria-label="Properties">{panel}</aside>
         )}
-        {shapesOpen && (
-          <div className="flyout" role="menu" style={mobile
-            ? { left: 8, right: 8, bottom: 8, justifyContent: 'center' }
-            : { left: 92, top: (shapesBtn.current?.offsetTop ?? 400) - (shapesBtn.current?.parentElement?.scrollTop ?? 0) - 6 }}>
-            {SHAPES.map(([t, label, ic]) => (
-              <button key={t} role="menuitem" className={`tool${tool === t ? ' active' : ''}`} onClick={() => pickTool(t)}>
-                <Icon name={ic} size={22} weight={tool === t ? 'fill' : 'regular'} /><span>{label}</span>
-              </button>
-            ))}
-          </div>
-        )}
+        {flyout && (() => {
+          const item = RAIL.find((r) => r.t === flyout.t)!;
+          const t: Tool = flyout.t === 'shapes' ? (SHAPE_TOOLS.includes(tool) ? tool : lastShape.current) : flyout.t as Tool;
+          return (
+            <div className={`flyout2${mobile ? ' m' : ''}`} role="dialog" aria-label={`${item.label} options`}
+              style={mobile ? undefined : { top: Math.max(8, flyout.top) }}>
+              <div className="fh"><b>{item.label}</b>{!mobile && <kbd>{item.key}</kbd>}</div>
+              {flyout.t === 'shapes' && (
+                <div className="ftiles" role="radiogroup" aria-label="Shape">
+                  {SHAPES.map(([st, label, ic]) => (
+                    <button key={st} role="radio" aria-checked={tool === st} className={tool === st ? 'on' : ''} onClick={() => { pickTool(st); if (!mobile) openFlyout('shapes'); }}>
+                      <Icon name={ic} size={20} weight={tool === st ? 'fill' : 'regular'} />{label}
+                    </button>
+                  ))}
+                </div>
+              )}
+              {!mobile && toolHasProps(t) && <ToolProps tool={t} style={style} compact onChange={(v) => setStyle((x) => ({ ...x, ...v }))} />}
+            </div>
+          );
+        })()}
       </div>
 
       {mobile && mobileEditing && (
@@ -804,21 +882,48 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         </SlimBar>
       )}
       {mobile && !mobileEditing && !(fieldNav) && (
-        <nav className="dock" aria-label="Tools">
-          <div className="scroll">
-            {RAIL.map((r) => {
-              const on = railActive(r);
-              return (
-                <button key={r.t} className={`tool${on ? ' active' : ''}`} aria-pressed={on} onClick={() => railClick(r)}>
-                  <Icon name={r.icon} size={23} weight={on ? 'fill' : 'regular'} /><span>{r.label}</span>
-                </button>
-              );
-            })}
-            <button className="tool" onClick={onTools}><Icon name="dots-three:bold" size={23} /><span>More</span></button>
-            <button className="tool" onClick={onTheme}><Icon name={theme === 'dark' ? 'sun' : 'moon'} size={23} /><span>{theme === 'dark' ? 'Light' : 'Dark'}</span></button>
-          </div>
-          <div className="fade" />
+        <nav className="dock2" aria-label="Tools">
+          {recent.slots.map((t) => {
+            const r = RAIL.find((x) => x.t === t)!;
+            const on = railActive(r);
+            return (
+              <button key={r.t} className={`dk${on ? ' on' : ''}`} aria-pressed={on} aria-label={r.label} onClick={() => railClick(r)}>
+                <Icon name={r.icon} size={23} weight={on ? 'fill' : 'regular'} />{on && <span>{r.label}</span>}
+              </button>
+            );
+          })}
+          <button className={`dk${moreOpen ? ' open' : ''}`} aria-label="All tools" aria-haspopup="dialog" onClick={() => { setFlyout(null); setMoreOpen(true); }}>
+            <Icon name="dots-nine:bold" size={23} />
+          </button>
         </nav>
+      )}
+      {mobile && moreOpen && (
+        <>
+          <div className="sheet-scrim" onClick={() => setMoreOpen(false)} />
+          <div className="toolsheet" role="dialog" aria-label="All tools">
+            <div className="grab" />
+            <div className="tsh"><h2>All tools</h2>
+              <ThemeButton theme={theme} onToggle={onTheme} />
+              <button className="ibtn round" onClick={() => setMoreOpen(false)} aria-label="Close"><Icon name="x:bold" size={18} /></button></div>
+            {GROUPS.map((g) => (
+              <div key={g.name} className="tsg">
+                <span className="kicker">{g.name}</span>
+                <div className="tiles">
+                  {g.items.map((r) => {
+                    const on = railActive(r);
+                    return (
+                      <button key={r.t} className={`tile${on ? ' on' : ''}`} aria-pressed={on} onClick={() => railClick(r)}>
+                        <span className="chip" style={{ background: on ? 'var(--marker)' : g.tint }}><Icon name={r.icon} size={21} weight={on ? 'fill' : 'duotone'} /></span>
+                        {r.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
+            <button className="more-tools" onClick={() => { setMoreOpen(false); onTools(); }}>More tools: combine, extract, convert<Icon name="right" size={16} /></button>
+          </div>
+        </>
       )}
       {mobile && sheetObj && (
         <>
@@ -898,7 +1003,7 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children }: {
 
 function MobileFillBar({ fields, filled, mark, onMark, onStart }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void }) {
   return (
-    <div className="slimbar">
+    <div className="slimbar fillfloat">
       <div className="row" style={{ overflowX: 'auto' }}>
         {fields > 0 && <button className="btn primary" onClick={onStart}>Fill {fields} fields</button>}
         {fields > 0 && <span className="label num" style={{ whiteSpace: 'nowrap' }}>{filled}/{fields}</span>}
