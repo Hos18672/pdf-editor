@@ -1,6 +1,7 @@
 // Scanner plumbing on the main thread: decode photos, find the document, render pages in a worker.
 import { detectKernels, luminance } from './detect';
 import { orientKernels, type Orientation } from './orient';
+import { workerUrl } from './workerUrl';
 import { aspectOf, dist, FORMATS, fullQuad, snapRatio, type Quad } from './geom';
 import { scanKernels, type Filter, type JobResult, type Kernels } from './kernels';
 
@@ -49,7 +50,16 @@ export function decode(blob: Blob): Promise<ImageBitmap | HTMLCanvasElement> {
         b = Array.isArray(r) ? r[0] : r;
       }
       if (typeof createImageBitmap === 'function') {
-        try { return await createImageBitmap(b, { imageOrientation: 'from-image' } as any); } catch { /* fall back */ }
+        try {
+          const oriented = await createImageBitmap(b, { imageOrientation: 'from-image' } as any);
+          // Phone photos keep "rotate me" in EXIF; some Android WebViews then crop such a bitmap in
+          // the unrotated frame (shifted crops). Bake the rotation into plain pixels once.
+          const c = document.createElement('canvas');
+          c.width = oriented.width; c.height = oriented.height;
+          c.getContext('2d')!.drawImage(oriented, 0, 0);
+          oriented.close();
+          try { const flat = await createImageBitmap(c); c.width = c.height = 0; return flat; } catch { return c; }
+        } catch { /* fall back */ }
       }
       const url = URL.createObjectURL(b);
       try {
@@ -112,20 +122,10 @@ let seq = 0;
 let local: { K: Kernels; D: ReturnType<typeof detectKernels>; O: ReturnType<typeof orientKernels> } | null = null;
 const canBitmap = typeof OffscreenCanvas !== 'undefined' && typeof createImageBitmap === 'function';
 
-function workerCode() {
-  return `var K=(${scanKernels.toString()})(),D=(${detectKernels.toString()})(),O=(${orientKernels.toString()})();
-function px(s){if(s.img)return s.img;var b=s.bmp,c=new OffscreenCanvas(b.width,b.height),x=c.getContext('2d',{willReadFrequently:true});x.drawImage(b,0,0);b.close();return{w:c.width,h:c.height,data:x.getImageData(0,0,c.width,c.height).data};}
-function shrink(im,max){var k=Math.max(1,Math.ceil(Math.max(im.w,im.h)/max));if(k===1)return im;var w=Math.floor(im.w/k),h=Math.floor(im.h/k),o=new Uint8ClampedArray(w*h*4);for(var y=0;y<h;y++)for(var x=0;x<w;x++){var i=((y*k)*im.w+x*k)*4,j=(y*w+x)*4;o[j]=im.data[i];o[j+1]=im.data[i+1];o[j+2]=im.data[i+2];o[j+3]=255;}return{w:w,h:h,data:o};}
-self.onmessage=function(e){var m=e.data;try{
-if(m.type==='process'){m.job.src=px(m.src);var r=K.process(m.job);var o=m.orient?O.textOrientation(shrink(r.img,1000)):undefined;self.postMessage({id:m.id,r:{img:r.img,blur:r.blur,times:r.times,orient:o}},[r.img.data.buffer]);}
-else if(m.type==='find'){var s=px(m.small),d=D.detectQuad(s,m.opts),q=null;if(d){var md=px(m.mid),k=md.w/s.w;q=D.refineQuad(D.luminance(md),md.w,md.h,d.quad.map(function(p){return{x:p.x*k,y:p.y*k};}));q=q.map(function(p){return{x:p.x/md.w,y:p.y/md.h};});}else if(m.mid.bmp)m.mid.bmp.close();self.postMessage({id:m.id,r:{det:d,quad:q}});}
-}catch(err){self.postMessage({id:m.id,err:String(err&&err.stack||err)});}};`;
-}
-
-function startPool() {
-  if (workers.length || poolBroken) return;
-  try {
-    const url = URL.createObjectURL(new Blob([workerCode()], { type: 'application/javascript' }));
+let starting: Promise<void> | null = null;
+function startPool(): Promise<void> {
+  if (workers.length || poolBroken) return Promise.resolve();
+  starting ??= workerUrl().then((url) => {
     const n = (navigator.hardwareConcurrency ?? 2) >= 4 ? 2 : 1;
     for (let i = 0; i < n; i++) {
       const w = new Worker(url);
@@ -144,7 +144,8 @@ function startPool() {
       };
       workers.push(slot);
     }
-  } catch (e) { console.warn('scan workers unavailable', e); poolBroken = true; }
+  }).catch((e) => { console.warn('scan workers unavailable', e); poolBroken = true; });
+  return starting;
 }
 
 function pump() {
@@ -158,9 +159,9 @@ function pump() {
   }
 }
 
-function post<T>(msg: any, transfer: Transferable[], low = false): Promise<T> {
-  startPool();
-  if (!workers.length) return Promise.reject(new Error('no workers'));
+async function post<T>(msg: any, transfer: Transferable[], low = false): Promise<T> {
+  await startPool();
+  if (!workers.length) throw new Error('no workers');
   return new Promise<T>((ok, fail) => { queue.push({ msg: { ...msg, id: ++seq }, transfer, ok, fail, low }); pump(); });
 }
 
@@ -168,7 +169,7 @@ const localKernels = () => (local ??= { K: scanKernels(), D: detectKernels(), O:
 
 /** a region of the photo at a given size, as a transferable bitmap (or pixels when that's not possible) */
 async function sourceOf(bmp: ImageBitmap | HTMLCanvasElement, region: { x: number; y: number; w: number; h: number }, W: number, H: number): Promise<Src> {
-  if (canBitmap && !workers.length && !poolBroken) startPool();
+  if (canBitmap) await startPool();
   if (canBitmap && workers.length) {
     try {
       const b = await createImageBitmap(bmp, region.x, region.y, region.w, region.h, { resizeWidth: W, resizeHeight: H, resizeQuality: 'high' } as any);

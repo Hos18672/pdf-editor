@@ -7,8 +7,8 @@
 //    shape. The largest bright blob gives one more candidate for sheets without clean straight edges.
 // 4. The winner is refined on a larger copy: along each side the exact edge position is measured at
 //    many points (sub-pixel) and a robust line fit gives the final corners.
-// Everything sits inside detectKernels() (no outside names) so the same code can also run in a
-// Web Worker built from its source text — the live camera finds the page there, off the main thread.
+// Everything sits inside detectKernels() so the same code also runs in the scanner's worker
+// (public/scan/worker.js) — the live camera finds the page there, off the main thread.
 import type { Pt, Quad } from './geom';
 
 export interface Rgba { w: number; h: number; data: Uint8ClampedArray | Uint8Array }

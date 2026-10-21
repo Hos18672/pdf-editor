@@ -55,7 +55,8 @@
     "web": "expo start --web",
     "test:engine": "tsx test/roundtrip.ts test/fixtures/sample.pdf /tmp/out.pdf \"2026-041\" \"2026-117\"",
     "build:web": "expo export -p web",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "build:worker": "node scripts/build-worker.mjs"
   },
   "private": true
 }

@@ -35,6 +35,9 @@ jobs:
 
       - run: npm ci
 
+      # the scanner's worker script (public/scan/worker.js) from src/ui/scan
+      - run: node scripts/build-worker.mjs
+
       - name: Typecheck
         run: npx tsc --noEmit
 

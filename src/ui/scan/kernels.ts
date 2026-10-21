@@ -1,8 +1,7 @@
 // Pixel work for the scanner: perspective crop, sharpening of blurry photos, and the page filters.
 //
-// Everything lives inside one self-contained function (no imports, no outside names) so the same
-// code runs on the main thread and, serialised with toString(), inside a Web Worker built from a
-// Blob (file:// pages in the Android app can't load worker files).
+// Everything lives inside one self-contained function so the same code runs on the main thread and
+// in the scanner's worker (src/ui/scan/worker.ts → public/scan/worker.js).
 
 export type Filter = 'auto' | 'color' | 'gray' | 'bw' | 'original';
 export interface PixelImage { w: number; h: number; data: Uint8ClampedArray }
