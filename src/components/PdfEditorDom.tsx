@@ -13,7 +13,7 @@ if (typeof window !== 'undefined') {
     let injected: any = null;
     try { injected = JSON.parse(w.ReactNativeWebView.injectedObjectJson?.() ?? 'null'); } catch { /* not there yet */ }
     w.$$EXPO_DOM_HOST_OS ??= injected?.EXPO_DOM_HOST_OS ?? 'android';
-    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf'], props: { isNative: true } };
+    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome'], props: { isNative: true } };
   }
 }
 
@@ -24,6 +24,7 @@ export default function PdfEditorDom(props: {
   isNative?: boolean;
   pickPdf?: () => Promise<{ name: string; base64: string } | null>;
   savePdf?: (base64: string, name: string) => Promise<string | void>;
+  onChrome?: (c: { top: string; bottom: string; topDark: boolean; bottomDark: boolean }) => void;
 }) {
-  return <EditorApp isNative={props.isNative} pickPdf={props.pickPdf} savePdf={props.savePdf} />;
+  return <EditorApp isNative={props.isNative} pickPdf={props.pickPdf} savePdf={props.savePdf} onChrome={props.onChrome} />;
 }

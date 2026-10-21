@@ -98,7 +98,36 @@ button { cursor: pointer; }
 .swatch.on i { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
 .swatch.none i { background: linear-gradient(135deg, transparent 45%, var(--danger) 45%, var(--danger) 55%, transparent 55%), var(--surface); }
 .swatch.custom i { border: 1.5px dashed var(--line-3); box-shadow: none; display: grid; place-items: center; color: var(--muted); }
-.swatch.custom input { position: absolute; inset: 0; opacity: 0; width: 100%; height: 100%; cursor: pointer; }
+.swatch.custom { cursor: pointer; }
+
+/* colour picker (react-colorful) */
+.cp-scrim { position: fixed; inset: 0; z-index: 85; background: var(--scrim); display: flex; align-items: center; justify-content: center; padding: 24px; animation: pe-fade .18s; }
+.cp { width: 100%; max-width: 340px; max-height: calc(100% - 16px); overflow-y: auto; background: var(--surface); color: var(--text); border-radius: 20px; padding: 18px 18px 16px; box-shadow: var(--shadow-modal); display: flex; flex-direction: column; gap: 16px; animation: pe-in .2s ease-out; font-family: var(--font); user-select: none; -webkit-user-select: none; }
+.cp-scrim.sheet { align-items: flex-end; padding: 0; }
+.cp-scrim.sheet .cp { max-width: none; border-radius: 20px 20px 0 0; padding: 8px 18px calc(16px + var(--safe-b, 0px)); max-height: 92%; }
+.cp .grab { width: 40px; height: 4px; border-radius: 2px; background: var(--line-3); margin: 4px auto 0; }
+.cp-head { display: flex; align-items: center; gap: 8px; }
+.cp-head h3 { flex: 1; margin: 0; font-size: 17px; font-weight: 600; }
+.cp .react-colorful { width: 100%; height: auto; gap: 14px; }
+.cp .react-colorful__saturation { height: 190px; flex: none; border-radius: 14px; border-bottom: 0; box-shadow: inset 0 0 0 1px rgba(0,0,0,.08); }
+.cp-scrim.sheet .react-colorful__saturation { height: min(220px, 34vh); }
+.cp .react-colorful__hue { height: 22px; flex: none; border-radius: 11px; }
+.cp .react-colorful__pointer { width: 26px; height: 26px; border-width: 3px; box-shadow: 0 1px 6px rgba(0,0,0,.3); }
+.cp .react-colorful__hue-pointer { width: 18px; height: 30px; border-radius: 9px; }
+.cp .react-colorful__interactive:focus:not(:focus-visible) { outline: none; }
+.cp-row { display: flex; align-items: center; gap: 10px; }
+.cp-compare { display: flex; flex: none; border-radius: 10px; overflow: hidden; box-shadow: inset 0 0 0 1px var(--line-2); }
+.cp-compare i { display: block; width: 26px; height: 40px; box-shadow: inset 0 0 0 1px rgba(20,23,46,.08); }
+.cp-hex { flex: 1; min-width: 0; display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 12px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line-2); background: var(--surface); color: var(--muted); font-variant-numeric: tabular-nums; }
+.cp-hex:focus-within { box-shadow: inset 0 0 0 2px var(--sel); }
+.cp-hex input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--text); font: 600 15px/1 var(--font); text-transform: uppercase; letter-spacing: .04em; user-select: text; -webkit-user-select: text; }
+.cp-grid { display: grid; grid-template-columns: repeat(10, minmax(0, 1fr)); gap: 6px; }
+.cp-chip { aspect-ratio: 1; width: 100%; min-width: 0; padding: 0; border: 0; border-radius: 50%; background: var(--c); box-shadow: inset 0 0 0 1px rgba(20,23,46,.16); cursor: pointer; }
+:root[data-theme="dark"] .cp-chip { box-shadow: inset 0 0 0 1px rgba(255,255,255,.22); }
+.cp-chip.on { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink); }
+.cp-recent { display: flex; flex-direction: column; gap: 8px; }
+.cp-acts { display: flex; gap: 10px; }
+.cp-acts .btn { flex: 1; height: 46px; }
 
 /* stepper */
 .stepper { display: flex; align-items: center; height: 44px; border-radius: 10px; box-shadow: inset 0 0 0 1px var(--line-2); background: var(--surface); min-width: 0; }

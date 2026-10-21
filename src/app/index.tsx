@@ -1,5 +1,8 @@
+import { useState } from 'react';
 import { Platform, StyleSheet, View, useColorScheme } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { StatusBar } from 'expo-status-bar';
+import { NavigationBar } from 'expo-navigation-bar';
 import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
@@ -61,28 +64,46 @@ export default function Index() {
       </View>
     );
   }
+  return <NativeShell dark={dark} />;
+}
+
+type Chrome = { top: string; bottom: string; topDark: boolean; bottomDark: boolean };
+
+/** Android: the page runs edge to edge; the status / navigation bar areas take the page's own edge colours. */
+function NativeShell({ dark }: { dark: boolean }) {
+  const insets = useSafeAreaInsets();
+  const desk = dark ? '#0F1118' : '#ECEEF3'; // page background until the page reports its colours
+  const [chrome, setChrome] = useState<Chrome | null>(null);
+  const c: Chrome = chrome ?? { top: desk, bottom: desk, topDark: dark, bottomDark: dark };
   return (
-    <SafeAreaView style={[styles.fill, dark && { backgroundColor: '#191C27' }]} edges={['top', 'bottom']}>
-      <PdfEditorDom
-        isNative
-        pickPdf={pickPdf}
-        savePdf={savePdf}
-        dom={{
-          style: { flex: 1 },
-          // react-native-webview supports <input type="file"> (signature photos, images) on Android
-          useExpoDOMWebView: false,
-          allowFileAccess: true,
-          allowFileAccessFromFileURLs: true,
-          allowUniversalAccessFromFileURLs: true,
-          setBuiltInZoomControls: false,
-          injectedJavaScriptBeforeContentLoaded: CATCH_PAGE_ERRORS,
-          onMessage: onPageMessage,
-          // only in the CI smoke-test build: lets the test read the page through DevTools
-          webviewDebuggingEnabled: process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1',
-        } as any}
-      />
-    </SafeAreaView>
+    <View style={[styles.fill, { backgroundColor: c.bottom }]}>
+      <StatusBar style={c.topDark ? 'light' : 'dark'} />
+      <NavigationBar style={c.bottomDark ? 'light' : 'dark'} />
+      <View style={{ height: insets.top, backgroundColor: c.top }} />
+      <View style={[styles.fill, { backgroundColor: c.top, paddingLeft: insets.left, paddingRight: insets.right }]}>
+        <PdfEditorDom
+          isNative
+          pickPdf={pickPdf}
+          savePdf={savePdf}
+          onChrome={setChrome}
+          dom={{
+            style: { flex: 1 },
+            // react-native-webview supports <input type="file"> (signature photos, images) on Android
+            useExpoDOMWebView: false,
+            allowFileAccess: true,
+            allowFileAccessFromFileURLs: true,
+            allowUniversalAccessFromFileURLs: true,
+            setBuiltInZoomControls: false,
+            injectedJavaScriptBeforeContentLoaded: CATCH_PAGE_ERRORS,
+            onMessage: onPageMessage,
+            // only in the CI smoke-test build: lets the test read the page through DevTools
+            webviewDebuggingEnabled: process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1',
+          } as any}
+        />
+      </View>
+      <View style={{ height: insets.bottom, backgroundColor: c.bottom }} />
+    </View>
   );
 }
 
-const styles = StyleSheet.create({ fill: { flex: 1, backgroundColor: '#e8ecf3' } });
+const styles = StyleSheet.create({ fill: { flex: 1 } });

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 export type Bp = 'mobile' | 'tablet' | 'desktop' | 'large';
 
@@ -84,4 +84,76 @@ export function setSoftKeyboard(el: HTMLTextAreaElement | HTMLInputElement, show
     el.focus({ preventScroll: true });
     if (a !== null && b !== null) el.setSelectionRange(a, b);
   } finally { delete el.dataset.refocus; }
+}
+
+// While a dialog that belongs to the text being edited is open (e.g. the colour picker), the text
+// field may lose focus without that ending the edit.
+let editHolds = 0;
+export const editingHeld = () => editHolds > 0;
+export function holdEditing(): () => void {
+  editHolds++;
+  let done = false;
+  return () => { if (!done) { done = true; editHolds--; } };
+}
+
+export interface ChromeColors { top: string; bottom: string; topDark: boolean; bottomDark: boolean }
+
+/** Parses a computed CSS colour (rgb/rgba, or color(srgb …) from color-mix) into 0–255 rgb + alpha. */
+function parseColor(c: string): [number, number, number, number] | null {
+  let m = c.match(/^rgba?\(([^)]+)\)$/);
+  if (m) {
+    const p = m[1].split(/[\s,/]+/).filter(Boolean).map(parseFloat);
+    return [p[0], p[1], p[2], p.length > 3 ? p[3] : 1];
+  }
+  m = c.match(/^color\(srgb ([^)]+)\)$/);
+  if (m) {
+    const p = m[1].split(/[\s/]+/).filter(Boolean).map(parseFloat);
+    return [p[0] * 255, p[1] * 255, p[2] * 255, p.length > 3 ? p[3] : 1];
+  }
+  return null;
+}
+
+/** The colour actually painted at a point: every background stacked there, blended bottom-up. */
+function paintedAt(x: number, y: number): [number, number, number] {
+  let out: [number, number, number] = [255, 255, 255];
+  const stack = (document.elementsFromPoint?.(x, y) ?? []) as HTMLElement[];
+  for (let i = stack.length - 1; i >= 0; i--) {
+    const col = parseColor(getComputedStyle(stack[i]).backgroundColor);
+    if (!col || col[3] <= 0) continue;
+    const a = col[3];
+    out = [out[0] * (1 - a) + col[0] * a, out[1] * (1 - a) + col[1] * a, out[2] * (1 - a) + col[2] * a];
+  }
+  return out;
+}
+
+const hex = (c: [number, number, number]) => '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
+const isDark = (c: [number, number, number]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2] < 140;
+
+/**
+ * Android app: reports the colours at the top and bottom edge of the page so the native status bar
+ * and navigation bar areas can match them (theme, screen, open sheets).
+ */
+export function useEdgeColors(report: ((c: ChromeColors) => void) | undefined, deps: unknown[]) {
+  const last = useRef('');
+  useEffect(() => {
+    if (!report) return;
+    let raf = 0, t = 0;
+    const measure = () => {
+      const x = Math.min(4, innerWidth - 1);
+      const top = paintedAt(x, 1), bottom = paintedAt(x, innerHeight - 2);
+      const c: ChromeColors = { top: hex(top), bottom: hex(bottom), topDark: isDark(top), bottomDark: isDark(bottom) };
+      const key = JSON.stringify(c);
+      if (key !== last.current) { last.current = key; try { report(c); } catch { /* host gone */ } }
+    };
+    const soon = () => { cancelAnimationFrame(raf); clearTimeout(t); raf = requestAnimationFrame(() => { t = window.setTimeout(measure, 60); }); };
+    soon();
+    // sheets, dialogs and screens come and go: re-measure after DOM changes (debounced) and animations
+    const mo = new MutationObserver(soon);
+    mo.observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['class', 'data-theme'] });
+    mo.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    const late = () => { clearTimeout(t); t = window.setTimeout(measure, 120); };
+    document.addEventListener('animationend', late, true);
+    window.addEventListener('resize', soon);
+    return () => { mo.disconnect(); document.removeEventListener('animationend', late, true); window.removeEventListener('resize', soon); cancelAnimationFrame(raf); clearTimeout(t); };
+  }, deps); // eslint-disable-line react-hooks/exhaustive-deps
 }

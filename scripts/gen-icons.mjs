@@ -21,7 +21,7 @@ const icons = {
   'warning-circle': [...R, 'duotone'], 'check-circle': F, 'pencil-circle': F, 'text-b': B, 'text-italic': R,
   'squares-four-fill': [], 'grid-four': R, 'sidebar-simple': R, 'magnifying-glass-plus': R, 'arrows-in-simple': R,
   'hand-pointing': R, 'cursor-click': R, 'list-checks': R, 'check-square': F, 'radio-button': F, 'list': R,
-  'cloud-slash': R, 'device-mobile': R, 'file-text': D, 'files': D,
+  'cloud-slash': R, 'device-mobile': R, 'file-text': D, 'files': D, eyedropper: R,
 };
 const out = {};
 for (const [name, weights] of Object.entries(icons)) {

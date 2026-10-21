@@ -8,7 +8,7 @@ import { appBase } from './assets';
 import { Editor, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { Start, OpenState } from './Start';
 import { Tools, ToolId } from './Tools';
-import { useBp, useTheme, useVisualViewportHeight } from './hooks';
+import { useBp, useEdgeColors, useTheme, useVisualViewportHeight } from './hooks';
 import type { M } from '../engine/types';
 
 export type { HostProps };
@@ -78,6 +78,7 @@ export default function EditorApp(host: HostProps) {
   const bp = useBp();
   const [theme, toggleTheme] = useTheme();
   useVisualViewportHeight();
+  useEdgeColors(host.isNative ? host.onChrome : undefined, [host.isNative, !!host.onChrome]);
 
   useEffect(() => { loadPdfjs().catch(() => null); if (!host.isNative) registerServiceWorker(); }, [host.isNative]);
   useEffect(() => {

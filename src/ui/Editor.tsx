@@ -21,6 +21,8 @@ export interface HostProps {
   isNative?: boolean;
   pickPdf?: () => Promise<{ name: string; base64: string } | null>;
   savePdf?: (base64: string, name: string) => Promise<string | void>;
+  /** Android: colours at the page's top / bottom edge, for the system bars */
+  onChrome?: (c: import('./hooks').ChromeColors) => void;
 }
 export interface ToastMsg { msg: string; kind?: 'ok' | 'err'; action?: { label: string; run: () => void } }
 export interface BusyMsg { title: string; detail?: string; progress?: number }

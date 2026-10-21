@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import type { EditorObject, FontFamily } from '../engine/types';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { RunEdit, Tool, ToolStyle } from './store';
 import { Icon } from './icons';
+import { ColorPicker } from './ColorPicker';
 
 export const COLORS = ['#000000', '#1E2559', '#3446C9', '#B83227', '#1E7A4C'];
 export const INKS = ['#14161F', '#1E2559', '#2F5BD3', '#B83227'];
@@ -12,12 +13,15 @@ const same = (a?: string | null, b?: string | null) => !!a && !!b && a.toLowerCa
 const rgbOf = (h: string) => { const v = h.replace('#', ''); return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16) || 0); };
 const near = (a: string, b: string) => { const x = rgbOf(a), y = rgbOf(b); return Math.abs(x[0] - y[0]) + Math.abs(x[1] - y[1]) + Math.abs(x[2] - y[2]) < 48; };
 
-export function Swatches({ value, onPick, list = COLORS, allowNone, original, custom = true }: {
+export function Swatches({ value, onPick, list = COLORS, allowNone, original, custom = true, title }: {
   value: string | null; onPick: (c: string | null) => void; list?: string[]; allowNone?: boolean;
-  /** first swatch = keep the original colour (value null) */ original?: string; custom?: boolean;
+  /** first swatch = keep the original colour (value null) */ original?: string; custom?: boolean; title?: string;
 }) {
+  const [picking, setPicking] = useState(false);
+  const isCustom = !!value && !list.some((c) => same(c, value));
   return (
-    <div className="swatches">
+    // pressing a swatch must not end the text edit (that would move the panel under the pointer)
+    <div className="swatches" onMouseDown={(e) => e.preventDefault()}>
       {original !== undefined && (
         <button className={`swatch${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label="Original colour" title="Original">
           <i style={{ background: original }} />
@@ -28,13 +32,11 @@ export function Swatches({ value, onPick, list = COLORS, allowNone, original, cu
         <button key={c} className={`swatch${same(value, c) ? ' on' : ''}`} onClick={() => onPick(c)} aria-label={`Colour ${c}`}><i style={{ background: c }} /></button>
       ))}
       {custom && (
-        <label className={`swatch custom${value && !list.some((c) => same(c, value)) ? ' on' : ''}`} aria-label="Custom colour" title="Custom colour">
-          <i style={value && !list.some((c) => same(c, value)) ? { background: value, border: 0 } : undefined}>
-            {!(value && !list.some((c) => same(c, value))) && <Icon name="plus" size={14} />}
-          </i>
-          <input type="color" value={value ?? '#000000'} onChange={(e) => onPick(e.target.value)} />
-        </label>
+        <button type="button" className={`swatch custom${isCustom ? ' on' : ''}`} onClick={() => setPicking(true)} aria-label="More colours" title="More colours" aria-haspopup="dialog">
+          <i style={isCustom ? { background: value!, border: 0 } : undefined}>{!isCustom && <Icon name="plus" size={14} />}</i>
+        </button>
       )}
+      {picking && <ColorPicker value={value ?? original ?? '#000000'} title={title} onApply={(c) => onPick(c)} onClose={() => setPicking(false)} />}
     </div>
   );
 }
@@ -121,7 +123,7 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
         <Stepper value={size} min={2} max={300} onChange={setSize} label="size" unit="pt" />
       </div>
       <div className="field"><div className="label">Colour</div>
-        <Swatches value={cur.color} original={origColor} custom={!compact} onPick={(c) => onEdit({ ...cur, color: c })} />
+        <Swatches value={cur.color} original={origColor} title="Text colour" onPick={(c) => onEdit({ ...cur, color: c })} />
       </div>
       <div className="acts">
         {edit && <button className="btn outline" onClick={onReset}><Icon name="restore" size={17} />Restore original</button>}
