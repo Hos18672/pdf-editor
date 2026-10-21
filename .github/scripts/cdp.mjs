@@ -22,5 +22,22 @@ console.log('scripts', JSON.stringify(await ev('[...document.scripts].map(s => s
 console.log('resources', JSON.stringify(await ev('performance.getEntriesByType("resource").map(e => e.name.split("/").pop() + " " + Math.round(e.duration))')));
 console.log('size', await ev('innerWidth + "x" + innerHeight + " body " + document.body.scrollHeight'));
 console.log('ua', await ev('navigator.userAgent'));
+console.log('text', JSON.stringify(await ev('document.body.innerText.slice(0, 400)')));
+console.log('tree', await ev(`(() => {
+  const out = [];
+  const walk = (el, d) => {
+    if (d > 7 || out.length > 60) return;
+    if (el.tagName === 'STYLE' || el.tagName === 'SCRIPT') return;
+    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+    out.push('  '.repeat(d) + el.tagName.toLowerCase() + (el.className && typeof el.className === 'string' ? '.' + el.className.split(' ').join('.') : '') +
+      ' ' + Math.round(r.x) + ',' + Math.round(r.y) + ' ' + Math.round(r.width) + 'x' + Math.round(r.height) +
+      ' disp=' + cs.display + ' op=' + cs.opacity + ' vis=' + cs.visibility + (cs.containerType && cs.containerType !== 'normal' ? ' ct=' + cs.containerType : ''));
+    for (const c of el.children) walk(c, d + 1);
+  };
+  walk(document.documentElement, 0);
+  return out.join('\\n');
+})()`));
+const shot = await send('Page.captureScreenshot', { format: 'png' });
+if (shot.result?.data) { (await import('node:fs')).writeFileSync('out/webview-shot.png', Buffer.from(shot.result.data, 'base64')); console.log('saved webview-shot.png'); }
 ws.close();
 process.exit(0);
