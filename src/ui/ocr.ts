@@ -36,7 +36,8 @@ export function loadOcr(progress?: (p: number) => void): Promise<Worker> {
       const step = <T,>(p: Promise<T>) => p.then((v) => { done++; progress?.(done / 5); return v; });
       const [coreJs, workerJs, deu, eng] = await Promise.all([
         step(loadBytes(base + core)), step(loadBytes(base + 'worker.min.js')),
-        step(loadBytes(base + 'deu.traineddata.gz')), step(loadBytes(base + 'eng.traineddata.gz')),
+        // gzip data under a neutral name: Android's build unpacks *.gz assets and renames them
+        step(loadBytes(base + 'deu-lstm.bin')), step(loadBytes(base + 'eng-lstm.bin')),
       ]);
       // language files are served to the worker from in-memory blob URLs (its own fetches would hit file://)
       const langUrl = (b: Uint8Array) => URL.createObjectURL(new Blob([b as BlobPart], { type: 'application/gzip' }));

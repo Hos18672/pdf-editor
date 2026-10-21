@@ -10,4 +10,4 @@ ws.addEventListener('message', (ev) => {
   if (m.id === 1) { console.log(JSON.stringify(m.result?.result?.value ?? m.result?.exceptionDetails?.text ?? null)); ws.close(); process.exit(0); }
 });
 ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: expr, returnByValue: true, awaitPromise: true } }));
-setTimeout(() => { console.log('timeout'); process.exit(0); }, 10000);
+setTimeout(() => { console.log('timeout'); process.exit(0); }, 120000);

@@ -54,6 +54,21 @@ async function decryptIfNeeded(bytes: Uint8Array, password: string): Promise<Uin
   return doc.save({ useObjectStreams: true });
 }
 
+// CI smoke-test build only: lets the emulator test run text recognition end to end
+if (process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1' && typeof window !== 'undefined') {
+  (window as any).__peOcrTest = async () => {
+    const { loadOcr } = await import('./ocr');
+    const w = await loadOcr();
+    const c = document.createElement('canvas');
+    c.width = 900; c.height = 160;
+    const ctx = c.getContext('2d')!;
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, 900, 160);
+    ctx.fillStyle = '#000'; ctx.font = '64px sans-serif'; ctx.fillText('Hallo Welt 2026', 40, 100);
+    const r = await w.recognize(c);
+    return r.data.text.trim();
+  };
+}
+
 let swRegistered = false;
 function registerServiceWorker() {
   if (swRegistered || typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return;
