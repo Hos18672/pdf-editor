@@ -121,7 +121,7 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, the
         <span className="s2-brand">PDF Editor</span>
         <span className="sp" />
         {mobile
-          ? <button className="s2-navbtn" onClick={onTools}><Icon name="tools" size={18} />Tools</button>
+          ? <button className="s2-navbtn" onClick={onTools} aria-label="All tools"><Icon name="tools" size={18} /><span className="lbl">Tools</span></button>
           : <button className="s2-navbtn" onClick={onTools}><Icon name="tools" size={18} />All tools</button>}
         {!mobile && !isNative && <a className="s2-navbtn" href={ANDROID_URL} target="_blank" rel="noopener noreferrer"><Icon name="android-logo" size={18} />Android app</a>}
         <ThemeButton theme={theme} onToggle={onTheme} round />

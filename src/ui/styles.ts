@@ -282,6 +282,7 @@ button { cursor: pointer; }
   .start h1 { font-size: 84px; }
   .s2-art { height: 440px; } .s2-art .front { width: 400px; margin-left: -200px; }
 }
+@container (max-width: 379px) { .s2-navbtn .lbl { display: none; } .s2-navbtn { padding: 0 11px; } .s2-nav { gap: 8px; } }
 @container (max-width: 599px) {
   .s2-nav { padding: 16px 20px 0; }
   .s2-hero { gap: 0; padding: 16px 20px 0; }
