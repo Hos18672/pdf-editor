@@ -14,9 +14,6 @@ if [ -n "$sock" ]; then
   node .github/scripts/cdp.mjs > out/webview-state.txt 2>&1 || true
   cat out/webview-state.txt
 fi
-adb shell "cmd uimode night yes" || true
-sleep 8
-adb exec-out screencap -p > out/start-dark.png
 # native file picker: tap "Open PDF", pick the pushed sample, check the editor opens it
 adb push test/fixtures/sample.pdf /sdcard/Download/sample.pdf
 adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/sample.pdf || true
@@ -52,6 +49,11 @@ print('' if not m else f'{(int(m[1])+int(m[3]))//2} {(int(m[2])+int(m[4]))//2}')
     adb shell input keyevent BACK
   fi
 fi
+# dark mode last: on the emulator it restarts Play Services, which can take the app down with it
+adb shell am start -n com.rezahossaini.pdfeditor/.MainActivity
+adb shell "cmd uimode night yes" || true
+sleep 8
+adb exec-out screencap -p > out/start-dark.png
 adb logcat -d > out/logcat.txt
 grep -E "ReactNativeJS|chromium" out/logcat.txt | head -100
 adb shell dumpsys webviewupdate > out/webview.txt || true
