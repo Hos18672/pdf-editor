@@ -21,7 +21,7 @@ adb exec-out screencap -p > out/start-dark.png
 adb push test/fixtures/sample.pdf /sdcard/Download/sample.pdf
 adb shell am broadcast -a android.intent.action.MEDIA_SCANNER_SCAN_FILE -d file:///sdcard/Download/sample.pdf || true
 if [ -n "$sock" ]; then
-  node .github/scripts/cdp-eval.mjs "document.querySelector('.zone .btn.primary').click(), 'clicked'" | tee out/flow.txt
+  node .github/scripts/cdp-eval.mjs "document.querySelector('.s2-cta').click(), 'clicked'" | tee out/flow.txt
   sleep 6
   adb shell dumpsys window | grep -E "mCurrentFocus" | tee -a out/flow.txt
   adb exec-out screencap -p > out/picker.png
