@@ -37,6 +37,10 @@ export const css = String.raw`
 }
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; margin: 0; }
+/* Android app: the DOM page renders the screens straight into #root (a row flexbox there), where a
+   size-contained screen (.start uses container-type) would collapse to 0px wide. Stack them instead. */
+#root { display: flex; flex-direction: column; }
+.start, .app, .tscreen { width: 100%; min-width: 0; }
 body { background: var(--desk); color: var(--text); font: 14px/1.45 var(--font); -webkit-font-smoothing: antialiased; overscroll-behavior: none; -webkit-tap-highlight-color: transparent; }
 button, input, select, textarea { font: inherit; color: inherit; }
 button { cursor: pointer; }
