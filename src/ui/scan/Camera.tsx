@@ -27,7 +27,10 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
   onShot: (blob: Blob) => void; onImport: (files: File[]) => void; onDone: () => void; onClose: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
+  const view = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  /** where the whole camera frame fits on screen (nothing cropped, like the phone's camera app) */
+  const [fit, setFit] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const fileIn = useRef<HTMLInputElement>(null);
   const camIn = useRef<HTMLInputElement>(null);
@@ -67,6 +70,12 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
         const track = s.getVideoTracks()[0];
         const caps: any = track.getCapabilities?.() ?? {};
         setTorch({ can: !!caps.torch, on: false });
+        // some phones start the camera zoomed in: back to 1× (not below: wide lenses bend the page)
+        try {
+          const z = caps.zoom ? Math.max(caps.zoom.min ?? 1, Math.min(1, caps.zoom.max ?? 1)) : null;
+          const cur = (track.getSettings?.() as any)?.zoom;
+          if (z != null && cur != null && cur > z + 0.01) await track.applyConstraints({ advanced: [{ zoom: z } as any] });
+        } catch { /* zoom not adjustable */ }
         setStatus('live');
       } catch (e: any) {
         if (!alive) return;
@@ -75,6 +84,25 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
     })();
     return () => { alive = false; stream.current?.getTracks().forEach((t) => t.stop()); stream.current = null; };
   }, []);
+
+  // ---- fit the whole camera frame into the space between the top bar and the controls
+  useEffect(() => {
+    if (status !== 'live') return;
+    const v = video.current, el = view.current;
+    if (!v || !el) return;
+    const measure = () => {
+      const vw = v.videoWidth, vh = v.videoHeight, cw = el.clientWidth, ch = el.clientHeight;
+      if (!vw || !vh || !cw || !ch) return;
+      const sc = Math.min(cw / vw, ch / vh);
+      const w = Math.round(vw * sc), h = Math.round(vh * sc);
+      const next = { x: Math.round((cw - w) / 2), y: Math.round((ch - h) / 2), w, h };
+      setFit((o) => (o && o.x === next.x && o.y === next.y && o.w === next.w && o.h === next.h ? o : next));
+    };
+    measure();
+    const ro = new ResizeObserver(measure); ro.observe(el);
+    v.addEventListener('loadedmetadata', measure); v.addEventListener('resize', measure);
+    return () => { ro.disconnect(); v.removeEventListener('loadedmetadata', measure); v.removeEventListener('resize', measure); };
+  }, [status]);
 
   // ---- live outline + auto-capture
   // The page is found in a worker on a small frame; the outline on screen glides towards the latest
@@ -117,7 +145,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       if (stop) return;
       const k = vw / fw;
       const now = performance.now();
-      // where the video is drawn (object-fit: cover)
+      // where the video is drawn (object-fit: cover; the box has the frame's shape once measured)
       const cw = b.clientWidth, ch = b.clientHeight, sc = Math.max(cw / vw, ch / vh);
       const ox = (cw - vw * sc) / 2, oy = (ch - vh * sc) / 2;
       setFound(!!det && det.score > 0.62);
@@ -218,16 +246,18 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
 
   return (
     <div className="scam" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
-      <div className="scam-view" ref={box}>
-        <video ref={video} playsInline muted autoPlay aria-label="Camera preview" />
-        {status === 'live' && ratio && !found && <div className="scam-guide" style={{ aspectRatio: String(ratio) }}><span>{mode === 'id' ? 'Place the card inside the frame' : 'Open the photo page and fit it in the frame'}</span></div>}
-        <svg className="scam-svg" aria-hidden="true">
-          <g ref={poly} style={{ display: 'none' }}>
-            <polygon className={hold >= 1 ? 'go' : ''} />
-            {[0, 1, 2, 3].map((i) => <circle key={i} r="7" />)}
-          </g>
-        </svg>
-        <div key={flash} className={flash ? 'scam-flash' : ''} />
+      <div className="scam-view" ref={view}>
+        <div className={`scam-frame${fit ? ' fit' : ''}`} ref={box} style={fit ? { left: fit.x, top: fit.y, width: fit.w, height: fit.h } : undefined}>
+          <video ref={video} playsInline muted autoPlay aria-label="Camera preview" />
+          {status === 'live' && ratio && !found && <div className="scam-guide" style={{ aspectRatio: String(ratio) }}><span>{mode === 'id' ? 'Place the card inside the frame' : 'Open the photo page and fit it in the frame'}</span></div>}
+          <svg className="scam-svg" aria-hidden="true">
+            <g ref={poly} style={{ display: 'none' }}>
+              <polygon className={hold >= 1 ? 'go' : ''} />
+              {[0, 1, 2, 3].map((i) => <circle key={i} r="7" />)}
+            </g>
+          </svg>
+          <div key={flash} className={flash ? 'scam-flash' : ''} />
+        </div>
         {status !== 'live' && status !== 'starting' && (
           <div className="scam-msg">
             <div className="tile"><Icon name={status === 'denied' ? 'camera-slash' : 'camera:duotone'} size={30} /></div>

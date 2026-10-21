@@ -783,13 +783,15 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 /* ---------- document scanner ---------- */
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; display: inline-block; animation: spin .8s linear infinite; flex: none; opacity: .75; }
 .scam { position: fixed; inset: 0; z-index: 40; background: #07080C; color: #fff; display: flex; flex-direction: column; overflow: hidden; user-select: none; -webkit-user-select: none; }
-.scam-view { position: absolute; inset: 0; }
-.scam-view video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #07080C; }
+.scam-view { position: absolute; left: var(--safe-l); right: var(--safe-r); top: calc(var(--safe-t) + 70px); bottom: calc(var(--safe-b) + 178px); }
+.scam-frame { position: absolute; inset: 0; overflow: hidden; }
+.scam-frame.fit { inset: auto; border-radius: 16px; }
+.scam-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #07080C; }
 .scam-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .scam-svg polygon { fill: rgba(255,225,77,.16); stroke-opacity: .98; stroke: #FFE14D; stroke-width: 3; stroke-linejoin: round; transition: fill .2s; }
 .scam-svg polygon.go { fill: rgba(91,214,154,.22); stroke: #5BD69A; }
 .scam-svg circle { fill: #fff; stroke: #FFE14D; stroke-width: 3; }
-.scam-guide { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); width: min(78vw, 560px); border: 2.5px dashed rgba(255,255,255,.75); border-radius: 18px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.35); display: flex; align-items: flex-end; justify-content: center; pointer-events: none; }
+.scam-guide { position: absolute; left: 50%; top: 46%; transform: translate(-50%, -50%); width: min(84%, 560px); border: 2.5px dashed rgba(255,255,255,.75); border-radius: 18px; box-shadow: 0 0 0 100vmax rgba(0,0,0,.35); display: flex; align-items: flex-end; justify-content: center; pointer-events: none; }
 .scam-guide span { transform: translateY(calc(100% + 12px)); font-size: 13px; font-weight: 600; color: rgba(255,255,255,.9); text-shadow: 0 1px 3px rgba(0,0,0,.6); white-space: nowrap; }
 .scam-flash { position: absolute; inset: 0; background: #fff; pointer-events: none; animation: scam-flash .35s ease-out forwards; }
 @keyframes scam-flash { from { opacity: .85; } to { opacity: 0; } }
