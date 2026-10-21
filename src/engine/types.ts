@@ -78,4 +78,15 @@ export interface ExportInput {
   forms?: FormValues;
   /** turn form fields into plain page content */
   flatten?: boolean;
+  /** text edits on scans / picture pages drawn with the page's own letters (null: not possible) */
+  scanImage?: (e: TextEdit) => Promise<ClonedText | null>;
+}
+
+/** Replacement text for a line of a scan, as a picture made of the page's own letters. */
+export interface ClonedText {
+  png: Uint8Array;
+  /** size of the picture and where its corner sits relative to the text layer's baseline start (pt) */
+  w: number; h: number; left: number; below: number;
+  /** printed letters of the original line, for the cover (× the line's layer height; dy > 0 = lower) */
+  inkX0: number; inkX1: number; dy: number;
 }

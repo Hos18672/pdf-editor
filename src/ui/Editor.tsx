@@ -14,6 +14,7 @@ import { exportPdf } from '../engine/exporter';
 import { pageNeedsText } from '../engine/textLayer';
 import { scanStyles } from './scanStyle';
 import { ConfirmClose } from './ConfirmClose';
+import { cloneLineText, pageGlyphs, PageCtx } from './scanGlyphs';
 import type { EditorObject, TextEdit, FontFamily } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
@@ -468,6 +469,20 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     return out;
   };
 
+  // edits on scans / picture pages: built from the page's own letters (other pages lend missing ones)
+  const scanImage = (e: TextEdit) => {
+    const ctxOf = (src: number): PageCtx | null => {
+      const d = pageData[src];
+      return d && infos[src] ? { pdf, src, info: infos[src], runs: d.runs, colors: d.colors } : null;
+    };
+    const c = ctxOf(e.page);
+    if (!c) return Promise.resolve(null);
+    return cloneLineText(c, e.key, e.text, {
+      sizeScale: e.sizeScale, color: e.color, family: e.scan?.family,
+      more: () => Promise.all([e.page - 1, e.page + 1, e.page - 2, e.page + 2].map(ctxOf).filter((x): x is PageCtx => !!x).map(pageGlyphs)),
+    });
+  };
+
   // ----- live preview: re-write edited pages with the real fonts and show that -----
   const editKeyOf = (src: number) => {
     const list = Object.entries(snap.edits).filter(([k]) => k.startsWith(src + ':')).sort(([a], [b]) => (a < b ? -1 : 1));
@@ -484,7 +499,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const t = setTimeout(async () => {
       try {
         const bytes = await exportPdf({
-          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits,
+          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage,
           viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
         });
         if (seq !== previewSeq.current) return;
@@ -509,7 +524,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     try {
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
-        viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten,
+        viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage,
       });
       const name = file.name.replace(/\.pdf$/i, '') + '-edited.pdf';
       setBusy(null);

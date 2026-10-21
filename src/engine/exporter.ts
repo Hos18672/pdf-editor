@@ -139,6 +139,15 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       // so cover them with the paper colour and draw the new text visibly.
       const hidden = hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length;
       const glyphless = hits.length > 0 && hits.every((g) => /GlyphLess/i.test(baseFontOf(fontDict, g.style.fontRes)));
+      // Scans / picture pages: the new text made of the page's own letters
+      if (hidden && input.scanImage) {
+        const img = await input.scanImage(e).catch((err) => { console.warn('scan text', err); return null; });
+        if (img) {
+          add += whiteoutRegion({ ...e, scan: { ...(e.scan ?? { family: 'Arimo', bold: false, sizeRatio: 1, stretch: 1, blur: 0, score: 0 }), inkX0: img.inkX0, inkX1: img.inkX1, dy: img.dy } }, true);
+          add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, 0, 0);
+          continue;
+        }
+      }
       if (hidden) add += whiteoutRegion(e, true);
       const inkOf = () => {
         // the sampled ink, unless it is barely different from the paper (nothing visible was there)
@@ -150,15 +159,9 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       if (hidden && e.scan) {
         const img = await renderScanText(lines, e.scan, e.region.height * e.scan.sizeRatio * e.sizeScale, e.color ?? inkOf()).catch(() => null);
         if (img) {
-          const ref = (await doc.embedPng(img.png)).ref;
-          const key = leaf.newXObject('ImT', ref).asString();
-          const [ux, uy] = e.region.u;
           // the printed letters' own start and baseline (the hidden layer can be a little off)
-          const sh = e.region.height, dx = (e.scan.dx ?? 0) * sh, dy = (e.scan.dy ?? 0) * sh;
-          const ox = e.region.o[0] + ux * dx + uy * dy, oy = e.region.o[1] + uy * dx - ux * dy;
-          // bottom-left corner of the picture: left of the baseline start, below the last line
-          const bx = ox - ux * img.left + uy * img.below, by = oy - uy * img.left - ux * img.below;
-          add += `q ${f(ux * img.w)} ${f(uy * img.w)} ${f(-uy * img.h)} ${f(ux * img.h)} ${f(bx)} ${f(by)} cm ${key} Do Q\n`;
+          const sh = e.region.height;
+          add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, (e.scan.dx ?? 0) * sh, (e.scan.dy ?? 0) * sh);
           continue;
         }
       }
@@ -302,6 +305,15 @@ async function fillForm(doc: PDFDocument, values: Record<string, string | boolea
   } catch (e) {
     form.acroForm.dict.set(PDFName.of('NeedAppearances'), PDFBool.True);
   }
+}
+
+/** Draws a picture of text along a line: `left` / `below` place its corner around the baseline start (+ dx along, dy down). */
+function placeImage(img: { w: number; h: number; left: number; below: number }, e: TextEdit, leaf: any, ref: any, dx: number, dy: number): string {
+  const key = leaf.newXObject('ImT', ref).asString();
+  const [ux, uy] = e.region.u;
+  const ox = e.region.o[0] + ux * dx + uy * dy, oy = e.region.o[1] + uy * dx - ux * dy;
+  const bx = ox - ux * img.left + uy * img.below, by = oy - uy * img.left - ux * img.below;
+  return `q ${f(ux * img.w)} ${f(uy * img.w)} ${f(-uy * img.h)} ${f(ux * img.h)} ${f(bx)} ${f(by)} cm ${key} Do Q\n`;
 }
 
 function baseFontOf(fontDict: PDFDict | undefined, res: string): string {
