@@ -11,17 +11,21 @@ import type { Quad } from './geom';
 import type { Filter } from './kernels';
 import { Camera, MODES } from './Camera';
 import { CropEditor } from './CropEditor';
-import { DEFAULT_FILTER, decode, findDocument, forget, newId, outputSize, renderPage, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
+import { Pager } from './Pager';
+import { DEFAULT_FILTER, decode, findDocument, forget, forgetBases, newId, outputSize, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
 import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
 
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'auto', label: 'Auto' }, { id: 'color', label: 'Photo' }, { id: 'gray', label: 'Grey' }, { id: 'bw', label: 'B & W' }, { id: 'original', label: 'Original' },
+  { id: 'original', label: 'Original' }, { id: 'lighten', label: 'Lighten' }, { id: 'enhance', label: 'Enhance' }, { id: 'auto', label: 'Magic' },
+  { id: 'color', label: 'Photo' }, { id: 'gray', label: 'Grey' }, { id: 'bw', label: 'B & W' },
 ];
+const FILTER_IDS = FILTERS.map((f) => f.id);
 const FORMAT_LABEL: Record<string, string> = { a4: 'A4', letter: 'Letter', legal: 'Legal', a5: 'A5', id1: 'ID card', id3: 'Passport' };
 
-interface Render { key: string; url: string; w: number; h: number }
+interface Render { key: string; url: string; w: number; h: number; quick?: boolean }
 const keyOf = (p: ScanPage) => `${p.id}:${p.ver}`;
-const geoKey = (p: ScanPage) => `${p.id}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.rot}`;
+/** crop + turns: what the look previews and the compare picture depend on */
+const geoKey = (p: ScanPage) => `${p.id}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 1 : 0}:${p.rot}`;
 
 const readMode = (): ScanMode => { try { const m = localStorage.getItem('pe.scan.mode'); return (['doc', 'id', 'passport', 'receipt'] as const).find((x) => x === m) ?? 'doc'; } catch { return 'doc'; } };
 const stamp = () => {
@@ -44,7 +48,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
   const [cur, setCur] = useState(0);
   const [crop, setCrop] = useState<string | null>(null);
   const [renders, setRenders] = useState<Record<string, Render>>({});
-  const [previews, setPreviews] = useState<Record<string, string>>({});
+  const [previews, setPreviews] = useState<Record<string, Record<string, string>>>({});
   const [finding, setFinding] = useState(0);
   const [quality, setQuality] = useState<Quality>('standard');
   const [paper, setPaper] = useState<PaperOpt>('auto');
@@ -72,7 +76,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
       const w = bmp.width, h = bmp.height;
       const found = await findDocument(bmp, kind);
       const page: ScanPage = {
-        id, blob, w, h, quad: found.quad, auto: found.sure ? found.quad : found.quad, sure: found.sure, rot: 0,
+        id, blob, w, h, quad: found.quad, auto: found.quad, bend: found.bend, autoBend: found.bend, sure: found.sure, rot: 0,
         // a card photographed in document mode keeps its photo and colours
         filter: kind === 'doc' && (found.format === 'id1' || found.format === 'id3') ? 'color' : DEFAULT_FILTER[kind], kind, side, format: found.format, ratio: found.ratio, ver: 1,
       };
@@ -110,47 +114,71 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
     setCur(start);
   }, [add, mode]);
 
-  // ---- rendering: the page on screen first, then the others, the filter previews, and finally the
+  // ---- rendering. The page on screen first: a quick look within a moment, then the cleaned page. The
+  // straightened page is kept, so changing the look or turning only redoes the last step. Then the
+  // previews of every look, the pages next to it (for swiping), the rest, and — once you pause — the
   // pages at saving quality in the background (so Save only has to put the PDF together).
-  // Two jobs run at once (the worker pool has two workers on most phones).
   const inflight = useRef(new Set<string>());
   const finals = useRef(new Map<string, Blob>());
   const [kick, setKick] = useState(0);
+  const [compare, setCompare] = useState(false);
+  const [origs, setOrigs] = useState<Record<string, string>>({});
+  const lastAct = useRef(0);
   const done = () => setKick((n) => n + 1);
+  const LONG = mobile ? 1200 : 1600;
   useEffect(() => {
     const list = pagesRef.current;
     const busy = inflight.current;
-    const long = mobile ? 1200 : 1600;
     const start = (key: string, run: () => Promise<unknown>) => { busy.add(key); run().catch((e) => console.warn('scan render failed', e)).finally(() => { busy.delete(key); done(); }); };
-    const order = [list[curRef.current], ...list].filter(Boolean) as ScanPage[];
-    for (const p of order) {
-      if (busy.size >= 2) return;
-      const key = keyOf(p);
-      if (renders[p.id]?.key === key || busy.has('v' + key)) continue;
+    const room = () => busy.size < 2;
+    const ci = Math.min(curRef.current, list.length - 1);
+    const p = list[ci];
+    const look = (q: ScanPage) => {
+      const key = keyOf(q);
+      if (renders[q.id]?.key === key || busy.has('v' + key)) return false;
       // the first look at a fresh page also reads which way its text runs
-      const orient = p.ver === 1;
-      start('v' + key, () => renderPage(p, { quality: 'standard', long, orient }).then((r) => {
-        setRenders((rs) => { const old = rs[p.id]; if (old) URL.revokeObjectURL(old.url); return { ...rs, [p.id]: { key, url: r.url, w: r.w, h: r.h } }; });
-        const t = orient ? turnsFor(p, r.orient) : null;
-        if (t) setPages((ps) => ps.map((x) => (x.id === p.id && x.ver === p.ver ? { ...x, rot: t, ver: x.ver + 1 } : x)));
+      const orient = q.ver === 1;
+      start('v' + key, () => renderLook(q, { long: LONG, orient }).then((r) => {
+        setRenders((rs) => { const old = rs[q.id]; if (old) URL.revokeObjectURL(old.url); return { ...rs, [q.id]: { key, url: r.url, w: r.w, h: r.h } }; });
+        const t = orient ? turnsFor(q, r.orient) : null;
+        if (t) setPages((ps) => ps.map((x) => (x.id === q.id && x.ver === q.ver ? { ...x, rot: t, ver: x.ver + 1 } : x)));
       }));
-    }
-    if (order.some((p) => renders[p.id]?.key !== keyOf(p))) return;
-    // filter previews of the page on screen
-    const p = list[curRef.current];
-    if (view === 'review' && p) {
-      for (const f of FILTERS) {
-        if (busy.size >= 2) return;
-        const k = `${geoKey(p)}:${f.id}`;
-        if (previews[k] !== undefined || busy.has(k)) continue;
-        start(k, () => renderPage(p, { quality: 'small', long: 220, filter: f.id, jpeg: 0.8 })
-          .then((r) => setPreviews((pv) => ({ ...pv, [k]: r.url })), () => setPreviews((pv) => ({ ...pv, [k]: '' }))));
+      return true;
+    };
+    const quick = (q: ScanPage) => {
+      if (renders[q.id] || busy.has('q' + q.id)) return;
+      start('q' + q.id, () => renderPage(q, { quality: 'standard', long: 640, quick: true, jpeg: 0.8 }).then((r) => {
+        setRenders((rs) => { if (rs[q.id]) { URL.revokeObjectURL(r.url); return rs; } return { ...rs, [q.id]: { key: 'quick', url: r.url, w: r.w, h: r.h, quick: true } }; });
+      }));
+    };
+    if (p) {
+      if (room()) quick(p);
+      if (room()) look(p);
+      if (view === 'review' && compare) {
+        const k = geoKey(p);
+        if (origs[k] === undefined && !busy.has('o' + k)) {
+          if (!room()) return;
+          start('o' + k, () => renderLook(p, { long: LONG, filter: 'original' }).then((r) => setOrigs((o) => ({ ...o, [k]: r.url })), () => setOrigs((o) => ({ ...o, [k]: '' }))));
+        }
       }
-      if (FILTERS.some((f) => previews[`${geoKey(p)}:${f.id}`] === undefined)) return;
+      if (view === 'review') {
+        const k = geoKey(p);
+        if (previews[k] === undefined && !busy.has('t' + k)) {
+          if (!room()) return;
+          start('t' + k, () => renderThumbs(p, FILTER_IDS, LONG, mobile ? 150 : 180).then((u) => setPreviews((pv) => ({ ...pv, [k]: u })), () => setPreviews((pv) => ({ ...pv, [k]: {} }))));
+        }
+        if (previews[k] === undefined) return;
+      }
     }
-    // pages at saving quality, ready for Save
+    // the pages either side (for swiping), then the rest
+    const order = [list[ci + 1], list[ci - 1], ...list].filter(Boolean) as ScanPage[];
+    for (const q of order) { if (!room()) return; look(q); }
+    if (order.some((q) => renders[q.id]?.key !== keyOf(q))) return;
+    // pages at saving quality, ready for Save: one at a time, once you pause, and only with a worker to spare
+    if ((navigator.hardwareConcurrency ?? 2) < 4 || busy.size) return;
+    const idle = performance.now() - lastAct.current;
+    if (idle < 1500) { const t = setTimeout(done, 1600 - idle); return () => clearTimeout(t); }
     for (const q of list) {
-      if (busy.size >= 1) return; // keep a worker free for whatever you do next
       const k = `f${keyOf(q)}:${quality}`;
       if (finals.current.has(k)) continue;
       start(k, () => renderPage(q, { quality, low: true, jpeg: jpegFor(quality) }).then((r) => {
@@ -158,15 +186,22 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
         for (const old of [...finals.current.keys()]) if (old.startsWith(`f${q.id}:`)) finals.current.delete(old);
         finals.current.set(k, r.blob);
       }));
+      return;
     }
-  }, [pages, cur, renders, previews, view, kick, mobile, quality]);
+  }, [pages, cur, renders, previews, origs, compare, view, kick, mobile, quality, LONG]);
+  // every change counts as activity (holds back the background saving renders a moment)
+  useEffect(() => { lastAct.current = performance.now(); }, [pages, cur, compare]);
 
   // tidy up object URLs when leaving
+  const live = useRef({ renders, previews, origs }); live.current = { renders, previews, origs };
   useEffect(() => () => {
-    Object.values(renders).forEach((r) => URL.revokeObjectURL(r.url));
-    Object.values(previews).forEach((u) => u && URL.revokeObjectURL(u));
+    const l = live.current;
+    Object.values(l.renders).forEach((r) => URL.revokeObjectURL(r.url));
+    Object.values(l.previews).forEach((m) => Object.values(m).forEach((u) => u && URL.revokeObjectURL(u)));
+    Object.values(l.origs).forEach((u) => u && URL.revokeObjectURL(u));
     pagesRef.current.forEach((p) => forget(p.blob));
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    forgetBases();
+  }, []);
 
   const page = pages[Math.min(cur, pages.length - 1)] as ScanPage | undefined;
   const lastThumb = pages.length ? renders[pages[pages.length - 1].id]?.url ?? null : null;
@@ -186,7 +221,12 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
   };
   const applyCrop = (q: Quad) => {
     const p = pages.find((x) => x.id === crop);
-    if (p) patch(p.id, () => ({ quad: q, sure: true, ...shapeOf(q, p.w, p.h, p.kind) }));
+    // corners moved by hand: straight sides (the found curve only fits the found corners)
+    const same = (a: Quad | null) => !!a && a.every((c, i) => Math.hypot(c.x - q[i].x, c.y - q[i].y) < 0.5);
+    if (p) {
+      const bend = same(p.auto) ? p.autoBend : same(p.quad) ? p.bend : null;
+      patch(p.id, () => ({ quad: q, bend, sure: true, ...shapeOf(q, p.w, p.h, p.kind, !!bend) }));
+    }
     setCrop(null);
   };
 
@@ -240,7 +280,14 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
   // Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || crop || askClose || sheetOpen) return;
+      if (crop || askClose || sheetOpen) return;
+      const typing = (e.target as HTMLElement)?.closest?.('input, textarea');
+      if (view === 'review' && !typing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        setCur((c) => Math.max(0, Math.min(pages.length - 1, c + (e.key === 'ArrowLeft' ? -1 : 1))));
+        return;
+      }
+      if (e.key !== 'Escape') return;
+      if (compare) { setCompare(false); return; }
       if (view === 'review') setView('camera'); else close();
     };
     window.addEventListener('keydown', onKey);
@@ -310,26 +357,26 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
           {page ? (
             <div className="sc-view">
               <button className="sc-nav l" onClick={() => setCur(Math.max(0, cur - 1))} disabled={cur === 0} aria-label="Previous page"><Icon name="left" size={20} /></button>
-              <div className="sc-paper">
-                {r ? <img src={r.url} alt={`Page ${cur + 1}`} className={stale ? 'stale' : ''} style={{ aspectRatio: `${r.w} / ${r.h}` }} /> : <div className="sc-skel" />}
-                {(stale || !r) && <div className="sc-working"><span className="spinner" />Straightening and cleaning…</div>}
-                {!page.sure && !stale && (
-                  <button className="sc-check" onClick={() => setCrop(page.id)}><Icon name="crop" size={16} />Check the corners</button>
-                )}
-              </div>
+              <Pager pages={pages} renders={renders} cur={Math.min(cur, pages.length - 1)} onCur={setCur} onAdd={() => setView('camera')} keyOf={keyOf}
+                compare={compare} orig={origs[geoKey(page)] || undefined} label={FILTERS.find((f) => f.id === page.filter)?.label ?? ''} onCheck={setCrop} />
               <button className="sc-nav r" onClick={() => setCur(Math.min(pages.length - 1, cur + 1))} disabled={cur >= pages.length - 1} aria-label="Next page"><Icon name="right" size={20} /></button>
-              <div className="sc-count num">{cur + 1} / {pages.length}{page.format ? ` · ${FORMAT_LABEL[page.format]}` : ''}{page.side ? ` · ${page.side === 'front' ? 'Front' : 'Back'}` : ''}</div>
             </div>
           ) : <div className="sc-empty">No pages yet</div>}
 
           {page && (
+            <div className="sc-under">
+              <span className="sc-count num">{cur + 1} / {pages.length}{page.format ? ` · ${FORMAT_LABEL[page.format]}` : ''}{page.side ? ` · ${page.side === 'front' ? 'Front' : 'Back'}` : ''}</span>
+              <button className={`sc-cmp${compare ? ' on' : ''}`} onClick={() => setCompare(!compare)} aria-pressed={compare}><Icon name="split-horizontal" size={17} />Compare</button>
+            </div>
+          )}
+
+          {page && (
             <div className="sc-filters" role="radiogroup" aria-label="Look">
               {FILTERS.map((f) => {
-                const u = previews[`${geoKey(page)}:${f.id}`];
+                const u = previews[geoKey(page)]?.[f.id];
                 return (
                   <button key={f.id} role="radio" aria-checked={page.filter === f.id} className={`sc-ft${page.filter === f.id ? ' on' : ''}`} onClick={() => setFilter(f.id)}>
-                    <span className="im">{u ? <img src={u} alt="" /> : <span className="spinner" />}</span>
-                    <span className="lb">{f.label}</span>
+                    <span className="im">{u ? <img src={u} alt="" /> : <span className="spinner" />}<span className="lb">{f.label}</span></span>
                   </button>
                 );
               })}

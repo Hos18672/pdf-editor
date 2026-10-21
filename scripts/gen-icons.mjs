@@ -24,7 +24,7 @@ const icons = {
   'cloud-slash': R, 'device-mobile': R, 'file-text': D, 'files': D, eyedropper: R, 'dots-nine': [...R, 'bold'], 'arrow-right': B, 'android-logo': R, 'hand-grabbing': B, 'clipboard-text': R,
   'identification-card': [...R, 'duotone'], 'book-open': [...R, 'duotone'], receipt: [...R, 'duotone'], 'camera-slash': R, lightning: F, flashlight: [...RF],
   scan: [...R, 'bold', 'duotone'], crop: R, 'magic-wand': R, sparkle: [...RF], 'circle-half': [...R, 'fill'], palette: R, 'text-aa': R, 'frame-corners': R,
-  'selection-all': R, 'arrows-clockwise': R, 'drop-half': R, 'camera-plus': R, 'image-square': R
+  'selection-all': R, 'arrows-clockwise': R, 'drop-half': R, 'camera-plus': R, 'image-square': R, 'split-horizontal': R
 };
 const out = {};
 for (const [name, weights] of Object.entries(icons)) {

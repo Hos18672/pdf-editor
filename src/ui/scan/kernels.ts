@@ -3,7 +3,8 @@
 // Everything lives inside one self-contained function so the same code runs on the main thread and
 // in the scanner's worker (src/ui/scan/worker.ts → public/scan/worker.js).
 
-export type Filter = 'auto' | 'color' | 'gray' | 'bw' | 'original';
+/** auto = Magic (white paper, vivid ink), color = Photo (natural, no flattening) */
+export type Filter = 'auto' | 'color' | 'gray' | 'bw' | 'original' | 'lighten' | 'enhance';
 export interface PixelImage { w: number; h: number; data: Uint8ClampedArray }
 export interface Job {
   src: PixelImage;
@@ -15,10 +16,18 @@ export interface Job {
   sharpen: 'auto' | 'off';
   /** corner radius in output pixels (ID cards), 0 for none */
   radius: number;
+  /** curved sides (see bend.ts), in src pixels and in the quad's corner order */
+  bend?: number[][] | null;
 }
 export interface JobResult { img: PixelImage; blur: number; times?: Record<string, number> }
+/** a straightened page before its look: as photographed, and with the blur taken out (null: wasn't blurred) */
+export interface Prepared { warped: PixelImage; sharp: PixelImage | null; blur: number; times?: Record<string, number> }
 export interface Kernels {
   process(job: Job): JobResult;
+  prepare(job: Omit<Job, 'filter' | 'radius'>): Prepared;
+  /** applies a look to a straightened page (in place unless turned), then `rot` quarter turns and corners */
+  finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number): PixelImage;
+  shrink(img: PixelImage, max: number): PixelImage;
   estimateBlur(img: PixelImage): number;
 }
 
@@ -117,18 +126,44 @@ export function scanKernels(): Kernels {
     return [A[0][8], A[1][8], A[2][8], A[3][8], A[4][8], A[5][8], A[6][8], A[7][8], 1];
   }
 
-  /** output rectangle → quad in the source; bilinear sampling, white outside the photo */
-  function warp(src: PixelImage, quad: number[], W: number, H: number, inset: number): PixelImage {
+  /** displacement of one side at a parameter 0…1 (linear between samples) */
+  function sideAt(a: number[], t: number, out: Float32Array, o: number): void {
+    const n = a.length / 2 - 1;
+    let f = t * n; if (f < 0) f = 0; if (f > n) f = n;
+    const i = Math.min(n - 1, f | 0), k = f - i;
+    out[o] = a[2 * i] + (a[2 * i + 2] - a[2 * i]) * k;
+    out[o + 1] = a[2 * i + 1] + (a[2 * i + 3] - a[2 * i + 1]) * k;
+  }
+
+  /**
+   * output rectangle → quad in the source; bilinear sampling, white outside the photo. With a bend, the
+   * curved sides are blended across the page (Coons patch) on top of the perspective.
+   */
+  function warp(src: PixelImage, quad: number[], W: number, H: number, inset: number, bend?: number[][] | null): PixelImage {
     const m = -inset;
     const Hm = solveH([m, m, W - m, m, W - m, H - m, m, H - m], quad);
     const out = new Uint8ClampedArray(W * H * 4);
     const sw = src.w, sh = src.h, sd = src.data;
+    // per column: top / bottom side displacement; per row: left / right
+    let Dt: Float32Array | null = null, Db: Float32Array | null = null, Dl: Float32Array | null = null, Dr: Float32Array | null = null;
+    const span = W - 2 * m, spanY = H - 2 * m;
+    if (bend && bend.some((a) => a.some((v) => v !== 0))) {
+      Dt = new Float32Array(W * 2); Db = new Float32Array(W * 2); Dl = new Float32Array(H * 2); Dr = new Float32Array(H * 2);
+      for (let x = 0; x < W; x++) { const u = (x + 0.5 - m) / span; sideAt(bend[0], u, Dt, 2 * x); sideAt(bend[2], 1 - u, Db, 2 * x); }
+      for (let y = 0; y < H; y++) { const v = (y + 0.5 - m) / spanY; sideAt(bend[1], v, Dr, 2 * y); sideAt(bend[3], 1 - v, Dl, 2 * y); }
+    }
     for (let y = 0; y < H; y++) {
       const yc = y + 0.5;
+      const v1 = (yc - m) / spanY, v0 = 1 - v1;
       for (let x = 0; x < W; x++) {
         const xc = x + 0.5;
         const z = Hm[6] * xc + Hm[7] * yc + Hm[8];
         let u = (Hm[0] * xc + Hm[1] * yc + Hm[2]) / z - 0.5, v = (Hm[3] * xc + Hm[4] * yc + Hm[5]) / z - 0.5;
+        if (Dt) {
+          const u1 = (xc - m) / span, u0 = 1 - u1;
+          u += v0 * Dt[2 * x] + v1 * Db![2 * x] + u0 * Dl![2 * y] + u1 * Dr![2 * y];
+          v += v0 * Dt[2 * x + 1] + v1 * Db![2 * x + 1] + u0 * Dl![2 * y + 1] + u1 * Dr![2 * y + 1];
+        }
         const o = (y * W + x) * 4;
         if (u < -1 || v < -1 || u > sw || v > sh) { out[o] = out[o + 1] = out[o + 2] = 255; out[o + 3] = 255; continue; }
         if (u < 0) u = 0; if (v < 0) v = 0; if (u > sw - 1.001) u = sw - 1.001; if (v > sh - 1.001) v = sh - 1.001;
@@ -343,8 +378,11 @@ export function scanKernels(): Kernels {
     return hist.length - 1;
   }
 
-  /** documents: white paper, black text, colours kept and a little livelier */
-  function docFilter(img: PixelImage, mode: 'auto' | 'gray' | 'bw'): void {
+  /**
+   * documents: the paper's own colour and shadows divided out. Magic (auto): white paper, black text,
+   * livelier colours. Enhance: cleaner and crisper but closer to the photo. Lighten: just even, bright light.
+   */
+  function docFilter(img: PixelImage, mode: 'auto' | 'gray' | 'bw' | 'lighten' | 'enhance'): void {
     const w = img.w, h = img.h, d = img.data, n = w * h;
     const P = paperPlanes(img);
     const ir = new Float32Array(w).fill(1 / 255), ig = new Float32Array(w).fill(1 / 255), ib = new Float32Array(w).fill(1 / 255);
@@ -372,15 +410,18 @@ export function scanKernels(): Kernels {
     const LN = 4096, LS = (LN - 1) / 1.25;
     const lut = new Float32Array(LN);
     // black point from the darkest ink, white a little below the paper (so shadows and grain vanish)
-    const black = Math.min(0.42, percentile(hist, hn, 0.004) / 800);
-    const white = 0.9;
+    const ink = percentile(hist, hn, 0.004) / 800;
+    const black = mode === 'lighten' ? 0 : mode === 'enhance' ? Math.min(0.3, ink * 0.75) : Math.min(0.42, ink);
+    const white = mode === 'lighten' ? 0.97 : mode === 'enhance' ? 0.93 : 0.9;
+    const gamma = mode === 'lighten' ? 0.92 : mode === 'enhance' ? 1.06 : 1.12;
+    const sat = mode === 'lighten' ? 1.05 : mode === 'enhance' ? 1.18 : 1.3;
     for (let k = 0; k < LN; k++) {
       let t = (k / LS - black) / (white - black); t = t < 0 ? 0 : t > 1 ? 1 : t;
       if (mode === 'bw') {
         // halfway between ink and paper keeps strokes their true width, even when blurred
         let v = (t - 0.47) / 0.16; v = v < 0 ? 0 : v > 1 ? 1 : v;
         lut[k] = v * v * (3 - 2 * v) * 255;
-      } else lut[k] = Math.pow(t, 1.12) * 255;
+      } else lut[k] = Math.pow(t, gamma) * 255;
     }
     const L = (v: number) => lut[v <= 0 ? 0 : v >= 1.25 ? LN - 1 : (v * LS) | 0];
     if (bh) {
@@ -428,11 +469,11 @@ export function scanKernels(): Kernels {
       if (P) paperRow(P, y, w, ir, ig, ib, xi, xt);
       for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
         const r = d[i] * ir[x], g = d[i + 1] * ig[x], b = d[i + 2] * ib[x];
-        if (mode !== 'auto') { d[i] = d[i + 1] = d[i + 2] = L(0.299 * r + 0.587 * g + 0.114 * b); continue; }
+        if (mode === 'gray') { d[i] = d[i + 1] = d[i + 2] = L(0.299 * r + 0.587 * g + 0.114 * b); continue; }
         // colour: the same curve on each channel, then a touch more saturation
         const R = L(r), G = L(g), B = L(b);
         const yy = 0.299 * R + 0.587 * G + 0.114 * B;
-        d[i] = yy + (R - yy) * 1.25; d[i + 1] = yy + (G - yy) * 1.25; d[i + 2] = yy + (B - yy) * 1.25;
+        d[i] = yy + (R - yy) * sat; d[i + 1] = yy + (G - yy) * sat; d[i + 2] = yy + (B - yy) * sat;
       }
     }
     void n;
@@ -494,29 +535,89 @@ export function scanKernels(): Kernels {
     return estimateBlurY(Y, cw, ch);
   }
 
-  function process(job: Job): JobResult {
+  /** local contrast: a wide unsharp mask on the brightness (makes faint print and colours stand out) */
+  function clarity(img: PixelImage, amount: number): void {
+    const w = img.w, h = img.h, d = img.data;
+    // on a quarter-size copy: wide blur is cheap there
+    const k = 4, W = Math.max(4, Math.round(w / k)), H = Math.max(4, Math.round(h / k));
+    const Y = lumaPlane(img), small = shrinkPlane(Y, w, h, W, H);
+    const B = resizePlane(blurPlane(small, W, H, Math.max(2, Math.max(W, H) / 90)), W, H, w, h);
+    for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+      const v = (Y[p] - B[p]) * amount;
+      d[i] = d[i] + v; d[i + 1] = d[i + 1] + v; d[i + 2] = d[i + 2] + v;
+    }
+  }
+
+  /** quarter turns clockwise */
+  function turn(img: PixelImage, rot: number): PixelImage {
+    const r = ((rot % 4) + 4) % 4;
+    if (!r) return img;
+    const w = img.w, h = img.h, s = new Uint32Array(img.data.buffer, img.data.byteOffset, w * h);
+    const W = r % 2 ? h : w, H = r % 2 ? w : h;
+    const out = new Uint8ClampedArray(W * H * 4), o = new Uint32Array(out.buffer);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      const X = r === 1 ? h - 1 - y : r === 2 ? w - 1 - x : y;
+      const Y = r === 1 ? x : r === 2 ? h - 1 - y : w - 1 - x;
+      o[Y * W + X] = s[y * w + x];
+    }
+    return { w: W, h: H, data: out };
+  }
+
+  /** box-averaged copy whose longest side is at most `max` */
+  function shrink(img: PixelImage, max: number): PixelImage {
+    const k = Math.max(img.w, img.h) / max;
+    if (k <= 1) return { w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) };
+    const W = Math.max(1, Math.round(img.w / k)), H = Math.max(1, Math.round(img.h / k));
+    const out = new Uint8ClampedArray(W * H * 4), d = img.data, w = img.w;
+    for (let Y = 0; Y < H; Y++) {
+      const y0 = Math.floor(Y * k), y1 = Math.max(y0 + 1, Math.min(img.h, Math.floor((Y + 1) * k)));
+      for (let X = 0; X < W; X++) {
+        const x0 = Math.floor(X * k), x1 = Math.max(x0 + 1, Math.min(w, Math.floor((X + 1) * k)));
+        let r = 0, g = 0, b = 0, n = 0;
+        for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * w + x) * 4; r += d[i]; g += d[i + 1]; b += d[i + 2]; n++; }
+        const o = (Y * W + X) * 4;
+        out[o] = r / n; out[o + 1] = g / n; out[o + 2] = b / n; out[o + 3] = 255;
+      }
+    }
+    return { w: W, h: H, data: out };
+  }
+
+  function prepare(job: Omit<Job, 'filter' | 'radius'>): Prepared {
     const T: Record<string, number> = {};
     let t0 = Date.now();
     const lap = (k: string) => { const t = Date.now(); T[k] = t - t0; t0 = t; };
     // a hair inside the found outline, so no sliver of the desk shows along the edges
-    const m = Math.max(1.5, 0.0035 * Math.max(job.outW, job.outH));
-    const img = warp(job.src, job.quad, job.outW, job.outH, m);
+    // (a little more on curved sides: the traced curve is smooth, a real edge has small waves)
+    const m = Math.max(1.5, (job.bend ? 0.006 : 0.0035) * Math.max(job.outW, job.outH));
+    const warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend);
     lap('warp');
-    let blur = 0;
-    if (job.filter !== 'original') {
-      if (job.sharpen === 'auto') {
-        blur = estimateBlur(img);
-        lap('estimate');
-        if (blur > 1.1) { deblur(img, Math.min(5, blur)); lap('deblur'); }
-      }
-      if (job.filter === 'color') colorFilter(img);
-      else docFilter(img, job.filter);
-      lap('filter');
-      if (job.filter !== 'bw') { unsharp(img, 1.0, blur > 1.1 ? 0.35 : 0.6); lap('unsharp'); }
+    let blur = 0, sharp: PixelImage | null = null;
+    if (job.sharpen === 'auto') {
+      blur = estimateBlur(warped);
+      lap('estimate');
+      if (blur > 1.1) { sharp = { w: warped.w, h: warped.h, data: new Uint8ClampedArray(warped.data) }; deblur(sharp, Math.min(5, blur)); lap('deblur'); }
     }
-    roundCorners(img, job.radius);
-    return { img, blur, times: T };
+    return { warped, sharp, blur, times: T };
   }
 
-  return { process, estimateBlur };
+  function finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number): PixelImage {
+    if (filter !== 'original') {
+      if (filter === 'color') colorFilter(img);
+      else docFilter(img, filter);
+      if (filter === 'enhance') clarity(img, 0.28);
+      if (filter !== 'bw') unsharp(img, 1.0, blur > 1.1 ? 0.35 : filter === 'lighten' ? 0.4 : 0.6);
+    }
+    const out = turn(img, rot);
+    roundCorners(out, radius);
+    return out;
+  }
+
+  function process(job: Job): JobResult {
+    const p = prepare({ ...job, sharpen: job.filter === 'original' ? 'off' : job.sharpen });
+    const t = Date.now();
+    const img = finish(p.sharp ?? p.warped, job.filter, p.blur, job.radius, 0);
+    return { img, blur: p.blur, times: { ...p.times, look: Date.now() - t } };
+  }
+
+  return { process, prepare, finish, shrink, estimateBlur };
 }

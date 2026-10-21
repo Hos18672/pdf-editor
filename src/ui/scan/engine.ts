@@ -3,7 +3,8 @@ import { detectKernels, luminance } from './detect';
 import { orientKernels, type Orientation } from './orient';
 import { workerUrl } from './workerUrl';
 import { aspectOf, dist, FORMATS, fullQuad, snapRatio, type Quad } from './geom';
-import { scanKernels, type Filter, type JobResult, type Kernels } from './kernels';
+import { scanKernels, type Filter, type JobResult, type Kernels, type PixelImage } from './kernels';
+import { bendReach, scaleBend, traceBend, turnBend, type Bend } from './bend';
 
 export type ScanMode = 'doc' | 'id' | 'passport' | 'receipt';
 export type Quality = 'small' | 'standard' | 'high';
@@ -15,6 +16,9 @@ export interface ScanPage {
   w: number; h: number;
   quad: Quad;
   auto: Quad | null;
+  /** curved sides (photo pixels), null when the sides are straight */
+  bend: Bend | null;
+  autoBend: Bend | null;
   /** the outline was found clearly; otherwise the page is flagged for a look */
   sure: boolean;
   /** extra quarter turns, clockwise */
@@ -36,6 +40,8 @@ export const MODE_RATIOS: Record<ScanMode, number[] | undefined> = {
 export const newId = () => Math.random().toString(36).slice(2, 10);
 
 // ---------------------------------------------------------------- decoding
+/** longest side kept from a photo (best quality output is 3300 px for the page itself) */
+const MAX_SIDE = 4096;
 const decoded = new Map<Blob, Promise<ImageBitmap | HTMLCanvasElement>>();
 
 /** Photo → bitmap with its EXIF orientation applied. HEIC goes through a converter first. */
@@ -43,6 +49,7 @@ export function decode(blob: Blob): Promise<ImageBitmap | HTMLCanvasElement> {
   let p = decoded.get(blob);
   if (!p) {
     p = (async () => {
+      const t0 = performance.now();
       let b = blob;
       if (/heic|heif/i.test(b.type) || /\.(heic|heif)$/i.test((b as File).name ?? '')) {
         const heic2any = (await import('heic2any')).default as any;
@@ -53,20 +60,27 @@ export function decode(blob: Blob): Promise<ImageBitmap | HTMLCanvasElement> {
         try {
           const oriented = await createImageBitmap(b, { imageOrientation: 'from-image' } as any);
           // Phone photos keep "rotate me" in EXIF; some Android WebViews then crop such a bitmap in
-          // the unrotated frame (shifted crops). Bake the rotation into plain pixels once.
+          // the unrotated frame (shifted crops). Bake the rotation into plain pixels once — and keep
+          // at most MAX_SIDE: 50 MP photos hold no more page detail than the best output uses, and
+          // cost seconds and hundreds of MB at every step.
+          const k = Math.min(1, MAX_SIDE / Math.max(oriented.width, oriented.height));
           const c = document.createElement('canvas');
-          c.width = oriented.width; c.height = oriented.height;
-          c.getContext('2d')!.drawImage(oriented, 0, 0);
+          c.width = Math.round(oriented.width * k); c.height = Math.round(oriented.height * k);
+          const cx = c.getContext('2d')!;
+          cx.imageSmoothingEnabled = true; (cx as any).imageSmoothingQuality = 'high';
+          cx.drawImage(oriented, 0, 0, c.width, c.height);
           oriented.close();
+          tlog(`decode ${c.width}x${c.height}`, t0);
           try { const flat = await createImageBitmap(c); c.width = c.height = 0; return flat; } catch { return c; }
         } catch { /* fall back */ }
       }
       const url = URL.createObjectURL(b);
       try {
         const im = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Not a readable image')); i.src = url; });
+        const k = Math.min(1, MAX_SIDE / Math.max(im.naturalWidth, im.naturalHeight));
         const c = document.createElement('canvas');
-        c.width = im.naturalWidth; c.height = im.naturalHeight;
-        c.getContext('2d')!.drawImage(im, 0, 0);
+        c.width = Math.round(im.naturalWidth * k); c.height = Math.round(im.naturalHeight * k);
+        c.getContext('2d')!.drawImage(im, 0, 0, c.width, c.height);
         return c;
       } finally { URL.revokeObjectURL(url); }
     })();
@@ -182,7 +196,7 @@ async function sourceOf(bmp: ImageBitmap | HTMLCanvasElement, region: { x: numbe
 const transferOf = (s: Src): Transferable[] => ('bmp' in s ? [s.bmp] : [s.img.data.buffer]);
 
 // ---------------------------------------------------------------- finding the page
-export interface Found { quad: Quad; sure: boolean; format: string | null; ratio: number }
+export interface Found { quad: Quad; bend: Bend | null; sure: boolean; format: string | null; ratio: number }
 
 /** timing log for tuning (window.__scanDebug = 1) */
 export const tlog = (label: string, t0: number) => { if ((window as any).__scanDebug) console.log(`scan ${label} ${Math.round(performance.now() - t0)}ms`); };
@@ -195,11 +209,13 @@ export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: S
   const ks = Math.min(1, 512 / Math.max(w, h)), km = Math.min(1, 1600 / Math.max(w, h));
   const sw = Math.max(1, Math.round(w * ks)), sh = Math.max(1, Math.round(h * ks));
   const mw = Math.max(1, Math.round(w * km)), mh = Math.max(1, Math.round(h * km));
-  let det: { score: number; support: number[] } | null = null, rel: { x: number; y: number }[] | null = null;
+  let det: { score: number; support: number[] } | null = null, rel: { x: number; y: number }[] | null = null, relBend: Bend | null = null;
+  // cards and passports are stiff: only sheets of paper are followed along curved sides
+  const bend = mode === 'doc' || mode === 'receipt';
   try {
     const small = await sourceOf(bmp, full, sw, sh), mid = await sourceOf(bmp, full, mw, mh);
-    const r = await post<{ det: any; quad: { x: number; y: number }[] | null }>({ type: 'find', small, mid, opts: { ratios: MODE_RATIOS[mode] } }, [...transferOf(small), ...transferOf(mid)]);
-    det = r.det; rel = r.quad;
+    const r = await post<{ det: any; quad: { x: number; y: number }[] | null; bend: Bend | null }>({ type: 'find', small, mid, bend, opts: { ratios: MODE_RATIOS[mode] } }, [...transferOf(small), ...transferOf(mid)]);
+    det = r.det; rel = r.quad; relBend = r.bend;
   } catch {
     // no workers: same work here
     const { D } = localKernels();
@@ -207,20 +223,22 @@ export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: S
     const d = D.detectQuad(small, { ratios: MODE_RATIOS[mode] });
     det = d;
     if (d) {
-      const mid = pixelsOf(bmp, 1600), k = mid.w / small.w;
-      const q = D.refineQuad(D.luminance(mid), mid.w, mid.h, d.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad);
+      const mid = pixelsOf(bmp, 1600), k = mid.w / small.w, L = D.luminance(mid);
+      let q = D.refineQuad(L, mid.w, mid.h, d.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad);
+      const b = bend ? traceBend(L, mid.w, mid.h, q) : null;
+      if (b) { q = b.quad; relBend = scaleBend(b.bend, 1 / mid.w, 1 / mid.h); }
       rel = q.map((p) => ({ x: p.x / mid.w, y: p.y / mid.h }));
     }
   }
   tlog('find', t0);
-  if (!det || !rel) return { quad: fullQuad(w, h), sure: false, ...shapeOf(fullQuad(w, h), w, h, mode) };
+  if (!det || !rel) return { quad: fullQuad(w, h), bend: null, sure: false, ...shapeOf(fullQuad(w, h), w, h, mode) };
   const quad = rel.map((p) => ({ x: p.x * w, y: p.y * h })) as Quad;
   const sure = det.score > 0.78 && Math.min(...det.support) > 0.45;
-  return { quad, sure, ...shapeOf(quad, w, h, mode) };
+  return { quad, bend: relBend ? scaleBend(relBend, w, h) : null, sure, ...shapeOf(quad, w, h, mode, !!relBend) };
 }
 
 /** True proportions of the crop and the format they match. */
-export function shapeOf(quad: Quad, w: number, h: number, mode: ScanMode): { format: string | null; ratio: number } {
+export function shapeOf(quad: Quad, w: number, h: number, mode: ScanMode, bent = false): { format: string | null; ratio: number } {
   const r = aspectOf(quad, w, h);
   if (mode === 'id' || mode === 'passport') {
     // the format is known: keep its shape whenever the measurement is anywhere near it
@@ -229,7 +247,8 @@ export function shapeOf(quad: Quad, w: number, h: number, mode: ScanMode): { for
     return s.format ? { format: f.id, ratio: s.ratio } : { format: null, ratio: r };
   }
   if (mode === 'receipt') return { format: null, ratio: r };
-  const s = snapRatio(r, ['a4', 'letter', 'legal', 'a5', 'id1', 'id3']);
+  // a page whose sides bend is paper, never a stiff card
+  const s = snapRatio(r, bent ? ['a4', 'letter', 'legal', 'a5'] : ['a4', 'letter', 'legal', 'a5', 'id1', 'id3']);
   // sheets lie in either orientation, but a "landscape legal" is far more likely an ID card
   if (s.format?.id === 'legal' && r > 1) {
     const c = snapRatio(r, ['id1'], 0.08);
@@ -260,57 +279,151 @@ export const turnQuad = (q: Quad, rot: number): Quad => {
 };
 
 export interface Rendered { blob: Blob; url: string; w: number; h: number; blur: number; orient?: Orientation | null }
-export interface RenderOpt { quality: Quality; long?: number; filter?: Filter; jpeg?: number; orient?: boolean; low?: boolean }
+export interface RenderOpt { quality: Quality; long?: number; filter?: Filter; jpeg?: number; orient?: boolean; low?: boolean; quick?: boolean }
 
-/**
- * Crops, straightens and filters a page. `long` caps the output's longest side (previews);
- * otherwise the quality setting decides. `orient` also reads the text direction (on rot 0 only).
- */
-export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered> {
-  const res = await renderRaw(p, opt);
-  const card = p.format === 'id1' || p.format === 'id3';
-  const filter = opt.filter ?? p.filter;
-  const blob = await toJpeg(res.img, opt.jpeg ?? (card ? 0.9 : filter === 'bw' ? 0.82 : 0.85));
-  return { blob, url: URL.createObjectURL(blob), w: res.img.w, h: res.img.h, blur: res.blur, orient: res.orient };
+/** output size before quarter turns, capped by `long` */
+function sizeFor(p: ScanPage, quality: Quality, long?: number) {
+  let { w: ow, h: oh } = outputSize(p, quality);
+  if (long && Math.max(ow, oh) > long) { const k = long / Math.max(ow, oh); ow = Math.round(ow * k); oh = Math.round(oh * k); }
+  return { ow, oh };
 }
+/** ISO ID-1 corner radius 3.18 mm on 85.6 mm; passport pages are square-cut */
+const radiusOf = (p: ScanPage, filter: Filter, ow: number, oh: number) => (p.format === 'id1' && filter !== 'original' ? (Math.max(ow, oh) * 3.18) / 85.6 : 0);
 
-/** The cropped, filtered page as pixels. */
-export async function renderRaw(p: ScanPage, opt: RenderOpt): Promise<JobResult & { orient?: Orientation | null }> {
-  const t0 = performance.now();
+/** the part of the photo under the page (curved sides included), at about the output's resolution */
+async function cropSource(p: ScanPage, ow: number, oh: number, rot: number) {
   const bmp = await decode(p.blob);
-  let { w: ow, h: oh } = outputSize(p, opt.quality);
-  if (opt.long && Math.max(ow, oh) > opt.long) { const k = opt.long / Math.max(ow, oh); ow = Math.round(ow * k); oh = Math.round(oh * k); }
-  // only the part of the photo under the page, at about the output's resolution
-  const q = p.quad;
+  const q = p.quad, reach = bendReach(p.bend);
   const xs = q.map((c) => c.x), ys = q.map((c) => c.y);
-  const x0 = Math.max(0, Math.floor(Math.min(...xs)) - 2), y0 = Math.max(0, Math.floor(Math.min(...ys)) - 2);
-  const x1 = Math.min(p.w, Math.ceil(Math.max(...xs)) + 2), y1 = Math.min(p.h, Math.ceil(Math.max(...ys)) + 2);
+  const x0 = Math.max(0, Math.floor(Math.min(...xs) - reach) - 2), y0 = Math.max(0, Math.floor(Math.min(...ys) - reach) - 2);
+  const x1 = Math.min(p.w, Math.ceil(Math.max(...xs) + reach) + 2), y1 = Math.min(p.h, Math.ceil(Math.max(...ys) + reach) + 2);
   const srcLong = Math.max(dist(q[0], q[1]), dist(q[3], q[2]), dist(q[0], q[3]), dist(q[1], q[2]));
   const k = Math.min(1, (Math.max(ow, oh) * 1.25) / srcLong);
   const region = { x: x0, y: y0, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
   const RW = Math.max(1, Math.round(region.w * k)), RH = Math.max(1, Math.round(region.h * k));
   const sx = RW / region.w, sy = RH / region.h;
-  const tq = turnQuad(q, p.rot);
+  const tq = turnQuad(q, rot);
+  const bend = p.bend ? scaleBend(turnBend(p.bend, rot), sx, sy) : null;
+  return { bmp, region, RW, RH, quad: tq.flatMap((c) => [(c.x - x0) * sx, (c.y - y0) * sy]), bend };
+}
+
+async function blobOf(r: { blob?: Blob; img?: PixelImage; w?: number; h?: number }, q: number): Promise<{ blob: Blob; w: number; h: number }> {
+  if (r.blob) return { blob: r.blob, w: r.w!, h: r.h! };
+  return { blob: await toJpeg(r.img!, q), w: r.img!.w, h: r.img!.h };
+}
+
+/**
+ * Crops, straightens and filters a page in one go (saving quality, or a quick first look with
+ * `quick`). `long` caps the output's longest side; otherwise the quality setting decides.
+ */
+export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered> {
+  const t0 = performance.now();
+  const { ow, oh } = sizeFor(p, opt.quality, opt.long);
   const odd = p.rot % 2 !== 0;
   const outW = odd ? oh : ow, outH = odd ? ow : oh;
   const filter = opt.filter ?? p.filter;
-  // ISO ID-1 corner radius 3.18 mm on 85.6 mm; passport pages are square-cut
-  const radius = p.format === 'id1' && filter !== 'original' ? (Math.max(outW, outH) * 3.18) / 85.6 : 0;
-  const job = { quad: tq.flatMap((c) => [(c.x - x0) * sx, (c.y - y0) * sy]), outW, outH, filter, sharpen: 'auto' as const, radius };
+  const card = p.format === 'id1' || p.format === 'id3';
+  const jpeg = opt.jpeg ?? (card ? 0.9 : filter === 'bw' ? 0.82 : 0.85);
+  const src = await cropSource(p, ow, oh, p.rot);
+  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh) };
   const orient = !!opt.orient && p.rot === 0;
-  let res: JobResult & { orient?: Orientation | null };
+  let res: { blob?: Blob; img?: PixelImage; w?: number; h?: number; blur: number; orient?: Orientation | null; times?: any };
   try {
-    const src = await sourceOf(bmp, region, RW, RH);
-    res = await post({ type: 'process', src, job, orient }, transferOf(src), opt.low);
+    const s = await sourceOf(src.bmp, src.region, src.RW, src.RH);
+    res = await post({ type: 'process', src: s, job, orient, jpeg }, transferOf(s), opt.low);
   } catch {
     const { K, O } = localKernels();
-    const px = pixelsOf(bmp, Math.max(RW, RH), region);
+    const px = pixelsOf(src.bmp, Math.max(src.RW, src.RH), src.region);
     await new Promise((r) => setTimeout(r, 0));
     const r = K.process({ ...job, src: { w: px.w, h: px.h, data: px.data } });
     res = { ...r, orient: orient ? O.textOrientation(r.img) : undefined };
   }
-  tlog(`render ${opt.long ?? opt.quality} ${filter} ${outW}x${outH} ${JSON.stringify(res.times)}`, t0);
-  return res;
+  const b = await blobOf(res, jpeg);
+  tlog(`render ${opt.long ?? opt.quality}${opt.quick ? ' quick' : ''} ${filter} ${b.w}x${b.h} ${JSON.stringify(res.times ?? {})}`, t0);
+  return { blob: b.blob, url: URL.createObjectURL(b.blob), w: b.w, h: b.h, blur: res.blur, orient: res.orient };
+}
+
+// ---------------------------------------------------------------- the page on screen
+// The straightened page (and its sharpened copy) is kept for the pages being looked at, so changing the
+// look, turning the page or comparing only runs the quick last step.
+
+interface Base { warped: PixelImage; sharp: PixelImage | null; blur: number; ow: number; oh: number }
+const bases = new Map<string, Promise<Base>>();
+const baseKey = (p: ScanPage, long: number) =>
+  `${p.id}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 'b' + bendReach(p.bend).toFixed(1) : ''}:${long}`;
+
+function baseOf(p: ScanPage, long: number, low?: boolean): Promise<Base> {
+  const key = baseKey(p, long);
+  let b = bases.get(key);
+  if (b) { bases.delete(key); bases.set(key, b); return b; }
+  b = (async () => {
+    const t0 = performance.now();
+    const { ow, oh } = sizeFor(p, 'standard', long);
+    const src = await cropSource(p, ow, oh, 0);
+    const job = { quad: src.quad, bend: src.bend, outW: ow, outH: oh, sharpen: 'auto' as const };
+    let r: { warped: PixelImage; sharp: PixelImage | null; blur: number; times?: any };
+    try {
+      const s = await sourceOf(src.bmp, src.region, src.RW, src.RH);
+      r = await post({ type: 'prep', src: s, job }, transferOf(s), low);
+    } catch {
+      const { K } = localKernels();
+      const px = pixelsOf(src.bmp, Math.max(src.RW, src.RH), src.region);
+      await new Promise((res) => setTimeout(res, 0));
+      r = K.prepare({ ...job, src: { w: px.w, h: px.h, data: px.data } });
+    }
+    tlog(`prep ${ow}x${oh} ${JSON.stringify(r.times ?? {})}`, t0);
+    return { warped: r.warped, sharp: r.sharp, blur: r.blur, ow, oh };
+  })();
+  bases.set(key, b);
+  b.catch(() => bases.delete(key));
+  // a few pages' worth (each is a few MB)
+  while (bases.size > 4) bases.delete(bases.keys().next().value as string);
+  return b;
+}
+/** drops kept pages of a scan that is closed */
+export const forgetBases = () => bases.clear();
+
+/** A page on screen in a given look (straightening reused from earlier looks of the same crop). */
+export async function renderLook(p: ScanPage, opt: { long: number; filter?: Filter; orient?: boolean; jpeg?: number }): Promise<Rendered> {
+  const t0 = performance.now();
+  const base = await baseOf(p, opt.long);
+  const filter = opt.filter ?? p.filter;
+  const img = filter === 'original' ? base.warped : base.sharp ?? base.warped;
+  const card = p.format === 'id1' || p.format === 'id3';
+  const jpeg = opt.jpeg ?? (card ? 0.9 : 0.85);
+  const radius = radiusOf(p, filter, base.ow, base.oh);
+  const orient = !!opt.orient && p.rot === 0;
+  let r: { blob?: Blob; img?: PixelImage; w?: number; h?: number; orient?: Orientation | null };
+  try {
+    r = await post({ type: 'look', img, filter, blur: base.blur, radius, rot: p.rot, orient, jpeg }, []);
+  } catch {
+    const { K, O } = localKernels();
+    const out = K.finish({ w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) }, filter, base.blur, radius, p.rot);
+    r = { img: out, orient: orient ? O.textOrientation(out) : undefined };
+  }
+  const b = await blobOf(r, jpeg);
+  tlog(`look ${filter} ${b.w}x${b.h}`, t0);
+  return { blob: b.blob, url: URL.createObjectURL(b.blob), w: b.w, h: b.h, blur: base.blur, orient: r.orient };
+}
+
+/** Small previews of a page in every look, from the kept straightened page. */
+export async function renderThumbs(p: ScanPage, filters: Filter[], long: number, max: number): Promise<Record<string, string>> {
+  const t0 = performance.now();
+  const base = await baseOf(p, long);
+  const img = base.sharp ?? base.warped;
+  const radius = radiusOf(p, 'auto', base.ow, base.oh);
+  let items: { filter: Filter; blob?: Blob; img?: PixelImage; w?: number; h?: number }[];
+  try {
+    items = (await post<{ items: typeof items }>({ type: 'thumbs', img, filters, blur: base.blur, radius, rot: p.rot, max, jpeg: 0.8 }, [])).items;
+  } catch {
+    const { K } = localKernels();
+    const small = K.shrink(img, max), k = small.w / img.w;
+    items = filters.map((f) => ({ filter: f, img: K.finish({ w: small.w, h: small.h, data: new Uint8ClampedArray(small.data) }, f, base.blur * k, f === 'original' ? 0 : radius * k, p.rot) }));
+  }
+  const out: Record<string, string> = {};
+  for (const it of items) out[it.filter] = URL.createObjectURL((await blobOf(it, 0.8)).blob);
+  tlog('thumbs', t0);
+  return out;
 }
 
 /**
