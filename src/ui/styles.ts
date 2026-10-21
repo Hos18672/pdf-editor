@@ -533,6 +533,16 @@ button { cursor: pointer; }
 .inkrow .inks { display: flex; align-items: center; gap: 10px; }
 .modal .foot { display: flex; gap: 10px; }
 .modal .foot .btn.primary { flex: 1; }
+.modal.confirm { max-width: 420px; gap: 22px; padding: 28px; }
+.cc-head { display: flex; flex-direction: column; gap: 16px; }
+.cc-tile { width: 52px; height: 52px; border-radius: 18px; background: var(--marker); color: #1E2559; display: grid; place-items: center; flex: none; }
+.cc-head h2 { margin: 0 0 6px; font-size: 21px; font-weight: 700; letter-spacing: -.015em; }
+.cc-head p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.5; }
+.cc-actions { display: flex; flex-direction: column; gap: 8px; }
+.cc-actions .btn { width: 100%; justify-content: center; }
+.cc-actions .btn.danger { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--danger) 35%, transparent); }
+.scrim.sheet .modal.confirm { padding: 10px 20px calc(20px + var(--safe-b)); gap: 20px; }
+.scrim.sheet .modal.confirm .cc-head { flex-direction: row; align-items: flex-start; margin-top: 8px; }
 
 /* ---------- export progress / busy / toast ---------- */
 .busy { position: fixed; inset: 0; z-index: 70; background: color-mix(in srgb, var(--desk) 60%, transparent); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 24px; animation: pe-fade .2s; }

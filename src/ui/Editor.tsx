@@ -13,6 +13,7 @@ import { readFields, FormField, isFilled } from './Fields';
 import { exportPdf } from '../engine/exporter';
 import { pageNeedsText } from '../engine/textLayer';
 import { scanStyles } from './scanStyle';
+import { ConfirmClose } from './ConfirmClose';
 import type { EditorObject, TextEdit, FontFamily } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
@@ -130,6 +131,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   // tool flyout beside the rail (tablet / desktop) or above the dock (phone, shapes only)
   const [flyout, setFlyout] = useState<{ t: RailT; top: number } | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [askClose, setAskClose] = useState(false);
+  const savedSnap = useRef<unknown>(null); // what the last download contained: closing then needs no question
   const [recent, setRecent] = useState<Recent>(readRecent);
   const railBtns = useRef<Partial<Record<RailT, HTMLButtonElement | null>>>({});
   const lastShape = useRef<Tool>('rect');
@@ -498,7 +501,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   // ----- export -----
   const editCount = Object.keys(snap.edits).length + snap.objects.length + Object.keys(snap.forms).length;
-  const download = async () => {
+  const download = async (): Promise<boolean> => {
     setEditing(null);
     (document.activeElement as HTMLElement | null)?.blur?.();
     await new Promise((r) => setTimeout(r, 30));
@@ -511,9 +514,12 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const name = file.name.replace(/\.pdf$/i, '') + '-edited.pdf';
       setBusy(null);
       await saveFile(host, bytes, name, 'application/pdf', toast);
+      savedSnap.current = snap;
+      return true;
     } catch (e: any) {
       console.error(e);
       toast({ msg: 'The PDF could not be saved: ' + (e?.message || 'unknown error'), kind: 'err', action: { label: 'Retry', run: download } });
+      return false;
     } finally {
       setBusy(null);
     }
@@ -810,8 +816,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   return (
     <div className={`app bp-${bp}`}>
+      {askClose && <ConfirmClose changes={editCount} sheet={mobile} onCancel={() => setAskClose(false)}
+        onDiscard={() => { setAskClose(false); onClose(); }}
+        onDownload={async () => { setAskClose(false); if (await download()) onClose(); }} />}
       <header className="topbar float">
-        <button className="ibtn" onClick={() => { if (!editCount || confirm('Close this document? Unsaved changes will be lost.')) onClose(); }} aria-label="Close document" title="Close"><Icon name="back" /></button>
+        <button className="ibtn" onClick={() => (editCount && savedSnap.current !== snap ? setAskClose(true) : onClose())} aria-label="Close document" title="Close"><Icon name="back" /></button>
         <div className="doc">
           <div className="names">
             <div className="fname" title={file.name}>{file.name}</div>
