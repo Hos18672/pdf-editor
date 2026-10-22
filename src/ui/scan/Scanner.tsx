@@ -49,6 +49,9 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   const [crop, setCrop] = useState<string | null>(null);
   const [renders, setRenders] = useState<Record<string, Render>>({});
   const [previews, setPreviews] = useState<Record<string, Record<string, string>>>({});
+  // a sharper picture of the page you zoom into (one at a time)
+  const [sharp, setSharp] = useState<Record<string, { key: string; url: string }>>({});
+  const sharpBusy = useRef('');
   const [finding, setFinding] = useState(0);
   const [quality, setQuality] = useState<Quality>('standard');
   const [paper, setPaper] = useState<PaperOpt>('auto');
@@ -198,9 +201,10 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   useEffect(() => { lastAct.current = performance.now(); }, [pages, cur, compare]);
 
   // tidy up object URLs when leaving
-  const live = useRef({ renders, previews, origs }); live.current = { renders, previews, origs };
+  const live = useRef({ renders, previews, origs, sharp }); live.current = { renders, previews, origs, sharp };
   useEffect(() => () => {
     const l = live.current;
+    Object.values(l.sharp).forEach((r) => URL.revokeObjectURL(r.url));
     Object.values(l.renders).forEach((r) => URL.revokeObjectURL(r.url));
     Object.values(l.previews).forEach((m) => Object.values(m).forEach((u) => u && URL.revokeObjectURL(u)));
     Object.values(l.origs).forEach((u) => u && URL.revokeObjectURL(u));
@@ -209,6 +213,19 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   }, []);
 
   const page = pages[Math.min(cur, pages.length - 1)] as ScanPage | undefined;
+  const wantSharp = (id: string) => {
+    const q = pagesRef.current.find((x) => x.id === id);
+    if (!q) return;
+    const key = keyOf(q);
+    if (live.current.sharp[id]?.key === key || sharpBusy.current === id + key) return;
+    sharpBusy.current = id + key;
+    renderLook(q, { long: mobile ? 2800 : 3400, jpeg: 0.9 }).then((r) => {
+      setSharp((m) => {
+        for (const v of Object.values(m)) URL.revokeObjectURL(v.url); // keep only this one
+        return { [id]: { key, url: r.url } };
+      });
+    }, () => { /* the normal picture stays */ }).finally(() => { if (sharpBusy.current === id + key) sharpBusy.current = ''; });
+  };
   const lastThumb = pages.length ? renders[pages[pages.length - 1].id]?.url ?? null : null;
   const step = mode === 'id' ? (idCount % 2 === 0 ? 'Front side' : 'Back side') : mode === 'passport' ? 'Photo page' : null;
 
@@ -364,7 +381,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
             <div className="sc-view">
               <button className="sc-nav l" onClick={() => setCur(Math.max(0, cur - 1))} disabled={cur === 0} aria-label="Previous page"><Icon name="left" size={20} /></button>
               <Pager pages={pages} renders={renders} cur={Math.min(cur, pages.length - 1)} onCur={setCur} onAdd={() => setView('camera')} keyOf={keyOf}
-                compare={compare} orig={origs[geoKey(page)] || undefined} label={FILTERS.find((f) => f.id === page.filter)?.label ?? ''} onCheck={setCrop} />
+                compare={compare} orig={origs[geoKey(page)] || undefined} label={FILTERS.find((f) => f.id === page.filter)?.label ?? ''} onCheck={setCrop}
+                sharp={sharp} onSharp={wantSharp} />
               <button className="sc-nav r" onClick={() => setCur(Math.min(pages.length - 1, cur + 1))} disabled={cur >= pages.length - 1} aria-label="Next page"><Icon name="right" size={20} /></button>
             </div>
           ) : <div className="sc-empty">No pages yet</div>}

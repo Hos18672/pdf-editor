@@ -1060,7 +1060,14 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .sc-pager { position: relative; height: 100%; align-self: stretch; min-height: 0; min-width: 0; overflow: hidden; touch-action: pan-y; user-select: none; -webkit-user-select: none; }
 .sc-track { display: flex; height: 100%; will-change: transform; }
 .sc-slide { flex: none; height: 100%; display: grid; place-items: center; }
-.sc-pic { position: relative; }
+.sc-pic { position: relative; transform-origin: 50% 50%; }
+.sc-pager.zoomed { touch-action: none; cursor: grab; }
+.sc-pager.zoomed .sc-pic > img { border-radius: 0; }
+.sc-pic > img.sc-sharp { box-shadow: none; }
+.sc-zoom { position: absolute; right: 10px; bottom: 10px; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-lift); }
+.sc-zoom button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--text); padding: 0; }
+.sc-zoom button:disabled { opacity: .35; }
+.sc-zoom button.pct { width: auto; min-width: 48px; padding: 0 6px; font-size: 12.5px; font-weight: 700; font-variant-numeric: tabular-nums; }
 .sc-pic > img { position: absolute; inset: 0; width: 100%; height: 100%; display: block; background: #fff; box-shadow: var(--shadow-page); border-radius: 3px; animation: pe-fade .2s; -webkit-user-drag: none; }
 .sc-pic > img.sc-orig { box-shadow: none; animation: none; }
 .sc-skel { position: absolute; inset: 0; border-radius: 4px; background: var(--surface); box-shadow: var(--shadow-page); }
