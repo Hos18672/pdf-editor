@@ -901,11 +901,65 @@ export function scanKernels(): Kernels {
   }
 
   /**
+   * A finger or hand holding the page: a skin-coloured patch, darker than the paper, that comes in from
+   * the page's edge. Returns how much each pixel is covered (0…1, with a soft rim), or null.
+   */
+  function edgeObjects(img: PixelImage): Float32Array | null {
+    const w = img.w, h = img.h, d = img.data;
+    const s = Math.max(1, Math.round(Math.max(w, h) / 420));
+    const gw = Math.ceil(w / s), gh = Math.ceil(h / s), gn = gw * gh;
+    const Yg = new Float32Array(gn), skin = new Uint8Array(gn);
+    for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+      const x = Math.min(w - 1, gx * s + (s >> 1)), y = Math.min(h - 1, gy * s + (s >> 1)), i = (y * w + x) * 4;
+      const r = d[i], g = d[i + 1], b = d[i + 2], q = gy * gw + gx;
+      Yg[q] = 0.299 * r + 0.587 * g + 0.114 * b;
+      skin[q] = r > 80 && r > g + 10 && r > b + 30 && (r - b) / r > 0.2 && (r - b) / r < 0.58 && g > b * 0.85 ? 1 : 0;
+    }
+    // the paper's brightness (a bright tail of the page); skin is clearly darker than it
+    const hist = new Uint32Array(256);
+    for (let q = 0; q < gn; q++) hist[Yg[q] | 0]++;
+    const paperY = percentile(hist, gn, 0.85);
+    for (let q = 0; q < gn; q++) if (skin[q] && Yg[q] > paperY * 0.9) skin[q] = 0;
+    const keep = new Float32Array(gn), seen = new Uint8Array(gn), stack: number[] = [], comp: number[] = [];
+    let any = false;
+    const edge = Math.max(1, Math.round(Math.min(gw, gh) * 0.02));
+    for (let q0 = 0; q0 < gn; q0++) {
+      if (!skin[q0] || seen[q0]) continue;
+      comp.length = 0; stack.push(q0); seen[q0] = 1;
+      let touches = false, x0 = gw, x1 = 0, y0 = gh, y1 = 0;
+      while (stack.length) {
+        const q = stack.pop()!; comp.push(q);
+        const x = q % gw, y = (q / gw) | 0;
+        if (x < edge || y < edge || x >= gw - edge || y >= gh - edge) touches = true;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (x > 0 && skin[q - 1] && !seen[q - 1]) { seen[q - 1] = 1; stack.push(q - 1); }
+        if (x < gw - 1 && skin[q + 1] && !seen[q + 1]) { seen[q + 1] = 1; stack.push(q + 1); }
+        if (y > 0 && skin[q - gw] && !seen[q - gw]) { seen[q - gw] = 1; stack.push(q - gw); }
+        if (y < gh - 1 && skin[q + gw] && !seen[q + gw]) { seen[q + gw] = 1; stack.push(q + gw); }
+      }
+      const area = comp.length, box = (x1 - x0 + 1) * (y1 - y0 + 1);
+      // a solid patch of a real size, not a coloured logo or a few warm specks; never most of the page
+      // (a printed band or block is a near-perfect rectangle; a finger is rounded)
+      if (!touches || area < gn * 0.002 || area > gn * 0.3 || area < box * 0.35 || area > box * 0.92) continue;
+      for (const q of comp) keep[q] = 1;
+      any = true;
+    }
+    if (!any) return null;
+    // a margin for its rim and soft shadow, then a soft edge
+    const r = Math.max(2, Math.round(Math.max(gw, gh) * 0.007));
+    const grown = runMax(runMax(keep, gw, gh, r, true, false), gw, gh, r, true, true);
+    const soft = boxSmooth(grown, gw, gh, r * 0.5);
+    return resizePlane(soft, gw, gh, w, h);
+  }
+
+  /**
    * documents: the paper's own colour and shadows divided out. Magic (auto): white paper, black text,
    * livelier colours. Enhance: cleaner and crisper but closer to the photo. Lighten: just even, bright light.
    */
   function docFilter(img: PixelImage, mode: 'auto' | 'gray' | 'bw' | 'lighten' | 'enhance'): void {
     const w = img.w, h = img.h, d = img.data, n = w * h;
+    // Magic: a finger or hand at the edge is taken off the page (read before the pixels change)
+    const EO = mode === 'auto' ? edgeObjects(img) : null;
     const P = paperPlanes(img);
     // 1 / fine shading per pixel (creases, folds, hard shadow edges)
     const FS = fineShade(img, P);
@@ -936,7 +990,7 @@ export function scanKernels(): Kernels {
     const lut = new Float32Array(LN);
     // black point from the darkest ink, white a little below the paper (so shadows and grain vanish)
     const ink = percentile(hist, hn, 0.004) / 800;
-    const black = mode === 'lighten' ? 0 : mode === 'enhance' ? Math.min(0.3, ink * 0.75) : Math.min(0.42, ink);
+    const black0 = mode === 'lighten' ? 0 : mode === 'enhance' ? Math.min(0.3, ink * 0.75) : Math.min(0.42, ink);
     // white just below where the paper's own brightness tails off (after the shading is divided out the
     // paper is a narrow peak near 1): pale rules, light tints and faint print stay, grain goes
     let peak = 640, pv = 0;
@@ -944,8 +998,11 @@ export function scanKernels(): Kernels {
     let lo = peak;
     while (lo > 560 && hist[lo] > pv * 0.12) lo--;
     const paperLo = lo / 800;
-    const white = mode === 'lighten' ? 0.97 : mode === 'enhance' ? Math.min(0.95, Math.max(0.9, paperLo + 0.02)) : Math.min(0.93, Math.max(0.86, paperLo - 0.005));
-    const gamma = mode === 'lighten' ? 0.92 : mode === 'enhance' ? 1.06 : 1.12;
+    // Enhance keeps a hint of the paper's tone; Magic clips the paper to white a little earlier (creases,
+    // grain and grey tints go) and pulls the print to a deep black, faint print included
+    const white = mode === 'lighten' ? 0.97 : mode === 'enhance' ? Math.min(1.0, Math.max(0.95, paperLo + 0.07)) : mode === 'auto' ? Math.min(0.9, Math.max(0.84, paperLo - 0.025)) : Math.min(0.93, Math.max(0.86, paperLo - 0.005));
+    const black = mode === 'auto' ? Math.min(0.55, black0 + 0.22 * (white - black0)) : black0;
+    const gamma = mode === 'lighten' ? 0.92 : mode === 'enhance' ? 1.0 : mode === 'auto' ? 1.35 : 1.12;
     const sat = mode === 'lighten' ? 1.05 : mode === 'enhance' ? 1.18 : 1.3;
     for (let k = 0; k < LN; k++) {
       let t = (k / LS - black) / (white - black); t = t < 0 ? 0 : t > 1 ? 1 : t;
@@ -1057,7 +1114,10 @@ export function scanKernels(): Kernels {
         d[i] = yy + cr; d[i + 2] = yy + cb; d[i + 1] = yy - (0.299 * cr + 0.114 * cb) / 0.587;
       }
     }
-    void n;
+    if (EO) for (let p = 0, i = 0; p < n; p++, i += 4) {
+      const a = EO[p] > 0.98 ? 1 : EO[p];
+      if (a > 0.01) { d[i] += (255 - d[i]) * a; d[i + 1] += (255 - d[i + 1]) * a; d[i + 2] += (255 - d[i + 2]) * a; }
+    }
   }
 
   /** photos, cards and passports: natural colours, balanced levels, no paper flattening */
@@ -1197,7 +1257,7 @@ export function scanKernels(): Kernels {
       if (filter === 'color') colorFilter(img);
       else docFilter(img, filter);
       if (filter === 'enhance') clarity(img, 0.28);
-      if (filter !== 'bw') unsharp(img, 1.0, blur > 1.1 ? 0.35 : filter === 'lighten' ? 0.4 : 0.6);
+      if (filter !== 'bw') unsharp(img, 1.0, blur > 1.1 ? (filter === 'auto' ? 0.5 : 0.35) : filter === 'lighten' ? 0.4 : filter === 'auto' ? 0.8 : 0.6);
     }
     const out = turn(img, rot);
     roundCorners(out, radius);
