@@ -53,8 +53,8 @@ export function sheetsOf(pages: ScanPage[], opts: Pick<PdfOpts, 'cardLayout'>): 
 export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Uint8Array> {
   const { PDFDocument, StandardFonts } = await import('pdf-lib');
   const doc = await PDFDocument.create();
-  doc.setProducer('PDF Editor (scanned on this device)');
-  doc.setCreator('PDF Editor');
+  doc.setProducer('Paginka (scanned on this device)');
+  doc.setCreator('Paginka');
   doc.setTitle('Scan');
   const sheets = sheetsOf(pages, opts);
   const ocr = opts.ocr ? await import('../ocr') : null;

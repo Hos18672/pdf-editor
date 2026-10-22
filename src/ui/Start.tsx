@@ -129,7 +129,7 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onR
       <div className="s2-glow" aria-hidden="true" />
       <header className="s2-nav">
         <LogoMark />
-        <span className="s2-brand">PDF Editor</span>
+        <span className="s2-brand">Paginka</span>
         <span className="sp" />
         {mobile
           ? <button className="s2-navbtn" onClick={onTools} aria-label="All tools"><Icon name="tools" size={18} /><span className="lbl">Tools</span></button>

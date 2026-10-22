@@ -59,7 +59,7 @@ jobs:
         id: apk
         run: |
           v=$(node -p "require('./app.json').expo.version")
-          out="PDF-Editor-$v-build${{ github.run_number }}.apk"
+          out="Paginka-$v-build${{ github.run_number }}.apk"
           cp android/app/build/outputs/apk/release/app-release.apk "$out"
           echo "file=$out" >> "$GITHUB_OUTPUT"
           echo "version=$v" >> "$GITHUB_OUTPUT"
@@ -78,5 +78,5 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="android-build-${{ github.run_number }}"; fi
           gh release create "$tag" "${{ steps.apk.outputs.file }}" \
             --target "${GITHUB_SHA}" \
-            --title "PDF Editor ${{ steps.apk.outputs.version }} (Android, build ${{ github.run_number }})" \
+            --title "Paginka ${{ steps.apk.outputs.version }} (Android, build ${{ github.run_number }})" \
             --notes "Android app (APK) built from ${GITHUB_SHA::7}. On your phone: download the .apk, open it and allow installing from this source."

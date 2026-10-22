@@ -129,7 +129,7 @@ const esc = (s: string) => s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace
 export function toIcs(events: { title: string; date: Date; time: string | null; note: string; remindDays: number }[]): string {
   const now = new Date();
   const stamp = `${ymd(now)}T${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}00Z`;
-  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//PDF Editor//Deadline finder//EN', 'CALSCALE:GREGORIAN'];
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Paginka//Deadline finder//EN', 'CALSCALE:GREGORIAN'];
   events.forEach((e, i) => {
     const next = new Date(e.date); next.setDate(next.getDate() + 1);
     lines.push('BEGIN:VEVENT', `UID:${stamp}-${i}@pdf-editor`, `DTSTAMP:${stamp}`);

@@ -111,7 +111,11 @@ export default function EditorApp(host: HostProps) {
 
   useEffect(() => {
     loadPdfjs().catch(() => null);
-    if (!host.isNative) registerServiceWorker();
+    if (!host.isNative) {
+      registerServiceWorker();
+      // the browser tab and search results say what the app does
+      document.title = 'Paginka – PDF Editor & Scanner';
+    }
     const t = setTimeout(() => { loadScreens().catch(() => null); }, 600);
     return () => clearTimeout(t);
   }, [host.isNative]);
