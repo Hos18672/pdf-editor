@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
+import { appBase } from './assets';
 import type { Theme } from './hooks';
+import { ago, listRecent, onRecentChange, removeRecent, type RecentDoc } from './recent';
 
 export type OpenState =
   | { kind: 'idle' }
@@ -20,9 +22,9 @@ export function ThemeButton({ theme, onToggle, round }: { theme: Theme; onToggle
   );
 }
 
-/** The app mark: navy tile, white sheet, yellow dot. */
+/** The app mark: a page with a PDF label, a scan line and a pen. */
 export function LogoMark({ size = 40 }: { size?: number }) {
-  return <span className="logo2" style={{ width: size, height: size }} aria-hidden="true"><i /><b /></span>;
+  return <span className="logo3" style={{ width: size, height: size }} aria-hidden="true"><img src={appBase() + 'logo.png'} alt="" draggable={false} /></span>;
 }
 
 const QUICK: [QuickAction, string, string, string][] = [
@@ -34,10 +36,18 @@ const QUICK: [QuickAction, string, string, string][] = [
   ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
 ];
 
-export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, theme, onTheme, mobile, isNative }: {
+export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onRecent, theme, onTheme, mobile, isNative }: {
   state: OpenState; onFile: (f: File) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
-  onQuick: (q: QuickAction) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
+  onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
 }) {
+  const [recent, setRecent] = useState<RecentDoc[]>([]);
+  useEffect(() => {
+    let alive = true;
+    const load = () => listRecent().then((l) => { if (alive) setRecent(l); });
+    load();
+    const off = onRecentChange(load);
+    return () => { alive = false; off(); };
+  }, []);
   const [over, setOver] = useState(false);
   const [pw, setPw] = useState('');
   const depth = useRef(0);
@@ -131,7 +141,7 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, the
         <div className="s2-copy">
           <div className="s2-pill"><span className="lk"><Icon name="lock" size={13} /></span>Files never leave your device</div>
           <h1>Edit any PDF.<br /><span className="mk">Right here.</span></h1>
-          <p className="s2-lead">Retype existing text in its original font, sign, fill forms, scan, merge and convert. All in your browser, all offline.</p>
+          <p className="s2-lead">{mobile ? 'Change text in its own font, sign, fill, scan and merge. Offline, on your phone.' : 'Retype existing text in its original font, sign, fill forms, scan, merge and convert. All in your browser, all offline.'}</p>
           {card}
           {idle && !over && (
             <div className="s2-chips" role="list" aria-label="Quick tools">
@@ -143,8 +153,27 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, the
             </div>
           )}
         </div>
-        <Demo />
+        {!mobile && <Demo />}
       </main>
+      {idle && !over && recent.length > 0 && (
+        <section className="s2-recent" aria-label="Recent documents">
+          <div className="rh"><h2>Recent</h2><span className="rs">Kept on this device only</span></div>
+          <div className="rl">
+            {recent.map((d) => (
+              <div key={d.id} className={`rc${d.hasBytes ? '' : ' off'}`}>
+                <button className="ro" onClick={() => d.hasBytes && onRecent(d)} disabled={!d.hasBytes} aria-label={`Open ${d.name}`}>
+                  <span className="rt">{d.thumb ? <img src={d.thumb} alt="" draggable={false} /> : <Icon name="file-pdf:duotone" size={26} />}</span>
+                  <span className="ri">
+                    <b title={d.name}>{d.name.replace(/\.pdf$/i, '')}</b>
+                    <span><i className={`rk ${d.kind}`}>{d.kind === 'edited' ? 'Edited' : d.kind === 'scanned' ? 'Scanned' : 'Opened'}</i>{d.pages} {d.pages === 1 ? 'page' : 'pages'} · {ago(d.at)}</span>
+                  </span>
+                </button>
+                <button className="rx" onClick={() => removeRecent(d.id)} aria-label={`Remove ${d.name} from the list`} title="Remove from the list"><Icon name="x" size={16} /></button>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
     </div>
   );
 }

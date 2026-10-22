@@ -1,6 +1,6 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { EditorObject, FormValues, M } from '../engine/types';
+import type { ClonedText, EditorObject, FormValues, M } from '../engine/types';
 import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
@@ -56,6 +56,8 @@ interface Props {
   preview?: { pdf: any; key: string };
   /** signature of this page's current text edits ('' = none) */
   editKey: string;
+  /** a scan line's new text as a picture of the page's letters, ready to show */
+  cloneFor?: (key: string) => { url: string; img: ClonedText } | undefined;
   fields: FormField[];
   forms: FormValues;
   activeField: string | null;
@@ -321,6 +323,7 @@ export function PageView(p: Props) {
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
               edit={p.edits[r.key]} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={live}
+              clone={p.edits[r.key] ? p.cloneFor?.(r.key) : undefined}
               local={local} onNext={() => p.onNextRun(r.key)}
               onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
               onCommit={(raw) => {
@@ -408,8 +411,8 @@ export function lineRooms(runs: TextRun[]): Record<string, { up: number; down: n
   return out;
 }
 
-function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, live, local, onStart, onCommit, onNext }: {
-  live?: boolean; selected: boolean; onNext: () => void;
+function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, live, clone, local, onStart, onCommit, onNext }: {
+  live?: boolean; selected: boolean; onNext: () => void; clone?: { url: string; img: ClonedText };
   run: TextRun; vm: M; zoom: number; font?: FontInfo; color?: { bg: string; fg: string }; edit?: RunEdit;
   room?: { up: number; down: number };
   editing: boolean; onStart: () => void; onCommit: (text: string) => void;
@@ -491,6 +494,23 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
     transformOrigin: `0 ${b.asc * zoom}px`,
   };
 
+  // a scan line: the new letters (made of the page's own) over the old ones, as it will be saved
+  if (clone && edit && !editing) {
+    const c = clone.img, h = b.h;
+    const pad = h * 0.15;
+    const down = Math.min(h * 0.42, room?.down ?? h * 0.42), up = Math.min(h * 1.05, room?.up ?? h * 1.05);
+    const l = Math.min(0, c.inkX0 * h) - pad, r = Math.max(b.w, c.inkX1 * h) + pad, dy = c.dy * h;
+    const z = zoom, oy = b.asc; // children are placed from the baseline start
+    return (
+      <div className={`run changed cloned${selected ? ' selected' : ''}`} data-key={run.key}
+        style={{ ...style, width: Math.max(b.w, c.w - c.left) * z }}
+        title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
+        <div className="cover" style={{ background: bg, left: l * z, width: (r - l) * z, top: (oy + dy - up) * z, height: (up + down) * z, right: 'auto', bottom: 'auto' }} />
+        <img className="clone" src={clone.url} alt="" draggable={false}
+          style={{ left: -c.left * z, top: (oy + c.below - c.h) * z, width: c.w * z, height: c.h * z }} />
+      </div>
+    );
+  }
   if ((!edit || live) && !editing) {
     return <div className={`run${selected ? ' selected' : ''}${edit ? ' changed' : ''}`} data-key={run.key} style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }} />;
   }
@@ -602,9 +622,10 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   onDelete: () => void; onDuplicate: () => void; onDrag: (d: { x: number; y: number } | null) => void;
   snap: Snap; page: PageInfo; onGuides: (g: { v: number[]; h: number[] }) => void; mobile: boolean; onMore: () => void;
 }) {
-  type Mode = 'move' | 'grip' | 'resize' | 'end' | 'pending';
+  type Mode = 'move' | 'grip' | 'resize' | 'end' | 'start' | 'rotate' | 'pending';
   const drag = useRef<null | { mode: Mode; sx: number; sy: number; cx: number; cy: number; o: EditorObject; moved: boolean }>(null);
   const [dragging, setDragging] = useState(false);
+  const [turning, setTurning] = useState<number | null>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const objRef = useRef<HTMLDivElement>(null);
@@ -615,7 +636,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   const bw = isLine ? Math.abs(o.x2 - o.x) : o.w;
   const bh = isLine ? Math.abs(o.y2 - o.y) : o.h;
 
-  const start = (mode: 'move' | 'grip' | 'resize' | 'end') => (e: React.PointerEvent) => {
+  const start = (mode: 'move' | 'grip' | 'resize' | 'end' | 'start' | 'rotate') => (e: React.PointerEvent) => {
     if (e.button !== 0 || gesture.multi) return;
     e.stopPropagation();
     const pt = local(e);
@@ -641,7 +662,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     e.preventDefault();
     // touch: start only after 4px so taps never nudge things
     if (!d.moved && Math.hypot(e.clientX - d.cx, e.clientY - d.cy) < 4) return;
-    onDrag({ x: e.clientX, y: e.clientY });
+    if (d.mode !== 'rotate') onDrag({ x: e.clientX, y: e.clientY });
     const pt = local(e);
     let dx = pt.x - d.sx, dy = pt.y - d.sy;
     const first = !d.moved;
@@ -666,21 +687,42 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       onChange(patch, !first);
     } else if (d.mode === 'end' && s.type === 'line') {
       onChange({ x2: s.x2 + dx, y2: s.y2 + dy } as any, !first);
+    } else if (d.mode === 'start' && s.type === 'line') {
+      onChange({ x: s.x + dx, y: s.y + dy } as any, !first);
+    } else if (d.mode === 'rotate' && s.type !== 'line') {
+      // the handle sits above the box: pointing straight up is 0°; snaps to every 15°
+      const cx = s.x + s.w / 2, cy = s.y + s.h / 2;
+      let a = (Math.atan2(pt.y - cy, pt.x - cx) * 180) / Math.PI + 90;
+      const near = Math.round(a / 15) * 15;
+      if (Math.abs(a - near) < 4) a = near;
+      a = ((Math.round(a * 10) / 10) % 360 + 540) % 360 - 180;
+      setTurning(a);
+      onChange({ rot: a } as any, !first);
     } else {
-      let w = Math.max(8, s.w + dx), h = Math.max(8, s.h + dy);
+      // resize in the box's own (turned) frame, keeping its top-left corner where it is
+      const r = ((s.rot ?? 0) * Math.PI) / 180, c = Math.cos(r), n = Math.sin(r);
+      const lx = dx * c + dy * n, ly = -dx * n + dy * c;
+      let w = Math.max(8, s.w + lx), h = Math.max(8, s.h + ly);
       const keep = s.type === 'text' || s.type === 'mark' || ((s.type === 'image' || s.type === 'signature') && !e.altKey);
       if (keep) {
         const k = Math.max(w / s.w, 8 / s.h);
         w = s.w * k; h = s.h * k;
-        if (s.type === 'text') { onChange({ w, h, size: Math.max(4, s.size * k) } as any, !first); return; }
       }
-      onChange({ w, h }, !first);
+      let pos = {};
+      if (r) {
+        const px = s.x + s.w / 2 + (-s.w / 2) * c - (-s.h / 2) * n, py = s.y + s.h / 2 + (-s.w / 2) * n + (-s.h / 2) * c;
+        const ncx = px + (w / 2) * c - (h / 2) * n, ncy = py + (w / 2) * n + (h / 2) * c;
+        pos = { x: ncx - w / 2, y: ncy - h / 2 };
+      }
+      if (s.type === 'text') { onChange({ w, h, ...pos, size: Math.max(4, s.size * (w / s.w)) } as any, !first); return; }
+      onChange({ w, h, ...pos }, !first);
     }
   };
   const end = () => {
     const d = drag.current;
     drag.current = null;
     setDragging(false);
+    setTurning(null);
     onDrag(null);
     onGuides({ v: [], h: [] });
     if (d && d.mode === 'move' && !d.moved && o.type === 'text' && selected) onEditing(true);
@@ -695,7 +737,11 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     const wrap = obj?.closest('.canvasWrap') as HTMLElement | null;
     if (!selected || !el || !obj || !wrap) return;
     const wr = wrap.getBoundingClientRect();
-    const r = obj.getBoundingClientRect();
+    const r0 = obj.getBoundingClientRect();
+    // the turn handle above the box belongs to it too (the toolbar must not cover it)
+    const hr = obj.querySelector('.rothandle')?.getBoundingClientRect();
+    const r = hr ? { left: Math.min(r0.left, hr.left), right: Math.max(r0.right, hr.right), top: Math.min(r0.top, hr.top), bottom: Math.max(r0.bottom, hr.bottom), width: 0, height: 0 } : r0;
+    if (hr) { r.width = r.right - r.left; r.height = r.bottom - r.top; }
     const bw = el.offsetWidth, bh = el.offsetHeight;
     const vw = window.innerWidth;
     const minL = Math.max(4, wr.left + 8), maxL = Math.min(vw - 4, wr.right - 8) - bw;
@@ -735,7 +781,17 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   });
   useEffect(() => { if (editing) taRef.current?.focus({ preventScroll: true }); }, [editing]);
 
-  const style: React.CSSProperties = { left: bx * zoom, top: by * zoom, width: Math.max(bw * zoom, 1), height: Math.max(bh * zoom, 1) };
+  const rot = !isLine && o.rot ? o.rot : 0;
+  const style: React.CSSProperties = { left: bx * zoom, top: by * zoom, width: Math.max(bw * zoom, 1), height: Math.max(bh * zoom, 1), transform: rot ? `rotate(${rot}deg)` : undefined };
+  /** a quarter turn: boxes turn around their centre, lines around their middle */
+  const quarter = () => {
+    if (o.type === 'line') {
+      const mx = (o.x + o.x2) / 2, my = (o.y + o.y2) / 2;
+      const t = (x: number, y: number) => [mx - (y - my), my + (x - mx)];
+      const [x1, y1] = t(o.x, o.y), [x2, y2] = t(o.x2, o.y2);
+      onChange({ x: x1, y: y1, x2, y2 } as any, false);
+    } else onChange({ rot: ((((o.rot ?? 0) + 90) % 360) + 540) % 360 - 180 } as any, false);
+  };
   let inner: React.ReactNode = null;
   switch (o.type) {
     case 'text': {
@@ -831,6 +887,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       {o.type === 'text' && !editing && (
         <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="pencil" size={18} /></button>
       )}
+      <button type="button" aria-label="Turn 90°" title="Turn 90°" onClick={quarter}><Icon name="arrow-clockwise" size={18} /></button>
       <button type="button" aria-label="Duplicate" title="Duplicate (Ctrl+D)" onClick={onDuplicate}><Icon name="copy" size={18} /></button>
       <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={18} /></button>
       {mobile && !editing && o.type !== 'whiteout' && (
@@ -849,9 +906,20 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
           <div className="handle" aria-label="Resize" onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><Icon name="resize" size={10} /></div>
         </>
       )}
+      {selected && !isLine && !editing && (
+        <div className="rothandle" role="slider" aria-label="Turn" aria-valuenow={Math.round(o.rot ?? 0)} title="Drag to turn"
+          onPointerDown={start('rotate')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+          <Icon name="arrow-clockwise:bold" size={13} />
+          {turning !== null && <span className="rotval">{Math.round(turning)}°</span>}
+        </div>
+      )}
       {selected && isLine && (
-        <div className="handle" style={{ left: (o.x2 - bx) * zoom - 9, top: (o.y2 - by) * zoom - 9, right: 'auto', bottom: 'auto', cursor: 'move' }}
-          onPointerDown={start('end')} onPointerMove={move} onPointerUp={end} />
+        <>
+          <div className="handle" style={{ left: (o.x - bx) * zoom - 9, top: (o.y - by) * zoom - 9, right: 'auto', bottom: 'auto', cursor: 'move' }}
+            onPointerDown={start('start')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
+          <div className="handle" style={{ left: (o.x2 - bx) * zoom - 9, top: (o.y2 - by) * zoom - 9, right: 'auto', bottom: 'auto', cursor: 'move' }}
+            onPointerDown={start('end')} onPointerMove={move} onPointerUp={end} onPointerCancel={end} />
+        </>
       )}
     </div>
   );

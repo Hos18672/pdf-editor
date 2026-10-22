@@ -37,9 +37,9 @@ const stamp = () => {
  * The document scanner: camera (or photos) → automatic crop and straightening → clean-up filters →
  * a PDF at real paper size, optionally searchable. Everything runs on the device.
  */
-export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
+export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onSaved }: {
   host: HostProps; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
-  onClose: () => void; onOpenInEditor: (name: string, bytes: Uint8Array) => void;
+  onClose: () => void; onOpenInEditor: (name: string, bytes: Uint8Array) => void; onSaved?: (name: string, bytes: Uint8Array) => void;
 }) {
   const mobile = bp === 'mobile';
   const [mode, setModeState] = useState<ScanMode>(readMode);
@@ -257,6 +257,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor }: {
     try {
       const bytes = await build();
       await saveFile(host, bytes, fileName, 'application/pdf', toast);
+      onSaved?.(fileName, bytes);
       setSaved(true); setSheetOpen(false);
       return true;
     } catch (e) {

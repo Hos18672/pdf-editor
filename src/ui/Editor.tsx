@@ -16,7 +16,7 @@ import { scanStyles } from './scanStyle';
 import { ConfirmClose } from './ConfirmClose';
 import { useBack } from './back';
 import { cloneLineText, pageGlyphs, PageCtx } from './scanGlyphs';
-import type { EditorObject, TextEdit, FontFamily } from '../engine/types';
+import type { EditorObject, TextEdit, FontFamily, ClonedText } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop } from './hooks';
@@ -80,6 +80,8 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
     { t: 'pages', label: 'Pages', icon: 'squares-four', key: 'P' }] },
 ];
 const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
+/** phone: every tool in the bottom bar, most used first (it scrolls sideways) */
+const DOCK: RailT[] = ['edit', 'text', 'sign', 'highlight', 'draw', 'shapes', 'whiteout', 'image', 'fill', 'pages'];
 const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line'];
 
 // phone dock: the 4 most recently used tools (slots stay put; a new tool replaces the least recent)
@@ -109,11 +111,13 @@ const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', '
 /** What the editor opens with when started from the tools page. */
 export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages';
 
-export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start }: {
+export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onSaved }: {
   host: HostProps; file: { name: string; bytes: Uint8Array }; pdf: any; infos: PageInfo[];
   hist: ReturnType<typeof useHistory>; onClose: () => void; onTools: () => void;
   theme: Theme; onTheme: () => void; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
   start?: EditorStart;
+  /** the edited PDF was saved (for the recent documents list) */
+  onSaved?: (bytes: Uint8Array) => void;
 }) {
   const { snap, commit } = hist;
   // looks of scanned lines belong to this document
@@ -125,6 +129,18 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
+  // the list of pages on the right: open by default on big screens (and remembered there)
+  const [strip, setStripRaw] = useState<boolean>(() => {
+    if (bp !== 'desktop' && bp !== 'large') return false;
+    try { return localStorage.getItem('pe-strip') !== '0'; } catch { return true; }
+  });
+  const setStrip = (v: boolean | ((x: boolean) => boolean)) => setStripRaw((cur) => {
+    const n = typeof v === 'function' ? v(cur) : v;
+    if (bp === 'desktop' || bp === 'large') { try { localStorage.setItem('pe-strip', n ? '1' : '0'); } catch { /* fine */ } }
+    return n;
+  });
+  // phone: the bottom bar keeps the chosen tool in view
+  const dockRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [pageData, setPageData] = useState<Record<number, PageData>>({});
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
@@ -397,11 +413,35 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   };
 
   const currentPage = () => {
+    // the page under the upper middle of the view
+    const wrap = wrapRef.current;
+    if (wrap) {
+      const r = wrap.getBoundingClientRect(), y = r.top + r.height * 0.4;
+      let src = -1, bd = Infinity;
+      wrap.querySelectorAll<HTMLElement>('.pageOuter').forEach((el) => {
+        const b = el.getBoundingClientRect();
+        const d = y < b.top ? b.top - y : y > b.bottom ? y - b.bottom : 0;
+        if (d < bd) { bd = d; src = +(el.dataset.src ?? -1); }
+      });
+      if (src >= 0) return src;
+    }
     let best = snap.pages[0]?.src ?? 0;
     let r = -1;
     for (const p of snap.pages) if ((ratios.current[p.src] ?? 0) > r) { r = ratios.current[p.src] ?? 0; best = p.src; }
     return best;
   };
+  const curRef = useRef(curPage);
+  curRef.current = curPage;
+  useEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    let raf = 0;
+    const fn = () => { cancelAnimationFrame(raf); raf = requestAnimationFrame(() => { const c = currentPage(); if (c !== curRef.current) setCurPage(c); }); };
+    wrap.addEventListener('scroll', fn, { passive: true });
+    fn();
+    return () => { wrap.removeEventListener('scroll', fn); cancelAnimationFrame(raf); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.pages, zoom]);
 
   const placeStamp = (st: Stamp, type: 'signature' | 'image', field?: FormField) => {
     const page = field ? field.page : currentPage();
@@ -480,21 +520,89 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const c = ctxOf(e.page);
     if (!c) return Promise.resolve(null);
     return cloneLineText(c, e.key, e.text, {
-      sizeScale: e.sizeScale, color: e.color, family: e.scan?.family,
+      sizeScale: e.sizeScale, color: e.color, family: e.scan?.family, stretch: e.scan?.stretch,
       more: () => Promise.all([e.page - 1, e.page + 1, e.page - 2, e.page + 2].map(ctxOf).filter((x): x is PageCtx => !!x).map(pageGlyphs)),
     });
   };
 
+  // ----- edits on scans: shown straight away as the new letters over the page (no re-written PDF) -----
+  // pages whose text is an invisible layer over a picture (an OCR'd scan)
+  const [hiddenPages, setHiddenPages] = useState<Set<number>>(() => new Set());
+  const checkedPages = useRef(new Set<number>());
+  const checkHidden = (src: number) => {
+    if (checkedPages.current.has(src)) return;
+    checkedPages.current.add(src);
+    (async () => {
+      try {
+        const OPS = (window as any).pdfjsLib?.OPS ?? {};
+        const ol = await (await pdf.getPage(src + 1)).getOperatorList();
+        let hidden = 0, shown = 0, img = false;
+        ol.fnArray.forEach((fn: number, i: number) => {
+          if (fn === OPS.setTextRenderingMode) { const m = ol.argsArray[i]?.[0]; if (m === 3 || m === 7) hidden++; else shown++; }
+          else if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject || fn === OPS.paintInlineImageXObject) img = true;
+        });
+        if (img && hidden > 0 && hidden >= shown) setHiddenPages((s) => new Set(s).add(src));
+      } catch { /* not a scan */ }
+    })();
+  };
+  useEffect(() => {
+    if (editing?.includes(':')) checkHidden(+editing.split(':')[0]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing]);
+  const isScanKey = (key: string) => {
+    const page = +key.split(':')[0];
+    if (hiddenPages.has(page)) return true;
+    return pageData[page]?.runs.find((r) => r.key === key)?.fontName === 'ocr';
+  };
+  const [clones, setClones] = useState<Record<string, { sig: string; url: string; img: ClonedText }>>({});
+  const cloneSeq = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const scanEdits = textEdits(snap.edits).filter((e) => isScanKey(e.key));
+    const want = new Set(scanEdits.map((e) => e.key));
+    setClones((c) => {
+      const gone = Object.keys(c).filter((k) => !want.has(k));
+      if (!gone.length) return c;
+      const n = { ...c };
+      for (const k of gone) { URL.revokeObjectURL(n[k].url); delete n[k]; }
+      return n;
+    });
+    for (const e of scanEdits) {
+      const sig = JSON.stringify([e.text, e.sizeScale, e.color]);
+      if (clones[e.key]?.sig === sig) continue;
+      const seq = (cloneSeq.current[e.key] = (cloneSeq.current[e.key] ?? 0) + 1);
+      scanImage({ ...e, ocr: true }).then((img) => {
+        if (cloneSeq.current[e.key] !== seq) return;
+        setClones((c) => {
+          const n = { ...c };
+          if (n[e.key]) URL.revokeObjectURL(n[e.key].url);
+          if (img) n[e.key] = { sig, url: URL.createObjectURL(new Blob([img.png as BlobPart], { type: 'image/png' })), img };
+          else delete n[e.key];
+          return n;
+        });
+      }).catch(() => null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap.edits, hiddenPages, pageData]);
+  useEffect(() => () => { for (const c of Object.values(clonesRef.current)) URL.revokeObjectURL(c.url); }, []);
+  const clonesRef = useRef(clones);
+  clonesRef.current = clones;
+  /** a scan line shows its picture only once it matches the current text */
+  const cloneFor = (key: string) => {
+    const c = clones[key], e = snap.edits[key];
+    return c && e && c.sig === JSON.stringify([e.text, e.sizeScale, e.color]) && isScanKey(key) ? c : undefined;
+  };
+
   // ----- live preview: re-write edited pages with the real fonts and show that -----
+  // (scan lines are drawn over the page instead, see above)
   const editKeyOf = (src: number) => {
-    const list = Object.entries(snap.edits).filter(([k]) => k.startsWith(src + ':')).sort(([a], [b]) => (a < b ? -1 : 1));
+    const list = Object.entries(snap.edits).filter(([k]) => k.startsWith(src + ':') && !isScanKey(k)).sort(([a], [b]) => (a < b ? -1 : 1));
     return list.length ? JSON.stringify(list) : '';
   };
   const [preview, setPreview] = useState<{ pdf: any; keys: Record<number, string> } | null>(null);
   const previewSeq = useRef(0);
   useEffect(() => {
     const seq = ++previewSeq.current;
-    const edits = textEdits(snap.edits);
+    const edits = textEdits(snap.edits).filter((e) => !isScanKey(e.key));
     if (!edits.length) { setPreview(null); return; }
     const keys: Record<number, string> = {};
     for (const e of edits) keys[e.page] = editKeyOf(e.page);
@@ -514,7 +622,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap.edits]);
+  }, [snap.edits, hiddenPages]);
 
   // ----- export -----
   const editCount = Object.keys(snap.edits).length + snap.objects.length + Object.keys(snap.forms).length;
@@ -549,6 +657,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       setBusy(null);
       await saveFile(host, bytes, name, 'application/pdf', toast);
       savedSnap.current = snap;
+      onSaved?.(bytes);
       return true;
     } catch (e: any) {
       console.error(e);
@@ -772,7 +881,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (!flyout) return;
     const down = (e: PointerEvent) => {
       const t = e.target as HTMLElement;
-      if (!t.closest?.('.flyout2, .rail, .dock2, .cp-scrim')) setFlyout(null);
+      if (!t.closest?.('.flyout2, .rail, .dock3, .cp-scrim')) setFlyout(null);
     };
     document.addEventListener('pointerdown', down, true);
     return () => document.removeEventListener('pointerdown', down, true);
@@ -882,6 +991,13 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   const mobileEditing = mobile && editing && (editing.includes(':') || snap.objects.find((o) => o.id === editing)?.type === 'text');
   const fieldNav = !desk && tool === 'fill' && activeField && fillable.length > 0;
+  useEffect(() => {
+    const el = dockRef.current?.querySelector<HTMLElement>('.dk3.on');
+    const box = dockRef.current;
+    if (!el || !box) return;
+    const l = el.offsetLeft, r = l + el.offsetWidth;
+    if (l < box.scrollLeft + 8 || r > box.scrollLeft + box.clientWidth - 8) box.scrollTo({ left: l - (box.clientWidth - el.offsetWidth) / 2, behavior: 'smooth' });
+  }, [tool, view, mobile]);
   const sheetObj = sheetFor ? snap.objects.find((o) => o.id === sheetFor) : undefined;
 
   // phone / browser back: finish typing, then close what's open, then leave the document
@@ -923,6 +1039,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             {desk && <button className="ibtn" onClick={() => zoomTo(fitZoom())} aria-label="Fit width" title="Fit width"><Icon name="fit" size={16} /></button>}
           </div>
         )}
+        {!mobile && <button className={`ibtn${strip ? ' on' : ''}`} onClick={() => setStrip((v) => !v)} aria-pressed={strip} aria-label="Pages panel" title="Pages panel"><Icon name="sidebar-simple" size={20} weight={strip ? 'fill' : 'regular'} /></button>}
         {!mobile && <button className="ibtn" onClick={onTools} aria-label="All tools" title="All tools: combine, extract, convert"><Icon name="dots-nine" size={20} /></button>}
         {!mobile && <ThemeButton theme={theme} onToggle={onTheme} />}
         {mobile
@@ -948,17 +1065,6 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
               </div>
             ))}
           </nav>
-        )}
-        {large && view === 'doc' && (
-          <aside className="thumbcol" aria-label="Pages">
-            <div className="kicker">Pages</div>
-            {snap.pages.map((p, i) => (
-              <button key={p.src} className={curPage === p.src ? 'on' : ''} onClick={() => goToPage(p.src)} aria-label={`Go to page ${i + 1}`}>
-                <div className="tc"><Thumb pdf={preview && preview.keys[p.src] !== undefined ? preview.pdf : pdf} src={p.src} rotation={p.rotation} size={150} /></div>
-                {i + 1}
-              </button>
-            ))}
-          </aside>
         )}
         <div className="deskWrap">
           <div className="canvasWrap" ref={wrapRef}>
@@ -987,7 +1093,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                     at: tapAt?.src === p.src ? tapAt : null,
                   } : undefined}
                   onVisible={(src, r) => { ratios.current[src] = r; const c = currentPage(); if (c !== curPage) setCurPage(c); }}
-                  editKey={editKeyOf(p.src)}
+                  editKey={editKeyOf(p.src)} cloneFor={cloneFor}
                   onDragInfo={setDragInfo}
                   preview={preview && preview.keys[p.src] !== undefined ? { pdf: preview.pdf, key: preview.keys[p.src] } : undefined}
                   fields={fieldsByPage[p.src] ?? []} forms={snap.forms} activeField={activeField} fillMark={tool === 'fill' ? fillMark : null}
@@ -1033,6 +1139,17 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             </div>
           )}
         </div>
+        {strip && view === 'doc' && (
+          <PageStrip pages={snap.pages} cur={curPage} overlay={!desk}
+            pdfFor={(src) => (preview && preview.keys[src] !== undefined ? preview.pdf : pdf)}
+            onGo={(src) => { goToPage(src); if (mobile) setStrip(false); }} onClose={() => setStrip(false)}
+            onOrganize={() => { setStrip(false); railClick(RAIL.find((r) => r.t === 'pages')!); }} />
+        )}
+        {!desk && !strip && view === 'doc' && !mobileEditing && !fieldNav && (
+          <button className="pgtab" onClick={() => setStrip(true)} aria-label="Show all pages">
+            <Icon name="sidebar-simple" size={17} /><b>{Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1)}</b>/{snap.pages.length}
+          </button>
+        )}
         {desk && view === 'doc' && (
           <aside className="side" aria-label="Properties">
             {panel ?? <IdleProps changes={changes} onPick={pickChange} />}
@@ -1075,18 +1192,21 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         </SlimBar>
       )}
       {mobile && !mobileEditing && !(fieldNav) && (
-        <nav className="dock2" aria-label="Tools">
-          {recent.slots.map((t) => {
-            const r = RAIL.find((x) => x.t === t)!;
-            const on = railActive(r);
-            return (
-              <button key={r.t} className={`dk${on ? ' on' : ''}`} aria-pressed={on} aria-label={r.label} onClick={() => railClick(r)}>
-                <Icon name={r.icon} size={23} weight={on ? 'fill' : 'regular'} />{on && <span>{r.label}</span>}
-              </button>
-            );
-          })}
-          <button className={`dk${moreOpen ? ' open' : ''}`} aria-label="All tools" aria-haspopup="dialog" onClick={() => { setFlyout(null); setMoreOpen(true); }}>
-            <Icon name="dots-nine:bold" size={23} />
+        <nav className="dock3" aria-label="Tools">
+          <div className="dk-scroll" ref={dockRef}>
+            {DOCK.map((t) => {
+              const r = RAIL.find((x) => x.t === t)!;
+              const on = railActive(r);
+              return (
+                <button key={r.t} className={`dk3${on ? ' on' : ''}`} aria-pressed={on} onClick={() => railClick(r)} data-t={r.t}>
+                  <span className="ic"><Icon name={r.icon} size={22} weight={on ? 'fill' : 'regular'} /></span>{r.label}
+                </button>
+              );
+            })}
+          </div>
+          <span className="sep" aria-hidden />
+          <button className={`dk3 more${moreOpen ? ' on' : ''}`} aria-haspopup="dialog" onClick={() => { setFlyout(null); setMoreOpen(true); }}>
+            <span className="ic"><Icon name="dots-nine:bold" size={22} /></span>More
           </button>
         </nav>
       )}
@@ -1143,6 +1263,40 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         return <Loupe x={dragInfo.x} y={dragInfo.y} page={dragInfo.page} obj={obj} pdf={src} pageW={infos[dragInfo.page].w} pageH={infos[dragInfo.page].h} rotation={pg.rotation} zoom={zoom} />;
       })()}
     </div>
+  );
+}
+
+// ---------------- the list of pages on the right ----------------
+function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize }: {
+  pages: { src: number; rotation: number }[]; cur: number; overlay: boolean; pdfFor: (src: number) => any;
+  onGo: (src: number) => void; onClose: () => void; onOrganize: () => void;
+}) {
+  const list = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const box = list.current, el = box?.querySelector<HTMLElement>('.ps-it.on');
+    if (!box || !el) return;
+    if (el.offsetTop < box.scrollTop || el.offsetTop + el.offsetHeight > box.scrollTop + box.clientHeight) box.scrollTo({ top: el.offsetTop - box.clientHeight / 3, behavior: 'smooth' });
+  }, [cur]);
+  return (
+    <>
+      {overlay && <div className="ps-scrim" onClick={onClose} />}
+      <aside className={`pstrip${overlay ? ' ov' : ''}`} aria-label="Pages">
+        <div className="ps-h">
+          <b>Pages</b><span className="ps-c">{pages.length}</span>
+          <span style={{ flex: 1 }} />
+          <button className="ibtn" onClick={onOrganize} aria-label="Organize pages" title="Organize: reorder, rotate, delete"><Icon name="squares-four" size={18} /></button>
+          <button className="ibtn" onClick={onClose} aria-label="Hide pages" title="Hide"><Icon name="close" size={18} /></button>
+        </div>
+        <div className="ps-list" ref={list}>
+          {pages.map((p, i) => (
+            <button key={p.src} className={`ps-it${p.src === cur ? ' on' : ''}`} onClick={() => onGo(p.src)} aria-label={`Page ${i + 1}`} aria-current={p.src === cur ? 'page' : undefined}>
+              <span className="ps-th"><Thumb pdf={pdfFor(p.src)} src={p.src} rotation={p.rotation} size={130} /></span>
+              <span className="ps-n">{i + 1}</span>
+            </button>
+          ))}
+        </div>
+      </aside>
+    </>
   );
 }
 

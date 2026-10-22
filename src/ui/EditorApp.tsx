@@ -8,6 +8,7 @@ import { appBase } from './assets';
 import type { HostProps, ToastMsg, BusyMsg, EditorStart } from './Editor';
 import { Start, OpenState, type QuickAction } from './Start';
 import type { ToolId } from './Tools';
+import { recentBytes, saveRecent, type RecentKind } from './recent';
 
 // Only the start screen loads up front; the editor, tools and scanner arrive as separate chunks
 // (fetched in the background right after start-up, so opening a file doesn't wait for them).
@@ -119,7 +120,9 @@ export default function EditorApp(host: HostProps) {
     return () => clearTimeout(t);
   }, [toastMsg]);
 
-  const open = useCallback(async (name: string, raw: Uint8Array, password?: string) => {
+  // the open document's entry in the recent list
+  const recentId = useRef<string | null>(null);
+  const open = useCallback(async (name: string, raw: Uint8Array, password?: string, kind: RecentKind = 'opened', id?: string) => {
     pending.current = { name, bytes: raw };
     setOpenState({ kind: 'loading', name, progress: 0.05, detail: 'Loading the PDF engine…' });
     try {
@@ -143,6 +146,8 @@ export default function EditorApp(host: HostProps) {
       setFile({ name, bytes });
       hist.reset(list.map((_, i) => ({ src: i, rotation: 0 })));
       setOpenState({ kind: 'idle' });
+      recentId.current = id ?? null;
+      saveRecent({ id, name, kind, bytes, pdf: doc }).then((i) => { if (i) recentId.current = i; });
       setRoute({ name: 'editor', start: startAfterOpen.current });
       startAfterOpen.current = undefined;
       pending.current = null;
@@ -182,11 +187,13 @@ export default function EditorApp(host: HostProps) {
       {route.name === 'editor' && file && pdf ? (
         <Editor key={file.name + file.bytes.length} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
+          onSaved={(bytes) => { saveRecent({ id: recentId.current ?? undefined, name: file.name, kind: 'edited', bytes }).then((i) => { if (i) recentId.current = i; }); }}
           toast={setToastMsg} setBusy={setBusy} />
       ) : route.name === 'scan' ? (
         <Scanner host={host} bp={bp} toast={setToastMsg} setBusy={setBusy}
           onClose={() => setRoute(route.back === 'tools' ? { name: 'tools', tool: 'hub', back: 'home' } : { name: 'home' })}
-          onOpenInEditor={(name, bytes) => open(name, bytes)} />
+          onOpenInEditor={(name, bytes) => open(name, bytes, undefined, 'scanned')}
+          onSaved={(name, bytes) => { saveRecent({ name, kind: 'scanned', bytes }); }} />
       ) : route.name === 'tools' ? (
         <Tools initial={route.tool} bp={bp} host={host} toast={setToastMsg} setBusy={setBusy}
           current={file && pdf ? { name: file.name, bytes: file.bytes, pdf, pages: hist.snap.pages, changed: hist.past > 0 } : null}
@@ -198,7 +205,12 @@ export default function EditorApp(host: HostProps) {
       ) : (
         <Start state={openState} onFile={(f) => readFile(f)} onPick={pick} mobile={bp === 'mobile'}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
-          onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme} />
+          onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme}
+          onRecent={async (d) => {
+            const b = await recentBytes(d.id);
+            if (b) open(d.name, b, undefined, d.kind, d.id);
+            else setToastMsg({ msg: 'That file is no longer stored here', kind: 'err' });
+          }} />
       )}
       </Suspense>
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { readFile(e.target.files?.[0]); e.target.value = ''; }} />

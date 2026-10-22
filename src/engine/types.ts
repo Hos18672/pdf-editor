@@ -50,6 +50,8 @@ interface Base {
   w: number;
   h: number;
   opacity?: number;
+  /** clockwise turn around the box centre, degrees (lines turn their end points instead) */
+  rot?: number;
 }
 
 export type EditorObject =

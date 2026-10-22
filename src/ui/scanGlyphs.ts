@@ -8,7 +8,7 @@
 import type { TextRun } from '../engine/pdfText';
 import type { ClonedText, M } from '../engine/types';
 import { runBox } from './geometry';
-import { scanCss } from './scanStyle';
+import { scanCss, SCAN_FAMILIES } from './scanStyle';
 
 
 export interface PageCtx { pdf: any; src: number; info: { w: number; h: number; vm: M }; runs: TextRun[]; colors: Record<string, { bg: string; fg: string }> }
@@ -30,14 +30,25 @@ interface Line {
   peak: number;
   /** how soft the letters' edges are: half-tone pixels per edge pixel */
   edge: number;
+  /** ink heights of the line's capitals / small letters / ascenders (filled in from similar lines when missing) */
+  ref: Ref;
+  /** the printed baseline as a straight fit (scans are often a little skewed): y = fitY + slope · (x − fitX) */
+  slope: number; fitX: number; fitY: number;
+  /** this line's contrast, for ink measures comparable across lines */
+  contrast: number;
 }
+type Cls = 'cap' | 'x' | 'asc';
+type Ref = Record<Cls, number>;
 interface Gap { g: number; capH: number; sw: number }
-interface Sample { bmp: Bitmap; top: number; capH: number; sw: number }
+/** a letter seen on the page: `h` its ink height, `bot` where its ink ends below the baseline, `oy` the fringe above it */
+interface Sample { bmp: Bitmap; capH: number; sw: number; h: number; bot: number; oy: number; line: Line }
 interface PageGlyphs {
   k: number; layerH: Map<string, number>; lines: Map<string, Line>; samples: Map<string, Sample[]>;
   /** gaps between letters (× capital height), with the size and weight they were seen at */
   pair: Map<string, Gap[]>; right: Map<string, Gap[]>; left: Map<string, Gap[]>;
   letterGap: number; wordGap: number; sw: number;
+  /** per letter: how far its ink usually reaches below the baseline (× the line's x-height) */
+  depth: Map<string, number>;
 }
 
 const median = (a: number[]) => { if (!a.length) return NaN; const s = [...a].sort((x, y) => x - y); return s[s.length >> 1]; };
@@ -46,6 +57,11 @@ const lumOf = (r: number, g: number, b: number) => 0.299 * r + 0.587 * g + 0.114
 const hexRgb = (h: string): [number, number, number] => { const v = parseInt(h.replace('#', '').padEnd(6, '0').slice(0, 6), 16); return [(v >> 16) & 255, (v >> 8) & 255, v & 255]; };
 /** letters whose top is the cap / ascender height (no accents) */
 const TALL = /[ABDEFHIKLMNPRTXYZ0-9bdhkl]/;
+/** which height a letter is sized by */
+const CAP_REF = /^[ABDEFHIKLMNPRTUVWXYZ0-9]$/, X_REF = /^[acemnorsuvwxz]$/, ASC_REF = /^[bdfhkl]$/;
+const clsOf = (ch: string): Cls => (/\p{Ll}/u.test(ch) ? (/[bdfhklßt]/.test(ch) ? 'asc' : 'x') : 'cap');
+/** letters whose ink sits on the baseline (for fitting it) */
+const ON_BASE = /^[A-PR-Za-fhik-ortuvwxz0-9.:!?ÄÖÜäöü]$/;
 
 /** coverage that the darkest few percent of a bitmap's ink reach */
 function peakOf(b: Bitmap) {
@@ -68,6 +84,7 @@ function edgeOf(b: Bitmap) {
   return edge ? mid / edge : 1;
 }
 
+type Cluster = { x0: number; x1: number; y0: number; y1: number; ids: number[]; n: number };
 const cache = new WeakMap<object, Map<number, Promise<PageGlyphs | null>>>();
 
 export function pageGlyphs(ctx: PageCtx): Promise<PageGlyphs | null> {
@@ -92,9 +109,13 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
   const px = cx.getImageData(0, 0, W, H).data;
   canvas.width = canvas.height = 0;
 
-  const pg: PageGlyphs = { k, layerH: new Map(), lines: new Map(), samples: new Map(), pair: new Map(), right: new Map(), left: new Map(), letterGap: 0.12, wordGap: 0.42, sw: 0.14 };
-  const letterGaps: number[] = [], wordGaps: number[] = [], sws: number[] = [];
-  const pending: { line: Line; chars: { ch: string; bmp: Bitmap; top: number }[][]; sws: number[] }[] = [];
+  const pg: PageGlyphs = { k, layerH: new Map(), lines: new Map(), samples: new Map(), pair: new Map(), right: new Map(), left: new Map(), letterGap: 0.12, wordGap: 0.42, sw: 0.14, depth: new Map() };
+  const t0 = performance.now();
+  type Ch = { ch: string; bmp: Bitmap; h: number; bot: number; oy: number };
+  type Unit = { t0: number; tn: number; cs: Cluster[]; one: boolean };
+  const pending: { line: Line; chars: Ch[][]; units: Unit[] | null }[] = [];
+  const gapsPx: { a: string; b: string; px: number; line: Line; wi: number }[] = [];
+  const hist = new Uint32Array(256);
 
   for (const run of runs) {
     const b = runBox(run, info.vm);
@@ -110,14 +131,15 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
 
     // ink coverage in the band: 0 paper … 1 ink
     const bgL = lumOf(...hexRgb(colors[run.key].bg));
-    const dark: number[] = [];
+    hist.fill(0);
+    let nDark = 0;
     for (let y = by0; y < by1; y++) for (let x = bx0; x < bx1; x++) {
       const i = (y * W + x) * 4, L = lumOf(px[i], px[i + 1], px[i + 2]);
-      if (L < bgL - 30) dark.push(L);
+      if (L < bgL - 30) { hist[L | 0]++; nDark++; }
     }
-    if (dark.length < 20) continue;
-    dark.sort((a, z) => a - z);
-    const fgL = dark[Math.floor(dark.length * 0.1)];
+    if (nDark < 20) continue;
+    let fgL = 0;
+    for (let v = 0, acc = 0; v < 256; v++) { acc += hist[v]; if (acc > nDark * 0.1) { fgL = v; break; } }
     if (bgL - fgL < 50) continue;
     const t = new Float32Array(bw * bh);
     const inkSum = [0, 0, 0]; let inkN = 0;
@@ -172,8 +194,9 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
     // accents above capitals (Ä Ö Ü É): small shapes just above the line, over one of its letters
     {
       const body = mine.slice();
+      const inLine = new Set(mine);
       for (const c of comps) {
-        if (mine.includes(c) || c.n >= 0.08 * capH * capH) continue;
+        if (inLine.has(c) || c.n >= 0.08 * capH * capH) continue;
         const cy = (c.y0 + c.y1) / 2;
         if (cy < top - 0.4 * capH || cy >= top - 0.15 * capH) continue;
         const cx = (c.x0 + c.x1) / 2;
@@ -195,7 +218,6 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
 
     // letters: shapes that stack (i, j, umlauts, accents, %) form one letter
     mine.sort((a, z) => a.x0 - z.x0);
-    type Cluster = { x0: number; x1: number; y0: number; y1: number; ids: number[]; n: number };
     const cl: Cluster[] = [];
     for (const c of mine) {
       const last = cl[cl.length - 1];
@@ -216,41 +238,60 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
     }
 
     // coverage of some shapes (with a one-pixel fringe for their soft edges)
+    const mark = new Uint8Array(comps.length);
+    const own = (q: number) => { const l = lab[q]; return l >= 0 && mark[l] === 1; };
     const cut = (ids: number[], x0: number, y0: number, x1: number, y1: number): Bitmap => {
-      const set = new Set(ids);
+      for (const id of ids) mark[id] = 1;
       const cx0 = x0, cx1 = x1;
       x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(bw - 1, x1 + 1); y1 = Math.min(bh - 1, y1 + 1);
       const ox = cx0 - x0, cw = cx1 - cx0 + 1;
       const w = x1 - x0 + 1, h = y1 - y0 + 1, a = new Uint8Array(w * h);
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        let own = false;
-        for (let dy = -1; dy <= 1 && !own; dy++) for (let dx = -1; dx <= 1 && !own; dx++) {
+        let hit = false;
+        for (let dy = -1; dy <= 1 && !hit; dy++) for (let dx = -1; dx <= 1 && !hit; dx++) {
           const nx = x + dx, ny = y + dy;
-          if (nx >= 0 && ny >= 0 && nx < bw && ny < bh && set.has(lab[ny * bw + nx])) own = true;
+          if (nx >= 0 && ny >= 0 && nx < bw && ny < bh && own(ny * bw + nx)) hit = true;
         }
-        if (own) a[(y - y0) * w + x - x0] = Math.round(t[y * bw + x] * 255);
+        if (hit) a[(y - y0) * w + x - x0] = Math.round(t[y * bw + x] * 255);
       }
+      for (const id of ids) mark[id] = 0;
       return { w, h, a, ox, cw };
     };
-    // stroke width of some shapes: 2 · area / perimeter
+    // stroke width of some shapes: their ink (including the blur around them) per length of
+    // stroke (half the outline). Blur spreads ink but keeps its amount, so bold and regular text stay
+    // apart even on soft, low-resolution scans.
     const strokeOf = (ids: number[], x0: number, y0: number, x1: number, y1: number) => {
-      const set = new Set(ids);
-      let area = 0, edges = 0;
+      for (const id of ids) mark[id] = 1;
+      let edges = 0;
       for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
-        if (!set.has(lab[y * bw + x])) continue;
-        area++;
-        if (x === x0 || !set.has(lab[y * bw + x - 1])) edges++;
-        if (x === x1 || !set.has(lab[y * bw + x + 1])) edges++;
-        if (y === y0 || !set.has(lab[(y - 1) * bw + x])) edges++;
-        if (y === y1 || !set.has(lab[(y + 1) * bw + x])) edges++;
+        const q = y * bw + x;
+        if (!own(q)) continue;
+        if (x === x0 || !own(q - 1)) edges++;
+        if (x === x1 || !own(q + 1)) edges++;
+        if (y === y0 || !own(q - bw)) edges++;
+        if (y === y1 || !own(q + bw)) edges++;
       }
-      return edges ? (2 * area) / (edges / 2) : 0;
+      // ink within 2 px of the shapes, not belonging to other shapes
+      const X0 = Math.max(0, x0 - 2), Y0 = Math.max(0, y0 - 2), X1 = Math.min(bw - 1, x1 + 2), Y1 = Math.min(bh - 1, y1 + 2);
+      let mass = 0;
+      for (let y = Y0; y <= Y1; y++) for (let x = X0; x <= X1; x++) {
+        const q = y * bw + x, l = lab[q];
+        if (l >= 0 && !mark[l]) continue;
+        let near = false;
+        for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2 && !near; dx++) {
+          const nx = x + dx, ny = y + dy;
+          if (nx >= 0 && ny >= 0 && nx < bw && ny < bh && own(ny * bw + nx)) near = true;
+        }
+        if (near) mass += t[q];
+      }
+      for (const id of ids) mark[id] = 0;
+      return edges ? (4 * mass) / edges : 0;
     };
     const wordOf = (cs: Cluster[]): Word => {
       const ids = cs.flatMap((c) => c.ids);
       const x0 = Math.min(...cs.map((c) => c.x0)), x1 = Math.max(...cs.map((c) => c.x1));
       const y0 = Math.min(...cs.map((c) => c.y0)), y1 = Math.max(...cs.map((c) => c.y1));
-      return { x0: x0 + bx0, x1: x1 + 1 + bx0, top: Math.max(0, y0 - 1) - base, bmp: cut(ids, x0, y0, x1, y1), sw: strokeOf(ids, x0, y0, x1, y1), n: cs.length };
+      return { x0: x0 + bx0, x1: x1 + 1 + bx0, top: Math.max(0, y0 - 1) - base, bmp: cut(ids, x0, y0, x1, y1), sw: strokeOf(ids, x0, y0, x1, y1) * (bgL - fgL), n: cs.length };
     };
 
     // words: split the letters at word-sized gaps, then match those pieces to the text's words by
@@ -285,7 +326,6 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
       cl.forEach((c, i) => { if (i > 0 && gaps[i - 1] > thr) { segs.push(cur); cur = []; } cur.push(c); });
       segs.push(cur);
     }
-    type Unit = { t0: number; tn: number; cs: Cluster[]; one: boolean };
     let units: Unit[] | null = null;
     {
       const mctx = document.createElement('canvas').getContext('2d')!;
@@ -328,46 +368,358 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
       if (tall.length >= 2) capH = median(tall);
     }
     const all = wordOf(cl);
+    // softness of the printed edges, before anything is cut out: half-tones per outline pixel
+    let soft = 1;
+    {
+      const ids = cl.flatMap((c) => c.ids);
+      for (const id of ids) mark[id] = 1;
+      const x0 = Math.max(0, Math.min(...cl.map((c) => c.x0)) - 3), x1 = Math.min(bw - 1, Math.max(...cl.map((c) => c.x1)) + 3);
+      const y0 = Math.max(0, Math.min(...cl.map((c) => c.y0)) - 3), y1 = Math.min(bh - 1, Math.max(...cl.map((c) => c.y1)) + 3);
+      let mid = 0, edges = 0;
+      for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+        const q = y * bw + x, l = lab[q];
+        if (l >= 0 && !mark[l]) continue;
+        if (t[q] > 0.15 && t[q] < 0.85) mid++;
+        if (own(q) && ((x > 0 && !own(q - 1)) || (x < bw - 1 && !own(q + 1)) || (y > 0 && !own(q - bw)) || (y < bh - 1 && !own(q + bw)))) edges++;
+      }
+      for (const id of ids) mark[id] = 0;
+      if (edges) soft = mid / edges;
+    }
     const words = units ? units.map((u) => wordOf(u.cs)) : null;
     const tokUnit: number[] = [];
     units?.forEach((u, ui) => { for (let q = 0; q < u.tn; q++) tokUnit[u.t0 + q] = ui; });
     const line: Line = {
       key: run.key, tokens, words, tokUnit, unitTok: units?.map((u) => [u.t0, u.tn] as [number, number]) ?? [], all, layerX, layerY, base: by0 + base, capH,
-      inkX0: all.x0, inkX1: all.x1, ink, wordGap: null, sw: all.sw / capH, peak: peakOf(all.bmp), edge: edgeOf(all.bmp),
+      inkX0: all.x0, inkX1: all.x1, ink, wordGap: null, sw: all.sw / capH, peak: peakOf(all.bmp), edge: soft,
+      ref: { cap: NaN, x: NaN, asc: NaN }, slope: 0, fitX: all.x0, fitY: by0 + base, contrast: bgL - fgL,
     };
-    if (words && units) {
-      const g = words.slice(1).map((w, i) => (w.x0 - words[i].x1) / capH);
-      if (g.length) line.wordGap = median(g);
-      wordGaps.push(...g.filter((_, i) => units![i].one && units![i + 1].one));
-    }
     pg.lines.set(run.key, line);
 
-    // letters (where a word's letters and its text match one to one)
-    const lineChars: { ch: string; bmp: Bitmap; top: number }[][] = [];
-    const lineSws: number[] = [];
+    // letters (where a word's letters and its text match one to one); gaps in pixels for now
+    const lineChars: Ch[][] = [];
     if (units) units.forEach((u, wi) => {
-      const sw = words![wi].sw / capH;
-      if (words![wi].n >= 3) sws.push(sw);
-      lineSws.push(sw);
       const chars = [...tokens[u.t0]], g = u.cs;
       if (!u.one || chars.length !== g.length) { lineChars.push([]); return; }
-      lineChars.push(g.map((c, ci) => ({ ch: chars[ci], bmp: cut(c.ids, c.x0, c.y0, c.x1, c.y1), top: Math.max(0, c.y0 - 1) - base })));
-      for (let ci = 0; ci + 1 < g.length; ci++) {
-        const gap: Gap = { g: (g[ci + 1].x0 - g[ci].x1 - 1) / capH, capH, sw };
-        push(pg.pair, chars[ci] + chars[ci + 1], gap); push(pg.right, chars[ci], gap); push(pg.left, chars[ci + 1], gap);
-        letterGaps.push(gap.g);
-      }
+      lineChars.push(g.map((c, ci) => ({ ch: chars[ci], bmp: cut(c.ids, c.x0, c.y0, c.x1, c.y1), h: c.y1 - c.y0 + 1, oy: c.y0 - Math.max(0, c.y0 - 1),
+        bot: c.y1 + 1 + by0, cx: (c.x0 + c.x1) / 2 + bx0 } as Ch & { cx: number })));
+      for (let ci = 0; ci + 1 < g.length; ci++) gapsPx.push({ a: chars[ci], b: chars[ci + 1], px: g[ci + 1].x0 - g[ci].x1 - 1, line, wi });
     });
-    pending.push({ line, chars: lineChars, sws: lineSws });
+    // the printed baseline: a straight fit through the bottoms of letters that sit on it
+    {
+      const pts = (lineChars.flat() as (Ch & { cx: number })[]).filter((c) => ON_BASE.test(c.ch)).map((c) => [c.cx, c.bot]);
+      if (pts.length >= 4) {
+        const fit = (P: number[][]) => {
+          const n = P.length, mx = P.reduce((a, p) => a + p[0], 0) / n, my = P.reduce((a, p) => a + p[1], 0) / n;
+          let sxx = 0, sxy = 0;
+          for (const [x, y] of P) { sxx += (x - mx) * (x - mx); sxy += (x - mx) * (y - my); }
+          return { mx, my, sl: sxx > 1 ? sxy / sxx : 0 };
+        };
+        let f = fit(pts);
+        const inl = pts.filter(([x, y]) => Math.abs(y - (f.my + f.sl * (x - f.mx))) <= 2.5);
+        if (inl.length >= 4) f = fit(inl);
+        line.fitX = f.mx; line.fitY = f.my; line.slope = Math.max(-0.035, Math.min(0.035, f.sl));
+      }
+      const hs = (re: RegExp) => median(lineChars.flat().filter((c) => re.test(c.ch)).map((c) => c.h));
+      line.ref = { cap: hs(CAP_REF), x: hs(X_REF), asc: hs(ASC_REF) };
+      for (const cs of lineChars) for (const c of cs) c.bot -= line.fitY + line.slope * ((c as any).cx - line.fitX);
+    }
+    pending.push({ line, chars: lineChars, units });
+    if ((globalThis as any).__scanDebug) (line as any).dbg = lineChars.flat().map((c) => c.ch + ':' + c.h + '/' + c.bot.toFixed(1));
   }
 
+  // Sizes: each line's capitals / small letters / ascenders as printed. A line that lacks one of
+  // them borrows it from the line of the most similar size that has both.
+  {
+    const lines = pending.map((P) => P.line);
+    const fill = (l: Line, want: Cls) => {
+      for (const have of ['cap', 'x', 'asc'] as Cls[]) {
+        if (have === want || !(l.ref[have] > 0)) continue;
+        const peers = lines.filter((o) => o.ref[want] > 0 && o.ref[have] > 0);
+        if (!peers.length) continue;
+        const near = peers.sort((a, z) => Math.abs(Math.log(a.ref[have] / l.ref[have])) - Math.abs(Math.log(z.ref[have] / l.ref[have])))[0];
+        return l.ref[have] * (near.ref[want] / near.ref[have]);
+      }
+      return NaN;
+    };
+    const filled = lines.map((l) => ({ l, r: { cap: l.ref.cap > 0 ? l.ref.cap : fill(l, 'cap'), x: l.ref.x > 0 ? l.ref.x : fill(l, 'x'), asc: l.ref.asc > 0 ? l.ref.asc : fill(l, 'asc') } }));
+    // lines without any matched letters: their capitals from the rough height measured above
+    const xr = median(lines.filter((l) => l.ref.cap > 0 && l.ref.x > 0).map((l) => l.ref.x / l.ref.cap)) || 0.75;
+    const ar = median(lines.filter((l) => l.ref.cap > 0 && l.ref.asc > 0).map((l) => l.ref.asc / l.ref.cap)) || 1.03;
+    for (const { l, r } of filled) {
+      if (!(r.cap > 0)) r.cap = r.x > 0 ? r.x / xr : r.asc > 0 ? r.asc / ar : l.capH;
+      if (!(r.x > 0)) r.x = r.cap * xr;
+      if (!(r.asc > 0)) r.asc = r.cap * ar;
+      l.ref = r; l.capH = r.cap;
+    }
+  }
+  // ink measures in the page's darkest contrast (thin strokes on soft scans never reach full ink)
+  {
+    const cs = pending.map((P) => P.line.contrast).sort((a, z) => z - a);
+    const top = cs.length ? cs[Math.floor(cs.length * 0.1)] : 1;
+    for (const P of pending) {
+      const f = 1 / Math.max(1, top);
+      P.line.all.sw *= f; P.line.words?.forEach((w) => { w.sw *= f; });
+    }
+  }
+  // everything else relative to the final capital heights
+  const sws: number[] = [], letterGaps: number[] = [], wordGaps: number[] = [];
+  for (const P of pending) {
+    const { line, units } = P, words = line.words, capH = line.capH;
+    line.sw = line.all.sw / capH;
+    if (words && units) {
+      words.forEach((w) => { if (w.n >= 3) sws.push(w.sw / capH); });
+      const g = words.slice(1).map((w, i) => (w.x0 - words[i].x1) / capH);
+      if (g.length) line.wordGap = median(g);
+      wordGaps.push(...g.filter((_, i) => units[i].one && units[i + 1].one));
+    }
+  }
+  for (const { a, b, px: gp, line, wi } of gapsPx) {
+    const gap: Gap = { g: gp / line.capH, capH: line.capH, sw: line.words![wi].sw / line.capH };
+    push(pg.pair, a + b, gap); push(pg.right, a, gap); push(pg.left, b, gap);
+    letterGaps.push(gap.g);
+  }
   if (letterGaps.length) pg.letterGap = median(letterGaps);
   if (wordGaps.length) pg.wordGap = median(wordGaps);
   if (sws.length) pg.sw = median(sws);
-  for (const { line, chars, sws: s } of pending) {
-    chars.forEach((cs, wi) => cs.forEach((c) => push(pg.samples, c.ch, { bmp: c.bmp, top: c.top, capH: line.capH, sw: s[wi] })));
+  const depth = new Map<string, number[]>();
+  for (const { line, chars } of pending) {
+    chars.forEach((cs, wi) => cs.forEach((c) => {
+      push(pg.samples, c.ch, { bmp: c.bmp, capH: line.capH, sw: line.words![wi].sw / line.capH, h: c.h, bot: c.bot, oy: c.oy, line });
+      push(depth, c.ch, c.bot / line.ref.x);
+    }));
   }
+  for (const [ch, v] of depth) pg.depth.set(ch, median(v));
+  if ((globalThis as any).__scanDebug) console.log('TIME harvest', src, Math.round(performance.now() - t0), 'ms', pg.lines.size, 'lines');
   return pg;
+}
+
+// ---------------------------------------------------------------- letters in a font, made to look printed
+
+interface Synth { fam: string; weight: number; lw: number; blur: number; capPx: number; xPx: number; stretch: number }
+let cvA: HTMLCanvasElement | null = null, cvB: HTMLCanvasElement | null = null;
+const canvasPair = () => {
+  cvA ??= document.createElement('canvas'); cvB ??= document.createElement('canvas');
+  return [cvA.getContext('2d', { willReadFrequently: true })!, cvB.getContext('2d', { willReadFrequently: true })!] as const;
+};
+/**
+ * Text drawn in a font, `lw` px heavier (or lighter, when negative), stretched and blurred.
+ * The bitmap's letters start `ox` px in; `top` is the bitmap's top relative to the baseline.
+ */
+function renderInk(text: string, font: string, lw: number, blur: number, stretch: number): { bmp: Bitmap; top: number; stroke: number; soft: number } | null {
+  const [a, b] = canvasPair();
+  a.font = font;
+  const m = a.measureText(text);
+  const L = m.actualBoundingBoxLeft, R = m.actualBoundingBoxRight, asc = m.actualBoundingBoxAscent, desc = m.actualBoundingBoxDescent;
+  if (!(L + R > 0) || !(asc + desc > 0)) return null;
+  const e = Math.max(0, lw) / 2;
+  const pad = 2 + Math.ceil(blur * 2.5 + e);
+  const w = Math.ceil((L + R) * stretch + 2 * pad), h = Math.ceil(asc + desc + 2 * pad);
+  if (w * h > 4e6) return null;
+  const draw = (g: CanvasRenderingContext2D) => {
+    g.canvas.width = w; g.canvas.height = h; // also resets the state
+    g.font = font; g.fillStyle = '#000'; g.strokeStyle = '#000'; g.lineJoin = 'round';
+  };
+  draw(a);
+  a.setTransform(stretch, 0, 0, 1, pad + L * stretch, pad + asc);
+  a.fillText(text, 0, 0);
+  if (Math.abs(lw) > 0.05) {
+    a.lineWidth = Math.abs(lw);
+    if (lw < 0) a.globalCompositeOperation = 'destination-out';
+    a.strokeText(text, 0, 0);
+  }
+  let src = a;
+  if (blur > 0.05) {
+    draw(b);
+    b.filter = `blur(${blur.toFixed(2)}px)`;
+    b.drawImage(a.canvas, 0, 0);
+    src = b;
+  }
+  const d = src.getImageData(0, 0, w, h).data, al = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) al[i] = d[i * 4 + 3];
+  // stroke width the way the page's words are measured: ink per length of stroke
+  let mass = 0, edges = 0, mid = 0;
+  const on = (i: number) => al[i] > 115;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    mass += al[i] / 255;
+    if (al[i] > 38 && al[i] < 217) mid++;
+    if (!on(i)) continue;
+    if (x === 0 || !on(i - 1)) edges++;
+    if (x === w - 1 || !on(i + 1)) edges++;
+    if (y === 0 || !on(i - w)) edges++;
+    if (y === h - 1 || !on(i + w)) edges++;
+  }
+  pageLike(al, w, h);
+  return { bmp: { w, h, a: al, ox: pad + Math.max(0, -lw) / 2, cw: Math.max(1, (L + R) * stretch + lw) }, top: -(pad + asc), stroke: edges ? (4 * mass) / edges : 0, soft: edges ? mid / edges : 1 };
+}
+/**
+ * Coverage as the page's letters are cut out: scaled so the darkest tenth of the ink is full, and
+ * only one pixel of fringe around the letter itself (coverage > 0.45) kept.
+ */
+function pageLike(al: Uint8Array, w: number, h: number) {
+  const hist = new Uint32Array(256);
+  let n = 0;
+  for (let i = 0; i < al.length; i++) if (al[i] > 25) { hist[al[i]]++; n++; }
+  if (!n) return;
+  let top = 255;
+  for (let v = 255, acc = 0; v > 0; v--) { acc += hist[v]; if (acc > n * 0.1) { top = v; break; } }
+  const f = 255 / Math.max(64, top);
+  const on = new Uint8Array(al.length);
+  for (let i = 0; i < al.length; i++) { const v = Math.min(255, Math.round(al[i] * f)); al[i] = v; on[i] = v > 115 ? 1 : 0; }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x;
+    if (on[i] || !al[i]) continue;
+    let near = false;
+    for (let dy = -1; dy <= 1 && !near; dy++) for (let dx = -1; dx <= 1 && !near; dx++) {
+      const nx = x + dx, ny = y + dy;
+      if (nx >= 0 && ny >= 0 && nx < w && ny < h && on[ny * w + nx]) near = true;
+    }
+    if (!near) al[i] = 0;
+  }
+}
+/** ink box of a bitmap (coverage > 0.45) */
+function inkBox(b: Bitmap) {
+  let x0 = b.w, x1 = -1, y0 = b.h, y1 = -1;
+  for (let y = 0; y < b.h; y++) for (let x = 0; x < b.w; x++) if (b.a[y * b.w + x] > 115) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+  return x1 < 0 ? null : { x0, y0, w: x1 - x0 + 1, h: y1 - y0 + 1 };
+}
+/**
+ * The bundled font that looks most like the page's own letters: letters seen on the page are drawn
+ * in each font at their size and laid over them. Also how much wider or narrower the page prints.
+ */
+const fontVotes = new WeakMap<object, Promise<{ family: string; stretch: number } | null>>();
+function pageFont(pg: PageGlyphs) {
+  let p = fontVotes.get(pg);
+  if (!p) { p = voteFont(pg).catch(() => null); fontVotes.set(pg, p); }
+  return p;
+}
+async function voteFont(pg: PageGlyphs): Promise<{ family: string; stretch: number } | null> {
+  const t0 = performance.now();
+  await Promise.all(SCAN_FAMILIES.flatMap((f) => [400, 700].map((w) => document.fonts?.load(`${w} 100px ${scanCss({ family: f })}`).catch(() => null))));
+  const order = 'agGRetyrfskJQ2357MWhn';
+  const chars = [...pg.samples.keys()].filter((ch) => /^[A-Za-z0-9]$/.test(ch))
+    .sort((a, z) => ((order.indexOf(a) + 99) % 99) - ((order.indexOf(z) + 99) % 99)).slice(0, 16);
+  if (chars.length < 5) return null;
+  const score: Record<string, number> = {}, widths: Record<string, number[]> = {};
+  for (const ch of chars) {
+    const ss = [...pg.samples.get(ch)!].sort((a, z) => z.h - a.h).slice(0, 2);
+    for (const s of ss) {
+      const sb = inkBox(s.bmp);
+      if (!sb || sb.h < 8) continue;
+      const sm = (x: number, y: number) => x >= 0 && y >= 0 && x < sb.w && y < sb.h && s.bmp.a[(y + sb.y0) * s.bmp.w + x + sb.x0] > 115;
+      for (const family of SCAN_FAMILIES) {
+        const fam = scanCss({ family });
+        let best = 0, bw = 1;
+        for (const wt of [400, 700]) {
+          const r0 = renderInk(ch, `${wt} 100px ${fam}`, 0, 0, 1);
+          const b0 = r0 && inkBox(r0.bmp);
+          if (!b0) continue;
+          const r = renderInk(ch, `${wt} ${((100 * sb.h) / b0.h).toFixed(2)}px ${fam}`, 0, 0, 1);
+          const rb = r && inkBox(r.bmp);
+          if (!r || !rb) continue;
+          const rm = (x: number, y: number) => x >= 0 && y >= 0 && x < rb.w && y < rb.h && r.bmp.a[(y + rb.y0) * r.bmp.w + x + rb.x0] > 115;
+          const W = Math.max(sb.w, rb.w) + 2, H = Math.max(sb.h, rb.h) + 2;
+          for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+            let both = 0, any = 0;
+            for (let y = -1; y < H; y++) for (let x = -1; x < W; x++) {
+              const a = sm(x, y), b = rm(x + dx, y + dy);
+              if (a && b) both++; if (a || b) any++;
+            }
+            const iou = any ? both / any : 0;
+            if (iou > best) { best = iou; bw = sb.w / rb.w; }
+          }
+        }
+        score[family] = (score[family] ?? 0) + best;
+        (widths[family] ??= []).push(bw);
+      }
+    }
+  }
+  const fams = Object.keys(score).sort((a, z) => score[z] - score[a]);
+  if (!fams.length) return null;
+  const family = fams[0];
+  if ((globalThis as any).__scanDebug) console.log('TIME font vote', Math.round(performance.now() - t0), 'ms', fams.map((f) => f + ' ' + score[f].toFixed(2)).join(', '));
+  return { family, stretch: Math.max(0.85, Math.min(1.18, median(widths[family]))) };
+}
+
+const synthCache = new WeakMap<object, Map<string, Promise<Synth>>>();
+/**
+ * How to draw letters this line doesn't show: the matched font at the weight and extra stroke that
+ * give the line's stroke width (measured the same way on the same word), blurred like the line.
+ */
+function synthStyle(sw: number, line: Line, pageSw: number, family?: string, stretch?: number, ref?: string): Promise<Synth> {
+  let m = synthCache.get(line);
+  if (!m) synthCache.set(line, (m = new Map()));
+  const key = `${family}|${sw.toFixed(3)}`;
+  let p = m.get(key);
+  if (!p) { p = makeSynth(sw, line, pageSw, family, stretch, ref); m.set(key, p); }
+  return p;
+}
+async function makeSynth(sw: number, line: Line, pageSw: number, family?: string, stretch?: number, ref?: string): Promise<Synth> {
+  const capH = line.capH, capInk = line.ref.cap, xInk = line.ref.x;
+  const fam = scanCss({ family: (family as any) ?? 'Arimo' });
+  await Promise.all([400, 700].map((wt) => document.fonts?.load(`${wt} 100px ${fam}`).catch(() => null)));
+  const [g] = canvasPair();
+  const met: Record<number, { cap: number; x: number }> = {};
+  for (const wt of [400, 700]) {
+    g.font = `${wt} 100px ${fam}`;
+    met[wt] = { cap: g.measureText('H').actualBoundingBoxAscent || 72, x: g.measureText('x').actualBoundingBoxAscent || 52 };
+  }
+  const str = Math.max(0.8, Math.min(1.25, stretch || 1));
+  const text = (ref && ref.length >= 3 ? ref : 'Hamburg').slice(0, 24);
+  const fontOf = (wt: number) => `${wt} ${((100 * capInk) / met[wt].cap).toFixed(2)}px ${fam}`;
+  // softness first (the edges' half-tones per edge pixel, as on the line)
+  let blur = 0, bestD = Infinity;
+  const softs: string[] = [];
+  for (const bl of [0, 0.4, 0.7, 1, 1.4, 1.9, 2.5, 3.2, 4]) {
+    const r = renderInk(text, fontOf(400), 0, bl, str);
+    if (!r) break;
+    softs.push(r.soft.toFixed(2));
+    const d = Math.abs(r.soft - line.edge);
+    if (d < bestD) { bestD = d; blur = bl; }
+  }
+  if ((globalThis as any).__scanDebug) console.log('synth soft', line.edge.toFixed(2), softs.join(' '), '→', blur);
+  // then the weight: the font weight closest to the line, then a finer stroke to match it exactly
+  const target = sw * capH;
+  const measure = (wt: number, lw: number) => { const r = renderInk(text, fontOf(wt), lw, blur, str); return r ? r.stroke : 0; };
+  const m4 = measure(400, 0), m7 = measure(700, 0);
+  // bold letter shapes only for text clearly heavier than the page's usual text
+  const weight = sw > pageSw * 1.2 ? 700 : 400;
+  let lo = -0.16 * capH, hi = 0.3 * capH, lw = 0;
+  const m0 = weight === 700 ? m7 : m4;
+  if (m0 && Math.abs(m0 - target) > target * 0.03) {
+    for (let it = 0; it < 9; it++) {
+      lw = (lo + hi) / 2;
+      const v = measure(weight, lw);
+      if (Math.abs(v - target) < target * 0.02) break;
+      if (v < target) lo = lw; else hi = lw;
+    }
+  }
+  // sizes: the drawn ink (with its extra stroke and softness) as tall as the page's letters
+  const inkH = (ch: string, px: number) => {
+    const r = renderInk(ch, `${weight} ${px.toFixed(2)}px ${fam}`, (lw / ((100 * capInk) / met[weight].cap)) * px, blur, str);
+    if (!r) return 0;
+    let t = -1, b = -1;
+    for (let y = 0; y < r.bmp.h && t < 0; y++) for (let x = 0; x < r.bmp.w; x++) if (r.bmp.a[y * r.bmp.w + x] > 115) { t = y; break; }
+    for (let y = r.bmp.h - 1; y >= 0 && b < 0; y--) for (let x = 0; x < r.bmp.w; x++) if (r.bmp.a[y * r.bmp.w + x] > 115) { b = y; break; }
+    return t >= 0 ? b - t + 1 : 0;
+  };
+  const fit = (ch: string, want: number, px0: number) => { let px = px0; for (let i = 0; i < 2; i++) { const h = inkH(ch, px); if (h > 0) px *= want / h; } return px; };
+  const capPx = fit('H', capInk, (100 * capInk) / met[weight].cap);
+  const xPx = fit('x', xInk, (100 * xInk) / met[weight].x);
+  if ((globalThis as any).__scanDebug) console.log('synth', fam, weight, 'lw', (lw / capPx).toFixed(3), 'blur', blur, 'target', target.toFixed(2), 'm400', m4.toFixed(2), 'm700', m7.toFixed(2), 'capPx', capPx.toFixed(1), 'xPx', xPx.toFixed(1));
+  return { fam, weight, lw: lw / ((100 * capInk) / met[weight].cap), blur, capPx, xPx, stretch: str };
+}
+const glyphCache = new WeakMap<Synth, Map<string, { bmp: Bitmap; top: number } | null>>();
+function synthGlyph(ch: string, st: Synth, peak: number) {
+  let m = glyphCache.get(st);
+  if (!m) glyphCache.set(st, (m = new Map()));
+  if (m.has(ch)) return m.get(ch)!;
+  // small letters sized by the page's x-height, the rest by its capital height
+  const px = /\p{Ll}/u.test(ch) ? st.xPx : st.capPx;
+  const r = renderInk(ch, `${st.weight} ${px.toFixed(2)}px ${st.fam}`, st.lw * px, st.blur, st.stretch);
+  if (r) for (let i = 0; i < r.bmp.a.length; i++) r.bmp.a[i] = Math.round(r.bmp.a[i] * peak);
+  m.set(ch, r);
+  return r;
 }
 
 // ---------------------------------------------------------------- composing an edit
@@ -396,7 +748,8 @@ function align(oldT: string[], newT: string[]) {
   return { keep, ref };
 }
 
-export async function cloneLineText(ctx: PageCtx, key: string, text: string, opts: { sizeScale: number; color: string | null; family?: string; more?: () => Promise<(PageGlyphs | null)[]> }): Promise<ClonedText | null> {
+export async function cloneLineText(ctx: PageCtx, key: string, text: string, opts: { sizeScale: number; color: string | null; family?: string; stretch?: number; more?: () => Promise<(PageGlyphs | null)[]> }): Promise<ClonedText | null> {
+  const t0 = performance.now();
   const pg = await pageGlyphs(ctx);
   const line = pg?.lines.get(key);
   if (!pg || !line) return null;
@@ -404,61 +757,47 @@ export async function cloneLineText(ctx: PageCtx, key: string, text: string, opt
   let extra: PageGlyphs[] | null = null;
   const items: Item[] = [];
   const lineSw = line.words && line.words.length ? median(line.words.filter((w) => w.n >= 3).map((w) => w.sw / capH)) || line.sw : line.sw;
+  // the line's longest word: synthetic letters are tuned on it (same text, so stroke measures compare)
+  const refWord = line.words ? line.unitTok.map(([t, n]) => line.tokens.slice(t, t + n).join(' ')).filter((_, i) => line.words![i].n >= 3).sort((a, z) => z.length - a.length)[0] : undefined;
 
+  if ((globalThis as any).__scanDebug) console.log('line', key, 'ref', JSON.stringify(line.ref), 'slope', line.slope.toFixed(4), 'sw', (lineSw * capH).toFixed(2), 'pgsw', (pg.sw * capH).toFixed(2), (line as any).dbg?.join(' '));
   const pick = async (ch: string, sw: number): Promise<Item | null> => {
-    // size compared at this page's resolution (other pages may be rendered at another scale)
-    const score = (s: Sample, f = 1) => 3 * Math.abs(Math.log((s.capH * f) / capH)) + 2.5 * Math.abs(s.sw - sw) / pg.sw;
-    let cands = (pg.samples.get(ch) ?? []).map((s) => ({ s, v: score(s) }));
+    const cls = clsOf(ch);
+    // pixel to pixel: the line's height for this kind of letter over the sample line's
+    const scaleOf = (s: Sample) => line.ref[cls] / s.line.ref[cls];
+    // size, and the stroke the letter will have once scaled to this line, against the line's stroke
+    const score = (s: Sample) => {
+      const sc = scaleOf(s);
+      return 3 * Math.abs(Math.log(sc)) + 4 * Math.abs(Math.log(Math.max(1e-3, s.sw * s.capH * sc) / Math.max(1e-3, sw * capH)));
+    };
+    let cands = (pg.samples.get(ch) ?? []).map((s) => ({ s, o: pg, v: score(s) }));
     if (!cands.some((c) => c.v <= 0.6) && opts.more) {
       if (!extra) {
         const got: (PageGlyphs | null)[] = await opts.more().catch(() => []);
         extra = got.filter((x): x is PageGlyphs => !!x && x !== pg);
       }
-      for (const o of extra) for (const s of o.samples.get(ch) ?? []) cands.push({ s, v: score(s, pg.k / o.k) });
+      for (const o of extra) for (const s of o.samples.get(ch) ?? []) cands.push({ s, o, v: score(s) });
     }
     if (!cands.length) return null;
     const best = Math.min(...cands.map((c) => c.v));
     if (best > 0.6) return null;
     cands = cands.filter((c) => c.v <= best + 0.15);
     // the most typical of them (misread letters are outliers)
-    const mw = median(cands.map((c) => c.s.bmp.w / c.s.capH)), mh = median(cands.map((c) => c.s.bmp.h / c.s.capH));
-    const s = cands.sort((a, z) => (Math.abs(a.s.bmp.w / a.s.capH - mw) + Math.abs(a.s.bmp.h / a.s.capH - mh) + a.v * 0.1)
-      - (Math.abs(z.s.bmp.w / z.s.capH - mw) + Math.abs(z.s.bmp.h / z.s.capH - mh) + z.v * 0.1))[0].s;
-    const scale = capH / s.capH;
-    return { bmp: s.bmp, x: 0, top: s.top * scale, scale };
+    const rw = (c: { s: Sample }) => c.s.bmp.w / c.s.line.ref[cls], rh = (c: { s: Sample }) => c.s.h / c.s.line.ref[cls];
+    const mw = median(cands.map(rw)), mh = median(cands.map(rh));
+    const c = cands.sort((a, z) => (Math.abs(rw(a) - mw) + Math.abs(rh(a) - mh) + a.v * 0.1) - (Math.abs(rw(z) - mw) + Math.abs(rh(z) - mh) + z.v * 0.1))[0];
+    const s = c.s, scale = scaleOf(s);
+    // sits where this letter usually sits (on the baseline, descenders below it)
+    const dep = pg.depth.get(ch) ?? c.o.depth.get(ch) ?? s.bot / s.line.ref.x;
+    if ((globalThis as any).__scanDebug) console.log('pick', ch, 'h', s.h, '→', (s.h * scale).toFixed(1), 'ref', line.ref[cls].toFixed(1), 'v', c.v.toFixed(2), 'swS', (s.sw * s.capH * scale).toFixed(2), 'swT', (sw * capH).toFixed(2));
+    return { bmp: s.bmp, x: 0, top: dep * line.ref.x - (s.h + s.oy) * scale, scale };
   };
+  /** a letter the page never shows: drawn in the matched font, tuned to the line's height, weight and softness */
   const fontGlyph = async (ch: string, sw: number): Promise<Item | null> => {
-    const fam = scanCss({ family: (opts.family as any) ?? 'Arimo' });
-    const bold = sw > pg.sw * 1.25 ? 700 : 400;
-    try { await document.fonts?.load(`${bold} 100px ${fam}`, ch); } catch { /* fine */ }
-    const m = document.createElement('canvas').getContext('2d')!;
-    m.font = `${bold} 100px ${fam}`;
-    const hA = m.measureText('H').actualBoundingBoxAscent || 72;
-    const px = (100 * capH) / hA;
-    m.font = `${bold} ${px}px ${fam}`;
-    const mm = m.measureText(ch);
-    // as soft and as dark as the scan's own letters: the blur whose edges look most like the line's
-    const cw = Math.ceil(mm.actualBoundingBoxLeft + mm.actualBoundingBoxRight);
-    if (cw < 1) return null;
-    let best: { bmp: Bitmap; pad: number; d: number } | null = null;
-    for (const blurPx of [0, 0.5, 0.8, 1.2, 1.7, 2.3, 3]) {
-      const pad = 1 + Math.ceil(blurPx * 2.5);
-      const w = cw + 2 * pad, h = Math.ceil(mm.actualBoundingBoxAscent + mm.actualBoundingBoxDescent) + 2 * pad;
-      const c = document.createElement('canvas'); c.width = w; c.height = h;
-      const g = c.getContext('2d')!;
-      g.font = m.font; g.fillStyle = '#000';
-      if (blurPx) g.filter = `blur(${blurPx}px)`;
-      g.fillText(ch, pad + mm.actualBoundingBoxLeft, pad + mm.actualBoundingBoxAscent);
-      const dd = g.getImageData(0, 0, w, h).data, a = new Uint8Array(w * h);
-      for (let i = 0; i < w * h; i++) a[i] = Math.round(dd[i * 4 + 3] * line.peak);
-      const bmp = { w, h, a, ox: pad, cw };
-      const d = Math.abs(edgeOf(bmp) - line.edge);
-      if (!best || d < best.d) best = { bmp, pad, d };
-      else break; // softer only gets further away
-    }
-    const { bmp, pad } = best!;
-    const { w, h, a } = bmp;
-    return { bmp: { w, h, a, ox: pad, cw }, x: 0, top: -pad - mm.actualBoundingBoxAscent, scale: 1 };
+    const pf = await pageFont(pg);
+    const st = await synthStyle(sw, line, pg.sw, pf?.family ?? opts.family, pf?.stretch ?? opts.stretch, refWord);
+    const g = synthGlyph(ch, st, line.peak);
+    return g ? { bmp: g.bmp, x: 0, top: g.top, scale: 1 } : null;
   };
   // spacing seen between these letters, preferably in text of the same size and weight
   const gapFor = (a: string, b: string, sw: number) => {
@@ -481,7 +820,9 @@ export async function cloneLineText(ctx: PageCtx, key: string, text: string, opt
       const it = (await pick(ch, sw)) ?? (await fontGlyph(ch, sw));
       if (prev !== null) x += gapFor(prev, ch, sw);
       // x is where the letter itself starts; its bitmap starts a soft fringe earlier
-      if (it) { it.x = x - it.bmp.ox * it.scale; it.top += dy; items.push(it); x += it.bmp.cw * it.scale; }
+      if ((globalThis as any).__scanDebug) console.log('letter', ch, it ? (it.scale === 1 && !pg.samples.has(ch) ? 'font' : 'page') : 'none', 'scale', it?.scale.toFixed(2), 'top', it?.top.toFixed(1), 'h', it ? (it.bmp.h * it.scale).toFixed(1) : '', 'capH', capH.toFixed(1), 'sw', sw.toFixed(3));
+      // on the printed baseline where the letter goes (it can slope a little on a scan)
+      if (it) { it.x = x - it.bmp.ox * it.scale; it.top += dy + line.fitY + line.slope * (x - line.fitX) - line.base; items.push(it); x += it.bmp.cw * it.scale; }
       else x += capH * 0.3;
       prev = ch;
     }
@@ -569,6 +910,7 @@ export async function cloneLineText(ctx: PageCtx, key: string, text: string, opt
     else o.drawImage(c, dx, dyy, it.bmp.w * s, it.bmp.h * s);
   }
   const blob: Blob | null = await new Promise((res) => out.toBlob((x) => res(x), 'image/png'));
+  if ((globalThis as any).__scanDebug) console.log('TIME clone', Math.round(performance.now() - t0), 'ms', JSON.stringify(text));
   if (!blob) return null;
   const k = pg.k, lh = pg.layerH.get(key) || 1;
   return {

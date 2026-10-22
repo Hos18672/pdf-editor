@@ -494,7 +494,7 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
                   <div className="lb">{i + 1}</div>
                   {at !== i && <button className="gap" onClick={() => setAfter(i)} aria-label={`Insert after page ${i + 1}`}><Icon name="plus:bold" size={13} /></button>}
                 </div>
-                {at === i && <InsertSlot active onClick={() => null} />}
+                {at === i && <InsertSlot active label={kind === 'blank' ? (count > 1 ? `${count} blank pages` : 'Blank page') : kind === 'pdf' ? 'Pages from a PDF' : kind === 'image' ? 'Images' : 'Camera'} onClick={() => (p.desk ? run() : setSheet(true))} />}
               </React.Fragment>
             ))}
           </div>
@@ -526,10 +526,10 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
   );
 }
 
-function InsertSlot({ active, onClick }: { active: boolean; onClick: () => void }) {
+function InsertSlot({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
-    <div className="pcell" onClick={onClick} aria-current={active}>
-      <div className="newslot"><Icon name="plus:bold" size={22} />New page</div>
+    <div className="pcell" aria-current={active}>
+      <button className="newslot" onClick={onClick} aria-label={`Insert here: ${label}`}><Icon name="plus:bold" size={22} /><span>{label}</span><small>Tap to add</small></button>
       <div className="lb" style={{ color: 'var(--sel)', fontWeight: 700 }}>New</div>
     </div>
   );

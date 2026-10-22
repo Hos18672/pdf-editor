@@ -449,6 +449,11 @@ async function drawObject(
     const key = leaf.newExtGState('GSo', doc.context.register(gs)).asString();
     s += `${key} gs `;
   }
+  if (o.rot && o.type !== 'line') {
+    // turned around the box centre (viewport space, y down: positive = clockwise)
+    const r = (o.rot * Math.PI) / 180, c = Math.cos(r), n = Math.sin(r), cx = o.x + o.w / 2, cy = o.y + o.h / 2;
+    s += `${f(c)} ${f(n)} ${f(-n)} ${f(c)} ${f(cx - cx * c + cy * n)} ${f(cy - cx * n - cy * c)} cm `;
+  }
   switch (o.type) {
     case 'whiteout':
     case 'highlight':
