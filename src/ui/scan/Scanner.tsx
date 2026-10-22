@@ -74,7 +74,12 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     try {
       const bmp = await decode(blob);
       const w = bmp.width, h = bmp.height;
-      const found = await findDocument(bmp, kind);
+      let found = await findDocument(bmp, kind);
+      // a long narrow strip photographed in document mode is a till receipt: receipt page size
+      if (kind === 'doc' && !found.format && found.sure && (found.ratio < 0.5 || found.ratio > 2)) {
+        kind = 'receipt';
+        found = { ...found, ...shapeOf(found.quad, w, h, kind, !!found.bend) };
+      }
       const page: ScanPage = {
         id, blob, w, h, quad: found.quad, auto: found.quad, bend: found.bend, autoBend: found.bend, sure: found.sure, rot: 0,
         // a card photographed in document mode keeps its photo and colours

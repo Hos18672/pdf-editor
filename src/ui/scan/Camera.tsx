@@ -148,8 +148,10 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       // where the video is drawn (object-fit: cover; the box has the frame's shape once measured)
       const cw = b.clientWidth, ch = b.clientHeight, sc = Math.max(cw / vw, ch / vh);
       const ox = (cw - vw * sc) / 2, oy = (ch - vh * sc) / 2;
-      setFound(!!det && det.score > 0.62);
-      if (det && det.score > 0.62) {
+      // a clear outline, or an outline that matches the sheet as a whole (a receipt on a white desk)
+      const ok = !!det && (det.score > 0.62 || (det.agree ?? 0) > 0.5);
+      setFound(ok);
+      if (det && ok) {
         const q = det.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad;
         const diag = Math.hypot(vw, vh);
         const move = last ? Math.max(...q.map((p, i) => Math.hypot(p.x - last![i].x, p.y - last![i].y))) / diag : 1;
@@ -157,14 +159,17 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
         last = q; lostSince = 0;
         if (!armed && shotQuad && Math.max(...q.map((p, i) => Math.hypot(p.x - shotQuad![i].x, p.y - shotQuad![i].y))) / diag > 0.12) armed = true;
         target = q.map((p) => ({ x: ox + p.x * sc, y: oy + p.y * sc }));
+        // big enough: by area, or by length (a long receipt that fills the frame's height)
         const area = quadArea(q) / (vw * vh);
+        const span = Math.max(...q.map((p, i) => Math.hypot(q[(i + 1) % 4].x - p.x, q[(i + 1) % 4].y - p.y))) / Math.max(vw, vh);
+        const near = area >= 0.12 || span >= 0.6;
         const held = Math.min(1, (now - stableSince) / 900);
         if (mean < 45) say('Too dark: add light or turn on the torch');
-        else if (area < 0.12) say('Move closer');
+        else if (!near) say('Move closer');
         else if (!armed) say('Got it. Next page, or tap Done');
         else say(autoRef.current ? (held < 1 ? 'Hold still…' : 'Scanning…') : 'Tap the button to scan');
-        holdTo(autoRef.current && armed && area >= 0.12 ? held : 0);
-        if (autoRef.current && armed && held >= 1 && area >= 0.12 && det.score > 0.78 && mean >= 45) {
+        holdTo(autoRef.current && armed && near ? held : 0);
+        if (autoRef.current && armed && held >= 1 && near && (det.score > 0.78 || (det.agree ?? 0) > 0.75) && mean >= 45) {
           armed = false; shotQuad = q; stableSince = 0; holdTo(0);
           shotRef.current();
         }

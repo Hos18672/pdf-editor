@@ -209,7 +209,7 @@ export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: S
   const ks = Math.min(1, 512 / Math.max(w, h)), km = Math.min(1, 1600 / Math.max(w, h));
   const sw = Math.max(1, Math.round(w * ks)), sh = Math.max(1, Math.round(h * ks));
   const mw = Math.max(1, Math.round(w * km)), mh = Math.max(1, Math.round(h * km));
-  let det: { score: number; support: number[] } | null = null, rel: { x: number; y: number }[] | null = null, relBend: Bend | null = null;
+  let det: { score: number; support: number[]; agree?: number } | null = null, rel: { x: number; y: number }[] | null = null, relBend: Bend | null = null;
   // cards and passports are stiff: only sheets of paper are followed along curved sides
   const bend = mode === 'doc' || mode === 'receipt';
   try {
@@ -233,7 +233,7 @@ export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: S
   tlog('find', t0);
   if (!det || !rel) return { quad: fullQuad(w, h), bend: null, sure: false, ...shapeOf(fullQuad(w, h), w, h, mode) };
   const quad = rel.map((p) => ({ x: p.x * w, y: p.y * h })) as Quad;
-  const sure = det.score > 0.78 && Math.min(...det.support) > 0.45;
+  const sure = (det.score > 0.78 && Math.min(...det.support) > 0.45) || (det.agree ?? 0) > 0.75;
   return { quad, bend: relBend ? scaleBend(relBend, w, h) : null, sure, ...shapeOf(quad, w, h, mode, !!relBend) };
 }
 
@@ -325,7 +325,8 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
   const card = p.format === 'id1' || p.format === 'id3';
   const jpeg = opt.jpeg ?? (card ? 0.9 : filter === 'bw' ? 0.82 : 0.85);
   const src = await cropSource(p, ow, oh, p.rot);
-  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh) };
+  // turned upright here already: text runs along the rows
+  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh), flatten: flattens(p) ? 'rows' as const : null };
   const orient = !!opt.orient && p.rot === 0;
   let res: { blob?: Blob; img?: PixelImage; w?: number; h?: number; blur: number; orient?: Orientation | null; times?: any };
   try {
@@ -343,6 +344,9 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
   return { blob: b.blob, url: URL.createObjectURL(b.blob), w: b.w, h: b.h, blur: res.blur, orient: res.orient };
 }
 
+/** sheets of paper get their printed lines straightened (cards and passports are stiff) */
+const flattens = (p: ScanPage) => (p.kind === 'doc' || p.kind === 'receipt') && p.format !== 'id1' && p.format !== 'id3';
+
 // ---------------------------------------------------------------- the page on screen
 // The straightened page (and its sharpened copy) is kept for the pages being looked at, so changing the
 // look, turning the page or comparing only runs the quick last step.
@@ -350,7 +354,7 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
 interface Base { warped: PixelImage; sharp: PixelImage | null; blur: number; ow: number; oh: number }
 const bases = new Map<string, Promise<Base>>();
 const baseKey = (p: ScanPage, long: number) =>
-  `${p.id}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 'b' + bendReach(p.bend).toFixed(1) : ''}:${long}`;
+  `${p.id}:${p.rot % 2}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 'b' + bendReach(p.bend).toFixed(1) : ''}:${long}`;
 
 function baseOf(p: ScanPage, long: number, low?: boolean): Promise<Base> {
   const key = baseKey(p, long);
@@ -360,7 +364,8 @@ function baseOf(p: ScanPage, long: number, low?: boolean): Promise<Base> {
     const t0 = performance.now();
     const { ow, oh } = sizeFor(p, 'standard', long);
     const src = await cropSource(p, ow, oh, 0);
-    const job = { quad: src.quad, bend: src.bend, outW: ow, outH: oh, sharpen: 'auto' as const };
+    // not turned yet: on a page that will get a quarter turn the text runs down the columns
+    const job = { quad: src.quad, bend: src.bend, outW: ow, outH: oh, sharpen: 'auto' as const, flatten: flattens(p) ? (p.rot % 2 ? 'cols' as const : 'rows' as const) : null };
     let r: { warped: PixelImage; sharp: PixelImage | null; blur: number; times?: any };
     try {
       const s = await sourceOf(src.bmp, src.region, src.RW, src.RH);

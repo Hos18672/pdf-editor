@@ -18,6 +18,8 @@ export interface Job {
   radius: number;
   /** curved sides (see bend.ts), in src pixels and in the quad's corner order */
   bend?: number[][] | null;
+  /** follow the printed lines and straighten them (sheets of paper, not cards) */
+  flatten?: 'rows' | 'cols' | null;
 }
 export interface JobResult { img: PixelImage; blur: number; times?: Record<string, number> }
 /** a straightened page before its look: as photographed, and with the blur taken out (null: wasn't blurred) */
@@ -66,6 +68,33 @@ export function scanKernels(): Kernels {
       }
     }
     return o;
+  }
+
+  /** about a Gaussian blur of the given sigma: two running-mean passes each way, constant time per pixel */
+  function boxSmooth(a: Float32Array, w: number, h: number, sigma: number): Float32Array {
+    const b = Math.max(1, Math.round(Math.sqrt(6 * sigma * sigma + 1) / 2 - 0.5));
+    let cur = a;
+    for (let pass = 0; pass < 2; pass++) {
+      const t = new Float32Array(cur.length), o = new Float32Array(cur.length), k = 1 / (2 * b + 1);
+      for (let y = 0; y < h; y++) {
+        const row = y * w;
+        let s = 0;
+        for (let i = -b - 1; i < b; i++) s += cur[row + (i < 0 ? 0 : i >= w ? w - 1 : i)];
+        for (let x = 0; x < w; x++) {
+          s += cur[row + (x + b >= w ? w - 1 : x + b)] - cur[row + (x - b - 1 < 0 ? 0 : x - b - 1)];
+          t[row + x] = s * k;
+        }
+      }
+      // vertical: running sums for a whole row at a time (streams through memory)
+      const acc = new Float32Array(w);
+      for (let i = -b - 1; i < b; i++) { const r0 = (i < 0 ? 0 : i >= h ? h - 1 : i) * w; for (let x = 0; x < w; x++) acc[x] += t[r0 + x]; }
+      for (let y = 0; y < h; y++) {
+        const ra = (y + b >= h ? h - 1 : y + b) * w, rs = (y - b - 1 < 0 ? 0 : y - b - 1) * w, ro = y * w;
+        for (let x = 0; x < w; x++) { acc[x] += t[ra + x] - t[rs + x]; o[ro + x] = acc[x] * k; }
+      }
+      cur = o;
+    }
+    return cur;
   }
 
   function lumaPlane(img: PixelImage): Float32Array {
@@ -139,7 +168,7 @@ export function scanKernels(): Kernels {
    * output rectangle → quad in the source; bilinear sampling, white outside the photo. With a bend, the
    * curved sides are blended across the page (Coons patch) on top of the perspective.
    */
-  function warp(src: PixelImage, quad: number[], W: number, H: number, inset: number, bend?: number[][] | null): PixelImage {
+  function warp(src: PixelImage, quad: number[], W: number, H: number, inset: number, bend?: number[][] | null, field?: LineField | null): PixelImage {
     const m = -inset;
     const Hm = solveH([m, m, W - m, m, W - m, H - m, m, H - m], quad);
     const out = new Uint8ClampedArray(W * H * 4);
@@ -152,17 +181,21 @@ export function scanKernels(): Kernels {
       for (let x = 0; x < W; x++) { const u = (x + 0.5 - m) / span; sideAt(bend[0], u, Dt, 2 * x); sideAt(bend[2], 1 - u, Db, 2 * x); }
       for (let y = 0; y < H; y++) { const v = (y + 0.5 - m) / spanY; sideAt(bend[1], v, Dr, 2 * y); sideAt(bend[3], 1 - v, Dl, 2 * y); }
     }
+    // straightened text lines: a vertical offset per column, from the strips' values at this row
+    const fdy = field ? new Float32Array(W) : null;
     for (let y = 0; y < H; y++) {
-      const yc = y + 0.5;
-      const v1 = (yc - m) / spanY, v0 = 1 - v1;
+      if (field) { if (field.cols) fieldCols(field, y, W, fdy!); else fieldRow(field, y, W, fdy!); }
       for (let x = 0; x < W; x++) {
-        const xc = x + 0.5;
+        const off = fdy ? fdy[x] : 0;
+        const xc = x + 0.5 + (field?.cols ? off : 0), yc = y + 0.5 + (field?.cols ? 0 : off);
+        const v1 = (yc - m) / spanY, v0 = 1 - v1;
         const z = Hm[6] * xc + Hm[7] * yc + Hm[8];
         let u = (Hm[0] * xc + Hm[1] * yc + Hm[2]) / z - 0.5, v = (Hm[3] * xc + Hm[4] * yc + Hm[5]) / z - 0.5;
         if (Dt) {
           const u1 = (xc - m) / span, u0 = 1 - u1;
-          u += v0 * Dt[2 * x] + v1 * Db![2 * x] + u0 * Dl![2 * y] + u1 * Dr![2 * y];
-          v += v0 * Dt[2 * x + 1] + v1 * Db![2 * x + 1] + u0 * Dl![2 * y + 1] + u1 * Dr![2 * y + 1];
+          const yy = yc < 0 ? 0 : yc >= H ? H - 1 : yc | 0, xx = xc < 0 ? 0 : xc >= W ? W - 1 : xc | 0;
+          u += v0 * Dt[2 * xx] + v1 * Db![2 * xx] + u0 * Dl![2 * yy] + u1 * Dr![2 * yy];
+          v += v0 * Dt[2 * xx + 1] + v1 * Db![2 * xx + 1] + u0 * Dl![2 * yy + 1] + u1 * Dr![2 * yy + 1];
         }
         const o = (y * W + x) * 4;
         if (u < -1 || v < -1 || u > sw || v > sh) { out[o] = out[o + 1] = out[o + 2] = 255; out[o + 3] = 255; continue; }
@@ -177,6 +210,225 @@ export function scanKernels(): Kernels {
       }
     }
     return { w: W, h: H, data: out };
+  }
+
+  // ---------------------------------------------------------------- straight text lines
+  /** vertical offsets that make printed lines straight: values at strip centres `xs` for every output row */
+  interface LineField { xs: Float32Array; ns: number; H: number; dy: Float32Array; cols?: boolean }
+
+  /** a field measured on the page turned on its side (text running down): x offsets along row y */
+  function fieldCols(f: LineField, y: number, W: number, out: Float32Array): void {
+    const { xs, ns, H, dy } = f; // H here is the page's width
+    const yc = y + 0.5;
+    let s = 0, t = 0;
+    if (ns === 1 || yc <= xs[0]) { s = 0; t = 0; }
+    else if (yc >= xs[ns - 1]) { s = ns - 1; t = 0; }
+    else { while (s < ns - 2 && yc > xs[s + 1]) s++; t = (yc - xs[s]) / (xs[s + 1] - xs[s]); }
+    const s1 = Math.min(ns - 1, s + 1);
+    for (let x = 0; x < W; x++) { const xx = x < H ? x : H - 1; out[x] = dy[s * H + xx] * (1 - t) + dy[s1 * H + xx] * t; }
+  }
+
+  function fieldRow(f: LineField, y: number, W: number, out: Float32Array): void {
+    const { xs, ns, H, dy } = f;
+    const yy = y < 0 ? 0 : y >= H ? H - 1 : y;
+    if (ns === 1) { out.fill(dy[yy]); return; }
+    let s = 0;
+    for (let x = 0; x < W; x++) {
+      const xc = x + 0.5;
+      while (s < ns - 2 && xc > xs[s + 1]) s++;
+      if (xc <= xs[0]) out[x] = dy[yy];
+      else if (xc >= xs[ns - 1]) out[x] = dy[(ns - 1) * H + yy];
+      else { const t = (xc - xs[s]) / (xs[s + 1] - xs[s]); out[x] = dy[s * H + yy] * (1 - t) + dy[(s + 1) * H + yy] * t; }
+    }
+  }
+
+  function transpose(img: PixelImage): PixelImage {
+    const w = img.w, h = img.h, s32 = new Uint32Array(img.data.buffer, img.data.byteOffset, w * h);
+    const out = new Uint8ClampedArray(w * h * 4), o = new Uint32Array(out.buffer);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) o[x * h + y] = s32[y * w + x];
+    return { w: h, h: w, data: out };
+  }
+
+  /**
+   * Follows the printed lines across a straightened page and works out how far each part of each line
+   * sits above or below where it would on flat paper — a crumpled receipt, a page bent over a fold.
+   * Text is found as small dark marks, smeared sideways into line bands; in narrow vertical strips the
+   * band centres are linked from strip to strip into lines. Each line should run level: the offsets
+   * between lines are interpolated, so the paper between them moves with them.
+   * Returns null when there aren't enough lines to be sure, or nothing to straighten.
+   */
+  function lineField(img: PixelImage): LineField | null {
+    const W = img.w, H = img.h;
+    const k = Math.min(1, 640 / W);
+    const w = Math.max(32, Math.round(W * k)), h = Math.max(32, Math.round(H * k)), n = w * h;
+    const kx = W / w, ky = H / h;
+    const Y = k < 1 ? shrinkPlane(lumaPlane(img), W, H, w, h) : lumaPlane(img);
+    const bg = closing(Y, w, h, Math.max(4, Math.round(w / 70)));
+    // text: clearly darker than the paper around it, smeared along the line
+    const hx = Math.max(4, Math.round(w / 45));
+    const I = new Uint8Array(n);
+    for (let p = 0; p < n; p++) I[p] = (bg[p] - Y[p]) / Math.max(30, bg[p]) > 0.22 ? 1 : 0;
+    const D = new Float32Array(n);
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      let s = 0;
+      const ink = (x: number) => I[row + (x < 0 ? 0 : x >= w ? w - 1 : x)];
+      for (let x = -hx - 1; x < hx; x++) s += ink(x);
+      for (let x = 0; x < w; x++) { s += ink(x + hx) - ink(x - hx - 1); D[row + x] = s / (2 * hx + 1); }
+    }
+    // only for text that runs across (a page still lying sideways is left alone): in square tiles, ink
+    // summed along each row ripples from line to line; summed along each column it evens out
+    let rh = 0, rv = 0;
+    {
+      const T = Math.max(24, Math.round(w / 6)), rs = new Float32Array(T), cs = new Float32Array(T);
+      for (let ty = 0; ty + T <= h; ty += T) for (let tx = 0; tx + T <= w; tx += T) {
+        rs.fill(0); cs.fill(0);
+        let tot = 0;
+        for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) { const v = I[(ty + y) * w + tx + x]; rs[y] += v; cs[x] += v; tot += v; }
+        if (tot < T * T * 0.02) continue;
+        const m = tot / T;
+        let vr = 0, vc = 0;
+        for (let i = 0; i < T; i++) { vr += (rs[i] - m) ** 2; vc += (cs[i] - m) ** 2; }
+        // a vote per tile (a barcode or a crease doesn't outweigh the text)
+        if (vr > vc * 1.4) rh++; else if (vc > vr * 1.4) rv++;
+      }
+    }
+    // clearly sideways (a page not turned yet): left alone
+    if (rv > rh * 1.5) return null;
+    const ns = Math.max(3, Math.min(24, Math.round(w / 53))), sw = w / ns;
+    // band centres in each strip
+    const peaks: number[][] = [];
+    const P = new Float32Array(h), Q = new Float32Array(h);
+    const L = Math.max(6, Math.round(h / 120));
+    for (let s = 0; s < ns; s++) {
+      const x0 = Math.round(s * sw), x1 = Math.round((s + 1) * sw);
+      for (let y = 0; y < h; y++) { let v = 0; for (let x = x0; x < x1; x++) v += D[y * w + x]; P[y] = v / (x1 - x0); }
+      for (let y = 0; y < h; y++) { let v = 0, c = 0; for (let d = -2; d <= 2; d++) { const yy = y + d; if (yy >= 0 && yy < h) { v += P[yy]; c++; } } Q[y] = v / c; }
+      const list: number[] = [];
+      for (let y = 3; y < h - 3; y++) {
+        const v = Q[y];
+        if (v < 0.08) continue;
+        let top = true;
+        for (let d = 1; d <= 4 && top; d++) { if ((y - d >= 0 && Q[y - d] > v) || (y + d < h && Q[y + d] >= v)) top = false; }
+        if (!top) continue;
+        let lo1 = v, lo2 = v;
+        for (let d = 1; d <= L * 2 && y - d >= 0; d++) lo1 = Math.min(lo1, Q[y - d]);
+        for (let d = 1; d <= L * 2 && y + d < h; d++) lo2 = Math.min(lo2, Q[y + d]);
+        if (v - Math.max(lo1, lo2) < 0.06) continue;
+        // the middle of the band at half height: the body of the letters, little moved by which
+        // letters reach up or down in this strip
+        const half = v * 0.5;
+        let yt = y, yb = y;
+        while (yt > 0 && Q[yt - 1] > half) yt--;
+        while (yb < h - 1 && Q[yb + 1] > half) yb++;
+        const ft = yt > 0 ? yt - (Q[yt] - half) / Math.max(1e-6, Q[yt] - Q[yt - 1]) : yt;
+        const fb = yb < h - 1 ? yb + (Q[yb] - half) / Math.max(1e-6, Q[yb] - Q[yb + 1]) : yb;
+        list.push((ft + fb) / 2);
+      }
+      peaks.push(list);
+    }
+    // typical line spacing
+    const gaps: number[] = [];
+    for (const l of peaks) for (let i = 1; i < l.length; i++) gaps.push(l[i] - l[i - 1]);
+    if (gaps.length < 8) return null;
+    gaps.sort((a, b) => a - b);
+    const sp = gaps[gaps.length >> 1];
+    // link band centres from strip to strip (mutually nearest, close enough, a strip may be skipped)
+    interface Track { s: number[]; y: number[] }
+    const tracks: Track[] = [];
+    let open: Track[] = [];
+    for (let s = 0; s < ns; s++) {
+      const l = peaks[s], used = new Uint8Array(l.length), next: Track[] = [];
+      const cands = open.filter((t) => s - t.s[t.s.length - 1] <= 2);
+      for (const t of cands) {
+        const n0 = t.s.length, ly = t.y[n0 - 1];
+        // predicted from the track's own slope
+        const slope = n0 >= 2 ? (t.y[n0 - 1] - t.y[n0 - 2]) / (t.s[n0 - 1] - t.s[n0 - 2]) : 0;
+        const py = ly + slope * (s - t.s[n0 - 1]);
+        let bi = -1, bd = sp * 0.3;
+        for (let i = 0; i < l.length; i++) { const d = Math.abs(l[i] - py); if (!used[i] && d < bd) { bd = d; bi = i; } }
+        if (bi < 0) { next.push(t); continue; }
+        // mutual: no other open track is closer to this centre
+        if (cands.some((o) => o !== t && Math.abs(o.y[o.y.length - 1] - l[bi]) < Math.abs(ly - l[bi]) - 0.5)) { next.push(t); continue; }
+        used[bi] = 1; t.s.push(s); t.y.push(l[bi]); next.push(t);
+      }
+      for (let i = 0; i < l.length; i++) if (!used[i]) { const t = { s: [s], y: [l[i]] }; tracks.push(t); next.push(t); }
+      open = next.filter((t) => s - t.s[t.s.length - 1] <= 1);
+    }
+    const good = tracks.filter((t) => t.s.length >= 3);
+    if (good.length < 4) return null;
+    // where each line would lie flat: its mean height. Points per strip: (target, offset)
+    const pts: { t: number; d: number }[][] = Array.from({ length: ns }, () => []);
+    const tol = Math.max(1.2, sp * 0.12);
+    for (const t0 of good) {
+      // a point that jumps away from both neighbours is a misread (a mark above or below the line)
+      const keep = t0.y.map((y, i, a) => {
+        const nb = [a[i - 1], a[i + 1]].filter((v) => v !== undefined);
+        if (nb.length === 2) { const m3 = [nb[0], y, nb[1]].sort((p, q) => p - q)[1]; return Math.abs(y - m3) <= tol; }
+        return Math.abs(y - nb[0]) <= tol * 2;
+      });
+      const t = { s: t0.s.filter((_, i) => keep[i]), y: t0.y.filter((_, i) => keep[i]) };
+      if (t.s.length < 3) continue;
+      const m = t.y.reduce((a, b) => a + b, 0) / t.y.length;
+      // a line that wanders by more than about half the spacing is two lines mixed up
+      if (t.y.some((y) => Math.abs(y - m) > sp * 1.2)) continue;
+      t.s.forEach((s, i) => pts[s].push({ t: m, d: t.y[i] - m }));
+    }
+    let total = 0;
+    for (const p of pts) { p.sort((a, b) => a.t - b.t); total += p.length; }
+    if (total < 12) return null;
+    // per strip, offsets at every full-size row (interpolated between lines, held beyond the ends)
+    const dy = new Float32Array(ns * H), have = new Uint8Array(ns);
+    let maxD = 0;
+    for (let s = 0; s < ns; s++) {
+      // drop points whose order disagrees with their neighbours (lines must not cross)
+      const p = pts[s].filter((q, i, a) => i === 0 || q.t + q.d > a[i - 1].t + a[i - 1].d);
+      if (p.length < 2) continue;
+      have[s] = 1;
+      let j = 0;
+      for (let Yr = 0; Yr < H; Yr++) {
+        const yt = (Yr + 0.5) / ky;
+        while (j < p.length - 2 && yt > p[j + 1].t) j++;
+        let v: number;
+        if (yt <= p[0].t) v = p[0].d; else if (yt >= p[p.length - 1].t) v = p[p.length - 1].d;
+        else { const a = p[j], b = p[j + 1], u = (yt - a.t) / Math.max(1e-6, b.t - a.t); v = a.d * (1 - u) + b.d * u; }
+        dy[s * H + Yr] = v * ky;
+        if (Math.abs(v * ky) > maxD) maxD = Math.abs(v * ky);
+      }
+    }
+    if (maxD < 0.6) return null;
+    // strips without lines: from their neighbours
+    for (let s = 0; s < ns; s++) {
+      if (have[s]) continue;
+      let a = s - 1; while (a >= 0 && !have[a]) a--;
+      let b = s + 1; while (b < ns && !have[b]) b++;
+      if (a < 0 && b >= ns) return null;
+      for (let Yr = 0; Yr < H; Yr++) {
+        dy[s * H + Yr] = a < 0 ? dy[b * H + Yr] : b >= ns ? dy[a * H + Yr] : dy[a * H + Yr] + (dy[b * H + Yr] - dy[a * H + Yr]) * ((s - a) / (b - a));
+      }
+    }
+    // smooth: along each strip over a third of a line, and across neighbouring strips
+    const sm = new Float32Array(ns * H), r = Math.max(1, Math.round(sp * ky * 0.3));
+    for (let s = 0; s < ns; s++) {
+      let acc = 0, c = 0;
+      const base = s * H;
+      for (let Yr = -r; Yr <= r; Yr++) if (Yr >= 0 && Yr < H) { acc += dy[base + Yr]; c++; }
+      for (let Yr = 0; Yr < H; Yr++) {
+        sm[base + Yr] = acc / c;
+        const add = Yr + r + 1, sub = Yr - r;
+        if (add < H) { acc += dy[base + add]; c++; }
+        if (sub >= 0) { acc -= dy[base + sub]; c--; }
+      }
+    }
+    for (let s = 0; s < ns; s++) for (let Yr = 0; Yr < H; Yr++) {
+      const a = sm[Math.max(0, s - 1) * H + Yr], b = sm[s * H + Yr], c2 = sm[Math.min(ns - 1, s + 1) * H + Yr];
+      // small offsets are within what the shapes of the letters alone produce: left alone
+      const v = 0.25 * a + 0.5 * b + 0.25 * c2, sh = 0.8 * ky;
+      dy[s * H + Yr] = v > sh ? v - sh : v < -sh ? v + sh : 0;
+    }
+    const xs = new Float32Array(ns);
+    for (let s = 0; s < ns; s++) xs[s] = (s + 0.5) * sw * kx;
+    return { xs, ns, H, dy };
   }
 
   // ---------------------------------------------------------------- blur: measure and undo
@@ -303,18 +555,21 @@ export function scanKernels(): Kernels {
       bgY[k] = p90;
       bR[k] = m ? sr / m : p90; bG[k] = m ? sg / m : p90; bB[k] = m ? sb / m : p90;
     }
-    // blocks much darker than their surroundings are content, not paper
+    // blocks much darker than their surroundings, or more colourful (a tinted table header, a stamp),
+    // are content, not paper
     const ok = new Uint8Array(gn);
-    const tmp: number[] = [];
+    const tmp: number[] = [], tc: number[] = [];
+    const bC = new Float32Array(gn);
+    for (let k = 0; k < gn; k++) bC[k] = Math.max(bR[k], bG[k], bB[k]) - Math.min(bR[k], bG[k], bB[k]);
     let good = 0;
     for (let by = 0; by < gh; by++) for (let bx = 0; bx < gw; bx++) {
-      tmp.length = 0;
+      tmp.length = 0; tc.length = 0;
       for (let yy = Math.max(0, by - 3); yy <= Math.min(gh - 1, by + 3); yy++)
-        for (let xx = Math.max(0, bx - 3); xx <= Math.min(gw - 1, bx + 3); xx++) tmp.push(bgY[yy * gw + xx]);
-      tmp.sort((a, b) => a - b);
-      const med = tmp[(tmp.length * 0.6) | 0];
+        for (let xx = Math.max(0, bx - 3); xx <= Math.min(gw - 1, bx + 3); xx++) { tmp.push(bgY[yy * gw + xx]); tc.push(bC[yy * gw + xx]); }
+      tmp.sort((a, b) => a - b); tc.sort((a, b) => a - b);
+      const med = tmp[(tmp.length * 0.6) | 0], medC = tc[(tc.length * 0.5) | 0];
       const k = by * gw + bx;
-      if (bgY[k] >= med * 0.8 && bgY[k] > 40) { ok[k] = 1; good++; }
+      if (bgY[k] >= med * 0.8 && bgY[k] > 40 && bC[k] <= medC + 8) { ok[k] = 1; good++; }
     }
     if (good < gn * 0.25) return null;
     // fill the gaps from valid neighbours
@@ -372,6 +627,181 @@ export function scanKernels(): Kernels {
     }
   }
 
+  /**
+   * running max (or min) over 2r+1 samples along rows or columns, any radius in constant time per pixel
+   * (van Herk / Gil-Werman)
+   */
+  function runMax(a: Float32Array, w: number, h: number, r: number, max: boolean, vertical: boolean): Float32Array {
+    if (vertical) return runMaxV(a, w, h, r, max);
+    const n = vertical ? h : w, lines = vertical ? w : h, step = vertical ? w : 1, k = 2 * r + 1, N = n + 2 * r;
+    const o = new Float32Array(a.length), src = new Float32Array(N), g = new Float32Array(N), hh = new Float32Array(N);
+    const pad = max ? -1e9 : 1e9;
+    for (let l = 0; l < lines; l++) {
+      const base = vertical ? l : l * w;
+      for (let i = 0; i < r; i++) { src[i] = pad; src[N - 1 - i] = pad; }
+      for (let i = 0, j = base; i < n; i++, j += step) src[i + r] = a[j];
+      for (let b = 0; b < N; b += k) {
+        const e = b + k < N ? b + k : N;
+        let v = src[b]; g[b] = v;
+        if (max) { for (let i = b + 1; i < e; i++) { const u = src[i]; if (u > v) v = u; g[i] = v; } v = src[e - 1]; hh[e - 1] = v; for (let i = e - 2; i >= b; i--) { const u = src[i]; if (u > v) v = u; hh[i] = v; } }
+        else { for (let i = b + 1; i < e; i++) { const u = src[i]; if (u < v) v = u; g[i] = v; } v = src[e - 1]; hh[e - 1] = v; for (let i = e - 2; i >= b; i--) { const u = src[i]; if (u < v) v = u; hh[i] = v; } }
+      }
+      const r2 = 2 * r;
+      if (max) for (let i = 0, j = base; i < n; i++, j += step) { const x = hh[i], y = g[i + r2]; o[j] = x > y ? x : y; }
+      else for (let i = 0, j = base; i < n; i++, j += step) { const x = hh[i], y = g[i + r2]; o[j] = x < y ? x : y; }
+    }
+    return o;
+  }
+  /** runMax down the columns, row by row (memory is read in order, not strided) */
+  function runMaxV(a: Float32Array, w: number, h: number, r: number, max: boolean): Float32Array {
+    const k = 2 * r + 1, N = h + 2 * r, pad = max ? -1e9 : 1e9;
+    // padded rows: index i ↔ source row i - r
+    const row = (i: number) => i - r;
+    const g = new Float32Array(N * w), hh = new Float32Array(N * w), o = new Float32Array(a.length);
+    const put = (dst: Float32Array, i: number) => {
+      const y = row(i), b = i * w;
+      if (y < 0 || y >= h) dst.fill(pad, b, b + w); else dst.set(a.subarray(y * w, y * w + w), b);
+    };
+    for (let b0 = 0; b0 < N; b0 += k) {
+      const e = Math.min(N, b0 + k);
+      put(g, b0);
+      for (let i = b0 + 1; i < e; i++) {
+        put(g, i);
+        const c = i * w, p = c - w;
+        if (max) for (let x = 0; x < w; x++) { if (g[p + x] > g[c + x]) g[c + x] = g[p + x]; }
+        else for (let x = 0; x < w; x++) { if (g[p + x] < g[c + x]) g[c + x] = g[p + x]; }
+      }
+      put(hh, e - 1);
+      for (let i = e - 2; i >= b0; i--) {
+        put(hh, i);
+        const c = i * w, p = c + w;
+        if (max) for (let x = 0; x < w; x++) { if (hh[p + x] > hh[c + x]) hh[c + x] = hh[p + x]; }
+        else for (let x = 0; x < w; x++) { if (hh[p + x] < hh[c + x]) hh[c + x] = hh[p + x]; }
+      }
+    }
+    const r2 = 2 * r;
+    for (let y = 0; y < h; y++) {
+      const ob = y * w, hb = y * w, gb = (y + r2) * w;
+      if (max) for (let x = 0; x < w; x++) { const u = hh[hb + x], v = g[gb + x]; o[ob + x] = u > v ? u : v; }
+      else for (let x = 0; x < w; x++) { const u = hh[hb + x], v = g[gb + x]; o[ob + x] = u < v ? u : v; }
+    }
+    return o;
+  }
+  /** grey closing with a square of side 2r+1: removes dark marks narrower than that, keeps the edges of larger shapes in place */
+  function closing(a: Float32Array, w: number, h: number, r: number): Float32Array {
+    const d = runMax(runMax(a, w, h, r, true, false), w, h, r, true, true);
+    return runMax(runMax(d, w, h, r, false, false), w, h, r, false, true);
+  }
+
+  /** marks (M = 1) the regions below `level` whose outline is a sharp step nearly all the way round */
+  function sharpAreas(R: Float32Array, w: number, h: number, r: number, level: number, M: Float32Array): void {
+    const n = w * h, lab = new Int32Array(n).fill(-1);
+    const stack: number[] = [], comp: number[] = [];
+    const minArea = (2 * r + 1) * (2 * r + 1);
+    for (let s = 0; s < n; s++) {
+      if (lab[s] !== -1 || R[s] >= level) continue;
+      comp.length = 0; stack.length = 0;
+      lab[s] = s; stack.push(s);
+      let lo = 9;
+      while (stack.length) {
+        const j = stack.pop()!; comp.push(j);
+        if (R[j] < lo) lo = R[j];
+        const x = j % w;
+        if (x > 0 && lab[j - 1] === -1 && R[j - 1] < level) { lab[j - 1] = s; stack.push(j - 1); }
+        if (x < w - 1 && lab[j + 1] === -1 && R[j + 1] < level) { lab[j + 1] = s; stack.push(j + 1); }
+        if (j >= w && lab[j - w] === -1 && R[j - w] < level) { lab[j - w] = s; stack.push(j - w); }
+        if (j < n - w && lab[j + w] === -1 && R[j + w] < level) { lab[j + w] = s; stack.push(j + w); }
+      }
+      if (comp.length < minArea) continue;
+      const depth = 1 - lo;
+      if (depth < 0.12) continue;
+      // along the outline: does brightness rise by most of the depth within two pixels outwards?
+      let edge = 0, sharp = 0;
+      for (const j of comp) {
+        const x = j % w, y = (j / w) | 0;
+        for (let k = 0; k < 4; k++) {
+          const dx = k === 0 ? -1 : k === 1 ? 1 : 0, dy = k === 2 ? -1 : k === 3 ? 1 : 0;
+          const x1 = x + dx, y1 = y + dy;
+          if (x1 < 0 || y1 < 0 || x1 >= w || y1 >= h) continue;
+          if (R[y1 * w + x1] < level) continue;
+          edge++;
+          const x3 = Math.min(w - 1, Math.max(0, x + 3 * dx)), y3 = Math.min(h - 1, Math.max(0, y + 3 * dy));
+          const xb = Math.min(w - 1, Math.max(0, x - dx)), yb = Math.min(h - 1, Math.max(0, y - dy));
+          if (R[y3 * w + x3] - R[yb * w + xb] >= 0.4 * Math.min(depth, 1 - R[yb * w + xb] + 0.02)) sharp++;
+          break;
+        }
+      }
+      if (edge && sharp / edge >= 0.72) for (const j of comp) M[j] = 1;
+    }
+  }
+
+  /**
+   * Fine shading across the page, relative to the block-wise paper colour: creases, folds and the sharp
+   * edge of a shadow are followed to the pixel (the paper blocks only see light that changes slowly).
+   * Text is removed by a closing; what is left darker than half the paper (logos, photos, QR codes) or
+   * coloured (tinted table headers, stamps) is content and keeps the block-wise paper.
+   */
+  function fineShade(img: PixelImage, P: Paper | null): Float32Array {
+    const W = img.w, H = img.h;
+    // half size on big pages: the shading needs no more detail, and it is 4× cheaper
+    const f = W * H > 4.2e6 ? 2 : 1;
+    const w = Math.max(8, Math.round(W / f)), h = Math.max(8, Math.round(H / f)), n = w * h;
+    const r = Math.max(3, Math.min(12, Math.round(Math.sqrt(W * H) / 220 / f)));
+    const d = img.data;
+    const Yf = lumaPlane(img), Chf = new Float32Array(W * H);
+    for (let p = 0, i = 0; p < W * H; p++, i += 4) Chf[p] = Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]);
+    const Y = f > 1 ? shrinkPlane(Yf, W, H, w, h) : Yf, Ch = f > 1 ? shrinkPlane(Chf, W, H, w, h) : Chf;
+    const C = closing(Y, w, h, r);
+    // paper brightness and colourfulness from the blocks (block grid scaled to this size)
+    const PY = new Float32Array(n), PC = new Float32Array(n);
+    const ir = new Float32Array(w), ig = new Float32Array(w), ib = new Float32Array(w), xi = new Int32Array(w), xt = new Float32Array(w);
+    const Pf = P ? { ...P, B: P.B / f } : null;
+    if (Pf) for (let x = 0; x < w; x++) { let fx = (x + 0.5) / Pf.B - 0.5; if (fx < 0) fx = 0; if (fx > Pf.gw - 1) fx = Pf.gw - 1; xi[x] = fx | 0; xt[x] = fx - (fx | 0); }
+    for (let y = 0; y < h; y++) {
+      if (Pf) paperRow(Pf, y, w, ir, ig, ib, xi, xt); else { ir.fill(1 / 255); ig.fill(1 / 255); ib.fill(1 / 255); }
+      for (let x = 0; x < w; x++) {
+        const R = 1 / ir[x], G = 1 / ig[x], B = 1 / ib[x];
+        PY[y * w + x] = 0.299 * R + 0.587 * G + 0.114 * B;
+        PC[y * w + x] = Math.max(R, G, B) - Math.min(R, G, B);
+      }
+    }
+    // colourfulness of the page itself, smoothed over about a letter
+    const ChB = boxSmooth(Ch, w, h, r * 0.6);
+    const S = new Float32Array(n), M = new Float32Array(n), Rt = new Float32Array(n);
+    for (let p = 0; p < n; p++) {
+      const ratio = C[p] / Math.max(20, PY[p]);
+      Rt[p] = ratio;
+      M[p] = ratio < 0.25 || ChB[p] - PC[p] > 9 ? 1 : 0;
+      S[p] = ratio < 0.3 ? 0.3 : ratio > 1.12 ? 1.12 : ratio;
+    }
+    // Dark areas left after the closing are either printed (a logo, a photo, a QR code, a grey box) or
+    // shading (the dark side of a crease, a shadow). Printed areas end in a sharp step all around;
+    // shading fades out on at least one side. Checked at two depths, so a pale logo inside a shadow
+    // still stands out.
+    sharpAreas(Rt, w, h, r, 0.88, M);
+    sharpAreas(Rt, w, h, r, 0.72, M);
+    // The closing also takes away narrow dark bands that are not print: the valley of a fold, the
+    // dark line of a crease. A smaller closing removes only the strokes of text; what it keeps on top
+    // of the large one is a band — printed (a thick rule, a QR module: sharp all round) or shading
+    // (soft on at least one side), which then joins the shading.
+    const r2 = Math.max(2, Math.round(r / 3));
+    if (r2 < r) {
+      const C2 = closing(Y, w, h, r2), R2 = new Float32Array(n), P2 = new Float32Array(n);
+      for (let p = 0; p < n; p++) R2[p] = C2[p] / Math.max(1, C[p]);
+      sharpAreas(R2, w, h, r2, 0.93, P2);
+      for (let p = 0; p < n; p++) if (R2[p] < 0.97 && !P2[p]) {
+        const ratio = C2[p] / Math.max(20, PY[p]);
+        S[p] = ratio < 0.3 ? 0.3 : ratio > 1.12 ? 1.12 : ratio;
+      }
+    }
+    // content and a margin around it keep the block-wise paper (factor 1)
+    const Md = runMax(runMax(M, w, h, r, true, false), w, h, r, true, true);
+    const Mb = boxSmooth(Md, w, h, Math.max(1, r * 0.4));
+    for (let p = 0; p < n; p++) S[p] = S[p] * (1 - Mb[p]) + Mb[p];
+    const Sb = blurPlane(S, w, h, 0.8 / f + 0.3);
+    return f > 1 ? resizePlane(Sb, w, h, W, H) : Sb;
+  }
+
   function percentile(hist: Uint32Array, total: number, q: number): number {
     let c = 0;
     for (let v = 0; v < hist.length; v++) { c += hist[v]; if (c >= total * q) return v; }
@@ -385,6 +815,9 @@ export function scanKernels(): Kernels {
   function docFilter(img: PixelImage, mode: 'auto' | 'gray' | 'bw' | 'lighten' | 'enhance'): void {
     const w = img.w, h = img.h, d = img.data, n = w * h;
     const P = paperPlanes(img);
+    // 1 / fine shading per pixel (creases, folds, hard shadow edges)
+    const FS = fineShade(img, P);
+    for (let p = 0; p < n; p++) FS[p] = 1 / FS[p];
     const ir = new Float32Array(w).fill(1 / 255), ig = new Float32Array(w).fill(1 / 255), ib = new Float32Array(w).fill(1 / 255);
     const xi = new Int32Array(w), xt = new Float32Array(w);
     if (P) for (let x = 0; x < w; x++) {
@@ -401,7 +834,7 @@ export function scanKernels(): Kernels {
       if (P) paperRow(P, y, w, ir, ig, ib, xi, xt);
       const brow = ((y / KB) | 0) * kw;
       for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
-        const v = 0.299 * d[i] * ir[x] + 0.587 * d[i + 1] * ig[x] + 0.114 * d[i + 2] * ib[x];
+        const v = (0.299 * d[i] * ir[x] + 0.587 * d[i + 1] * ig[x] + 0.114 * d[i + 2] * ib[x]) * FS[y * w + x];
         hist[v >= 1.279 ? 1023 : (v * 800) | 0]++; hn++;
         if (bh) bh[(brow + ((x / KB) | 0)) * 64 + (v >= 1.24 ? 63 : (v * 51) | 0)]++;
       }
@@ -412,7 +845,14 @@ export function scanKernels(): Kernels {
     // black point from the darkest ink, white a little below the paper (so shadows and grain vanish)
     const ink = percentile(hist, hn, 0.004) / 800;
     const black = mode === 'lighten' ? 0 : mode === 'enhance' ? Math.min(0.3, ink * 0.75) : Math.min(0.42, ink);
-    const white = mode === 'lighten' ? 0.97 : mode === 'enhance' ? 0.93 : 0.9;
+    // white just below where the paper's own brightness tails off (after the shading is divided out the
+    // paper is a narrow peak near 1): pale rules, light tints and faint print stay, grain goes
+    let peak = 640, pv = 0;
+    for (let b = 640; b < 960; b++) if (hist[b] > pv) { pv = hist[b]; peak = b; }
+    let lo = peak;
+    while (lo > 560 && hist[lo] > pv * 0.12) lo--;
+    const paperLo = lo / 800;
+    const white = mode === 'lighten' ? 0.97 : mode === 'enhance' ? Math.min(0.95, Math.max(0.9, paperLo + 0.02)) : Math.min(0.93, Math.max(0.86, paperLo - 0.005));
     const gamma = mode === 'lighten' ? 0.92 : mode === 'enhance' ? 1.06 : 1.12;
     const sat = mode === 'lighten' ? 1.05 : mode === 'enhance' ? 1.18 : 1.3;
     for (let k = 0; k < LN; k++) {
@@ -458,7 +898,7 @@ export function scanKernels(): Kernels {
         for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
           const x0 = ti[x], x1 = x0 + 1 < kw ? x0 + 1 : x0, tx = tt[x];
           const thr = (T[y0 * kw + x0] * (1 - tx) + T[y0 * kw + x1] * tx) * (1 - ty) + (T[y1 * kw + x0] * (1 - tx) + T[y1 * kw + x1] * tx) * ty;
-          const v = 0.299 * d[i] * ir[x] + 0.587 * d[i + 1] * ig[x] + 0.114 * d[i + 2] * ib[x];
+          const v = (0.299 * d[i] * ir[x] + 0.587 * d[i + 1] * ig[x] + 0.114 * d[i + 2] * ib[x]) * FS[y * w + x];
           let a = (v - thr) / 0.07 + 0.5; a = a < 0 ? 0 : a > 1 ? 1 : a;
           d[i] = d[i + 1] = d[i + 2] = a * a * (3 - 2 * a) * 255;
         }
@@ -468,7 +908,7 @@ export function scanKernels(): Kernels {
     for (let y = 0; y < h; y++) {
       if (P) paperRow(P, y, w, ir, ig, ib, xi, xt);
       for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
-        const r = d[i] * ir[x], g = d[i + 1] * ig[x], b = d[i + 2] * ib[x];
+        const f = FS[y * w + x], r = d[i] * ir[x] * f, g = d[i + 1] * ig[x] * f, b = d[i + 2] * ib[x] * f;
         if (mode === 'gray') { d[i] = d[i + 1] = d[i + 2] = L(0.299 * r + 0.587 * g + 0.114 * b); continue; }
         // colour: the same curve on each channel, then a touch more saturation
         const R = L(r), G = L(g), B = L(b);
@@ -589,8 +1029,19 @@ export function scanKernels(): Kernels {
     // a hair inside the found outline, so no sliver of the desk shows along the edges
     // (a little more on curved sides: the traced curve is smooth, a real edge has small waves)
     const m = Math.max(1.5, (job.bend ? 0.006 : 0.0035) * Math.max(job.outW, job.outH));
-    const warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend);
+    let warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend);
     lap('warp');
+    if (job.flatten) {
+      // text lines run along the rows, or down the columns on a page that will be turned a quarter
+      const cols = job.flatten === 'cols';
+      const g = lineField(cols ? transpose(warped) : warped);
+      lap('lines');
+      if (g) {
+        g.cols = cols;
+        warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend, g);
+        lap('flatten');
+      }
+    }
     let blur = 0, sharp: PixelImage | null = null;
     if (job.sharpen === 'auto') {
       blur = estimateBlur(warped);

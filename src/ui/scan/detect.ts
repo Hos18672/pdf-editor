@@ -12,7 +12,8 @@
 import type { Pt, Quad } from './geom';
 
 export interface Rgba { w: number; h: number; data: Uint8ClampedArray | Uint8Array }
-export interface Detection { quad: Quad; score: number; support: number[] }
+/** agree: how well the outline matches the sheet found as a region (0…1; 0 when no region was found) */
+export interface Detection { quad: Quad; score: number; support: number[]; agree?: number }
 
 export interface Detector {
   luminance(img: Rgba): Float32Array;
@@ -240,7 +241,8 @@ export function detectKernels(): Detector {
         acc[t * NR + rho + R]++;
       }
     }
-    const minVotes = Math.max(12, Math.min(w, h) * 0.1);
+    // low enough for the short end of a long receipt (a quarter of the frame width or less)
+    const minVotes = Math.max(12, Math.min(w, h) * 0.06);
     const peaks: { t: number; r: number; v: number }[] = [];
     for (let t = 0; t < NT; t++) for (let r = 2; r < NR - 2; r++) {
       const v = acc[t * NR + r];
@@ -319,6 +321,31 @@ export function detectKernels(): Detector {
     return tot ? hit / tot : 0;
   }
 
+  /**
+   * Edge support just past a corner, along the side's own direction. A real corner is where the sheet
+   * ends; when the side's edge carries on (the long side of a receipt past a fold that crosses it), the
+   * "corner" is only a crease. Returns 0 when the extension runs out of the picture.
+   */
+  function beyond(E: EdgeMap, from: Pt, c: Pt, frac: number): number {
+    const { w, h } = E;
+    const dx = c.x - from.x, dy = c.y - from.y, len = Math.hypot(dx, dy);
+    const ext = Math.max(6, len * frac);
+    // start a little past the corner: the crossing side's own edge sits right at it
+    const gap = Math.max(3, Math.min(w, h) * 0.015);
+    const a = { x: c.x + (dx / len) * gap, y: c.y + (dy / len) * gap }, b = { x: c.x + (dx / len) * (gap + ext), y: c.y + (dy / len) * (gap + ext) };
+    const inPic = (p: Pt) => p.x >= 2 && p.y >= 2 && p.x <= w - 3 && p.y <= h - 3;
+    if (!inPic(a)) return 0;
+    let e = b;
+    if (!inPic(b)) {
+      // clip to the picture; too short a stretch says nothing
+      let lo = 0, hi = 1;
+      for (let i = 0; i < 18; i++) { const m = (lo + hi) / 2; if (inPic({ x: a.x + (b.x - a.x) * m, y: a.y + (b.y - a.y) * m })) lo = m; else hi = m; }
+      e = { x: a.x + (b.x - a.x) * lo, y: a.y + (b.y - a.y) * lo };
+      if (Math.hypot(e.x - a.x, e.y - a.y) < Math.max(8, ext * 0.4)) return 0;
+    }
+    return support(E, a, e);
+  }
+
   /** brightness inside minus outside along a side (quad given clockwise) */
   function contrast(E: EdgeMap, p: Pt, q: Pt): number {
     const { w, h, L } = E;
@@ -349,31 +376,78 @@ export function detectKernels(): Detector {
       const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
       if (v > best) { best = v; thr = t; }
     }
-    const lab = new Int32Array(n).fill(-1);
+    const m = new Uint8Array(n);
+    for (let i = 0; i < n; i++) m[i] = L[i] > thr ? 1 : 0;
+    const big = largest(m, w, h);
+    if (!big || big.size < n * 0.06 || big.size > n * 0.97) return null;
+    return maskQuad(big.mask, w, h);
+  }
+
+  /** mean over a (2r+1)² square, constant time per pixel (edges clamped) */
+  function boxBlur(a: Float32Array, w: number, h: number, r: number): Float32Array {
+    const t = new Float32Array(a.length), o = new Float32Array(a.length), k = 1 / (2 * r + 1);
+    for (let y = 0; y < h; y++) {
+      const row = y * w;
+      let s = 0;
+      for (let i = -r - 1; i < r; i++) s += a[row + (i < 0 ? 0 : i >= w ? w - 1 : i)];
+      for (let x = 0; x < w; x++) {
+        const add = x + r >= w ? w - 1 : x + r, sub = x - r - 1 < 0 ? 0 : x - r - 1;
+        s += a[row + add] - a[row + sub];
+        t[row + x] = s * k;
+      }
+    }
+    for (let x = 0; x < w; x++) {
+      let s = 0;
+      for (let i = -r - 1; i < r; i++) s += t[(i < 0 ? 0 : i >= h ? h - 1 : i) * w + x];
+      for (let y = 0; y < h; y++) {
+        const add = y + r >= h ? h - 1 : y + r, sub = y - r - 1 < 0 ? 0 : y - r - 1;
+        s += t[add * w + x] - t[sub * w + x];
+        o[y * w + x] = s * k;
+      }
+    }
+    return o;
+  }
+
+  /** the largest 4-connected region of a 0/1 mask */
+  function largest(m: Uint8Array, w: number, h: number): { mask: Uint8Array; size: number } | null {
+    const n = w * h, lab = new Int32Array(n).fill(-1);
     let bestId = -1, bestSize = 0, id = 0;
     const q: number[] = [];
     for (let s = 0; s < n; s++) {
-      if (lab[s] !== -1 || L[s] <= thr) continue;
+      if (lab[s] !== -1 || !m[s]) continue;
       let size = 0;
       lab[s] = id; q.length = 0; q.push(s);
       while (q.length) {
         const j = q.pop()!; size++;
         const x = j % w;
-        if (x > 0 && lab[j - 1] === -1 && L[j - 1] > thr) { lab[j - 1] = id; q.push(j - 1); }
-        if (x < w - 1 && lab[j + 1] === -1 && L[j + 1] > thr) { lab[j + 1] = id; q.push(j + 1); }
-        if (j >= w && lab[j - w] === -1 && L[j - w] > thr) { lab[j - w] = id; q.push(j - w); }
-        if (j < n - w && lab[j + w] === -1 && L[j + w] > thr) { lab[j + w] = id; q.push(j + w); }
+        if (x > 0 && lab[j - 1] === -1 && m[j - 1]) { lab[j - 1] = id; q.push(j - 1); }
+        if (x < w - 1 && lab[j + 1] === -1 && m[j + 1]) { lab[j + 1] = id; q.push(j + 1); }
+        if (j >= w && lab[j - w] === -1 && m[j - w]) { lab[j - w] = id; q.push(j - w); }
+        if (j < n - w && lab[j + w] === -1 && m[j + w]) { lab[j + w] = id; q.push(j + w); }
       }
       if (size > bestSize) { bestSize = size; bestId = id; }
       id++;
     }
-    if (bestSize < n * 0.06 || bestSize > n * 0.97) return null;
+    if (bestId < 0) return null;
+    const out = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (lab[i] === bestId) out[i] = 1;
+    return { mask: out, size: bestSize };
+  }
+
+  /** a region → its convex hull → the largest quad on it, sides straightened by line fits */
+  function maskQuad(mask: Uint8Array, w: number, h: number): Quad | null {
     // extreme points per row → convex hull
     const pts: Pt[] = [];
     for (let y = 0; y < h; y++) {
       let l = -1, r = -1;
-      for (let x = 0; x < w; x++) if (lab[y * w + x] === bestId) { if (l < 0) l = x; r = x; }
+      for (let x = 0; x < w; x++) if (mask[y * w + x]) { if (l < 0) l = x; r = x; }
       if (l >= 0) { pts.push({ x: l, y }); if (r !== l) pts.push({ x: r + 1, y }); }
+    }
+    // top and bottom rows of each column too (flat top and bottom ends)
+    for (let x = 0; x < w; x++) {
+      let t = -1, b = -1;
+      for (let y = 0; y < h; y++) if (mask[y * w + x]) { if (t < 0) t = y; b = y; }
+      if (t >= 0) { pts.push({ x, y: t }); if (b !== t) pts.push({ x, y: b + 1 }); }
     }
     const hull = convexHull(pts);
     if (hull.length < 4) return null;
@@ -389,7 +463,8 @@ export function detectKernels(): Detector {
       if (j1 >= 0 && j2 >= 0 && m1 + m2 > bestA) { bestA = m1 + m2; bq = [hull[i], hull[j1], hull[k], hull[j2]]; }
     }
     if (!bq) return null;
-    // straighten each side with a line fit to the hull boundary near it
+    // straighten each side with a line fit to the boundary near it; a side may only move outwards
+    // (the hull already holds every point of the region)
     const sides: Line[] = [];
     for (let s = 0; s < 4; s++) {
       const p = bq[s], qq = bq[(s + 1) % 4];
@@ -403,7 +478,96 @@ export function detectKernels(): Detector {
     }
     const corners: Pt[] = [];
     for (let s = 0; s < 4; s++) { const c = intersect(sides[(s + 3) % 4], sides[s]); if (!c) return null; corners.push(c); }
-    return isConvex(corners) ? orderQuad(corners) : orderQuad(bq);
+    const ok = isConvex(corners) && corners.every((c, i) => Math.hypot(c.x - bq![i].x, c.y - bq![i].y) < Math.min(w, h) * 0.08);
+    return ok ? orderQuad(corners) : orderQuad(bq);
+  }
+
+  /**
+   * The sheet as a region: seeds on the printed parts (small dark marks on bright ground: text, a
+   * barcode) and on the picture's border, then a watershed flood over the edge strength. The two
+   * floods meet on the strongest edge between them — the paper's outline even when the desk is
+   * nearly as white as the paper, and never a fold or a printed line inside the sheet, which lies
+   * between seeds of the sheet itself. Returns the region and how clearly its outline is an edge.
+   */
+  function paperRegion(img: Rgba, E: EdgeMap): { mask: Uint8Array; size: number; conf: number } | null {
+    const { w, h, L: Lc, mag } = E, n = w * h;
+    const Y = luminance(img);
+    // bright level of the scene
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) hist[Math.max(0, Math.min(255, Lc[i] | 0))]++;
+    let c = 0, p95 = 255;
+    for (let v = 255; v >= 0; v--) { c += hist[v]; if (c >= n * 0.05) { p95 = v; break; } }
+    // marks: much darker than their closed surroundings, on bright ground
+    const mk = new Float32Array(n);
+    for (let i = 0; i < n; i++) if (Lc[i] > p95 * 0.55 && Lc[i] - Y[i] > Math.max(22, Lc[i] * 0.14)) mk[i] = 1;
+    const rd = Math.max(3, Math.round(Math.min(w, h) / 28));
+    const dens = boxBlur(boxBlur(mk, w, h, Math.max(1, Math.round(rd * 0.55))), w, h, Math.max(1, Math.round(rd * 0.55)));
+    // areas where marks are dense, sizeable ones only (specks on the desk, a key on a keyboard are not
+    // a sheet); the seeds are the marks inside them (the density itself spreads past the sheet's edge)
+    const area = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (dens[i] > 0.07 && Lc[i] > p95 * 0.55) area[i] = 1;
+    const seed = new Uint8Array(n);
+    const lab = new Int32Array(n).fill(-1), q: number[] = [], comp: number[] = [];
+    let any = 0;
+    for (let s = 0; s < n; s++) {
+      if (lab[s] !== -1 || !area[s]) continue;
+      comp.length = 0;
+      lab[s] = s; q.length = 0; q.push(s);
+      while (q.length) {
+        const j = q.pop()!; comp.push(j);
+        const x = j % w;
+        if (x > 0 && lab[j - 1] === -1 && area[j - 1]) { lab[j - 1] = s; q.push(j - 1); }
+        if (x < w - 1 && lab[j + 1] === -1 && area[j + 1]) { lab[j + 1] = s; q.push(j + 1); }
+        if (j >= w && lab[j - w] === -1 && area[j - w]) { lab[j - w] = s; q.push(j - w); }
+        if (j < n - w && lab[j + w] === -1 && area[j + w]) { lab[j + w] = s; q.push(j + w); }
+      }
+      if (comp.length < n * 0.004) continue;
+      for (const j of comp) if (mk[j]) { seed[j] = 1; any++; }
+    }
+    if (any < n * 0.002) return null;
+    // label: 1 sheet, 2 surroundings; border seeds stay clear of printed parts that run off the picture
+    const lb = new Uint8Array(n);
+    const LV = 1024, head = new Int32Array(LV).fill(-1), next = new Int32Array(n);
+    const lvl = (i: number) => { const v = Math.round(mag[i] * 8); return v < LV ? v : LV - 1; };
+    const push = (i: number, l: number) => { next[i] = head[l]; head[l] = i; };
+    for (let i = 0; i < n; i++) if (seed[i]) { lb[i] = 1; push(i, lvl(i)); }
+    for (let x = 0; x < w; x++) for (const y of [0, h - 1]) { const i = y * w + x; if (!lb[i] && dens[i] < 0.02) { lb[i] = 2; push(i, lvl(i)); } }
+    for (let y = 0; y < h; y++) for (const x of [0, w - 1]) { const i = y * w + x; if (!lb[i] && dens[i] < 0.02) { lb[i] = 2; push(i, lvl(i)); } }
+    for (let l = 0; l < LV; l++) {
+      while (head[l] !== -1) {
+        const i = head[l]; head[l] = next[i];
+        const x = i % w, L0 = lb[i];
+        for (let k = 0; k < 4; k++) {
+          const j = k === 0 ? (x > 0 ? i - 1 : -1) : k === 1 ? (x < w - 1 ? i + 1 : -1) : k === 2 ? i - w : i + w;
+          if (j < 0 || j >= n || lb[j]) continue;
+          lb[j] = L0;
+          const lj = lvl(j);
+          push(j, lj > l ? lj : l);
+        }
+      }
+    }
+    const m = new Uint8Array(n);
+    for (let i = 0; i < n; i++) m[i] = lb[i] === 1 ? 1 : 0;
+    const big = largest(m, w, h);
+    if (!big) return null;
+    // how much of the outline is a real edge (vs. a flood that met in the middle of flat ground)
+    const edgeHigh = (() => {
+      const b = new Uint32Array(256);
+      for (let i = 0; i < n; i++) b[Math.min(255, (mag[i] * 4) | 0)]++;
+      let cc = 0; for (let k = 0; k < 256; k++) { cc += b[k]; if (cc >= n * 0.9) return Math.max(2.5, k / 4); }
+      return 16;
+    })();
+    let bn = 0, strong = 0;
+    const near = morph(mag, w, h, 2, true);
+    for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (!big.mask[i] || (big.mask[i - 1] && big.mask[i + 1] && big.mask[i - w] && big.mask[i + w])) continue;
+      bn++;
+      // the strongest edge within a pixel or two of the outline
+      if (near[i] >= edgeHigh * 0.6) strong++;
+    }
+    const conf = bn ? strong / bn : 0;
+    return { mask: big.mask, size: big.size, conf };
   }
 
   function convexHull(pts: Pt[]): Pt[] {
@@ -440,7 +604,7 @@ export function detectKernels(): Detector {
     const E = edgeMap(img);
     const { w, h } = E;
     const minDim = Math.min(w, h);
-    const lines = houghLines(E, opts.maxLines ?? (opts.live ? 14 : 20));
+    const lines = houghLines(E, opts.maxLines ?? (opts.live ? 18 : 22));
     // the image border can stand in for a side that runs out of the picture
     const borders: Line[] = [
       { a: 1, b: 0, c: 0.5, border: true, votes: 0 }, { a: 1, b: 0, c: w - 1.5, border: true, votes: 0 },
@@ -469,33 +633,41 @@ export function detectKernels(): Detector {
     const xMin = -0.04 * w, xMax = 1.04 * w, yMin = -0.04 * h, yMax = 1.04 * h;
     let best: Detection | null = null;
     const cands: Detection[] = [];
-    const consider = (q: Quad, sup: number[]) => {
+    const consider = (q: Quad, sup: number[], force = false): Detection | null => {
       const area = quadArea(q) / (w * h);
-      if (area < 0.05) return;
+      if (area < (force ? 0.02 : 0.05)) return null;
       const lens = [0, 1, 2, 3].map((s) => Math.hypot(q[(s + 1) % 4].x - q[s].x, q[(s + 1) % 4].y - q[s].y));
-      if (Math.min(...lens) < minDim * 0.1) return;
+      if (Math.min(...lens) < minDim * (force ? 0.05 : 0.1)) return null;
       const angs = cornerAngles(q);
-      if (angs.some((a) => a < 30 || a > 150)) return;
+      if (angs.some((a) => a < 30 || a > 150)) return null;
       const per = lens.reduce((s, l) => s + l, 0);
       const fit = lens.reduce((s, l, k) => s + l * sup[k], 0) / per;
       const minSup = Math.min(...sup);
-      if (minSup < 0.22) return;
+      if (minSup < 0.22 && !force) return null;
       const anglePen = angs.reduce((s, a) => s + Math.max(0, Math.abs(a - 90) - 22) / 40, 0);
       // a sheet is usually brighter than what it lies on, on every side
       const con = [0, 1, 2, 3].map((s) => contrast(E, q[s], q[(s + 1) % 4]));
       const pol = con.every((c) => c > 6) ? 0.03 : con.every((c) => c < -6) ? -0.05 : 0;
       const borderSides = sup.filter((s) => s === 0.42).length;
+      // sides whose edge runs on past a corner: that corner is a fold or a printed line, not the sheet's end
+      let runOn = 0;
+      for (let s = 0; s < 4; s++) {
+        if (sup[s] === 0.42) continue;
+        const p = q[s], r = q[(s + 1) % 4];
+        runOn += Math.max(0, beyond(E, p, r, 0.22) - 0.4) + Math.max(0, beyond(E, r, p, 0.22) - 0.4);
+      }
       // the expected shape (ID card, passport page) when the caller knows it
       let shape = 0;
       if (opts.ratios?.length) {
         const r = aspectOf(q, w, h);
         shape = opts.ratios.some((t) => Math.abs(Math.log(r / t)) < 0.09 || Math.abs(Math.log(r * t)) < 0.09) ? 0.07 : 0;
       }
-      const score = 0.5 * fit + 0.3 * minSup + 0.38 * Math.sqrt(area) - 0.3 * anglePen + pol - 0.05 * borderSides + shape;
-      if ((globalThis as any).__detDebug) (globalThis as any).__detDebug.push({ score, fit, minSup, area, anglePen, pol, sup, con, q });
+      const score = 0.5 * fit + 0.3 * minSup + 0.38 * Math.sqrt(area) - 0.3 * anglePen + pol - 0.05 * borderSides + shape - 0.6 * runOn;
+      if ((globalThis as any).__detDebug) (globalThis as any).__detDebug.push({ score, fit, minSup, area, anglePen, pol, sup, con, q, runOn });
       const det = { quad: q, score, support: sup };
       cands.push(det);
       if (!best || score > best.score) best = det;
+      return det;
     };
     for (let a = 0; a < pairs.length; a++) for (let b = a + 1; b < pairs.length; b++) {
       const [i, j] = pairs[a], [k, l] = pairs[b];
@@ -525,18 +697,59 @@ export function detectKernels(): Detector {
       const bq = blobQuad(E);
       if (bq) consider(bq, [0, 1, 2, 3].map((s) => support(E, bq[s], bq[(s + 1) % 4])));
     }
+    // the sheet as a region: outlines that cut through it (a fold, a printed rule, the edge of a
+    // shadow) or reach far past it (the desk, the picture's border) lose against ones that follow it
+    const reg = paperRegion(img, E);
+    let regQ: Detection | null = null, overlap: ((q: Quad) => number) | null = null, regW = 0;
+    if (reg && reg.size > w * h * 0.03 && reg.size < w * h * 0.97 && reg.conf > 0.45) {
+      const rq = maskQuad(reg.mask, w, h);
+      // overlap (intersection over union) of a quad with the region, on a grid of about 2500 points
+      const st = Math.max(1, Math.round(Math.sqrt((w * h) / 2500)));
+      const px: number[] = [], py: number[] = [], pm: number[] = [];
+      for (let y = st >> 1; y < h; y += st) for (let x = st >> 1; x < w; x += st) { px.push(x); py.push(y); pm.push(reg.mask[y * w + x]); }
+      const np = px.length;
+      let rn = 0; for (let k = 0; k < np; k++) rn += pm[k];
+      // how badly a quad disagrees with the region: cutting the region off counts fully (a fold or a
+      // printed rule taken for the edge); reaching past it counts a little, and only beyond a margin
+      // (blank paper the flood didn't reach because a crease or a shadow stopped it)
+      overlap = (q: Quad) => {
+        // inside = right of every side (clockwise, y down)
+        const A: number[] = [], B: number[] = [], C: number[] = [];
+        for (let s = 0; s < 4; s++) { const a = q[s], b = q[(s + 1) % 4]; A.push(-(b.y - a.y)); B.push(b.x - a.x); C.push(-(b.y - a.y) * a.x + (b.x - a.x) * a.y); }
+        let miss = 0, extra = 0, qn = 0;
+        for (let k = 0; k < np; k++) {
+          const x = px[k], y = py[k];
+          const ins = A[0] * x + B[0] * y - C[0] >= 0 && A[1] * x + B[1] * y - C[1] >= 0 && A[2] * x + B[2] * y - C[2] >= 0 && A[3] * x + B[3] * y - C[3] >= 0;
+          if (ins) { qn++; if (!pm[k]) extra++; } else if (pm[k]) miss++;
+        }
+        return 2 * (rn ? miss / rn : 0) + 0.6 * Math.max(0, (qn ? extra / qn : 1) - 0.12);
+      };
+      regW = Math.min(1, reg.conf);
+      if (rq) regQ = consider(rq, [0, 1, 2, 3].map((s) => support(E, rq[s], rq[(s + 1) % 4])), true);
+      if (regQ) regQ.score = Math.max(regQ.score, 0.62);
+    }
     let res = best as Detection | null;
     if (!res) return null;
+    const ious = new Map<Detection, number>();
+    const iouOf = (c: Detection) => { let v = ious.get(c); if (v === undefined) { v = overlap ? overlap(c.quad) : 0; ious.set(c, v); } return v; };
+    if (overlap) {
+      const adj = (c: Detection) => c.score - regW * iouOf(c);
+      const top = cands.slice().sort((a, b) => b.score - a.score).slice(0, 60);
+      if (regQ && !top.includes(regQ)) top.push(regQ);
+      res = top.reduce((a, b) => (adj(b) > adj(a) ? b : a));
+      if ((globalThis as any).__detDebug) (globalThis as any).__detReg = { conf: reg!.conf, size: reg!.size / (w * h), regQ: regQ?.quad, disagree: iouOf(res), mask: reg!.mask };
+    }
     // A band or frame printed along the edge (ID card header, table border) makes an inner outline that
     // scores like the sheet itself: when a clearly outlined quad encloses the winner, take the outer one.
     for (let guard = 0; guard < 4; guard++) {
       const inner: Detection = res;
       const outer = cands.filter((c) => c !== inner && c.score > inner.score - 0.09 && Math.min(...c.support) >= 0.85 &&
-        quadArea(c.quad) > quadArea(inner.quad) * 1.04 && inner.quad.every((p) => inside(c.quad, p, 2)))
+        quadArea(c.quad) > quadArea(inner.quad) * 1.04 && inner.quad.every((p) => inside(c.quad, p, 2)) && iouOf(c) <= iouOf(inner) + 0.04)
         .sort((a, b) => b.score - a.score)[0];
       if (!outer) break;
       res = outer;
     }
+    if (overlap && reg) res = { ...res, agree: Math.max(0, Math.min(1, (reg.conf - 0.6) / 0.3)) * Math.max(0, 1 - iouOf(res) / 0.12) };
     // corners may lie a little outside the picture (sheet cut off): keep the true geometry
     return res;
   }
