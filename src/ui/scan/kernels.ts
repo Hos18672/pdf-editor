@@ -165,6 +165,26 @@ export function scanKernels(): Kernels {
   }
 
   /**
+   * splits a side's displacement samples (x, y pairs, zero at both corners) into its broad bow (left in
+   * `d`) and the local waves (returned)
+   */
+  function bandSplit(d: number[]): number[] {
+    const n = d.length / 2, sg = Math.max(1.5, n * 0.1), r = Math.ceil(sg * 2.5);
+    // mirrored with a sign flip past the ends, so the broad part stays zero at the corners
+    const at = (i: number, c: number) => { while (i < 0 || i > n - 1) i = i < 0 ? -i : 2 * (n - 1) - i; return d[2 * i + c]; };
+    const sgnAt = (i: number) => { let f = 1; while (i < 0 || i > n - 1) { i = i < 0 ? -i : 2 * (n - 1) - i; f = -f; } return f; };
+    const lo: number[] = new Array(2 * n).fill(0);
+    for (let i = 0; i < n; i++) for (let c = 0; c < 2; c++) {
+      let v = 0, ks = 0;
+      for (let j = -r; j <= r; j++) { const g = Math.exp(-(j * j) / (2 * sg * sg)); v += g * sgnAt(i + j) * at(i + j, c); ks += g; }
+      lo[2 * i + c] = v / ks;
+    }
+    const hi = d.map((v, i) => v - lo[i]);
+    for (let i = 0; i < 2 * n; i++) d[i] = lo[i];
+    return hi;
+  }
+
+  /**
    * output rectangle → quad in the source; bilinear sampling, white outside the photo. With a bend, the
    * curved sides are blended across the page (Coons patch) on top of the perspective.
    */
@@ -175,11 +195,28 @@ export function scanKernels(): Kernels {
     const sw = src.w, sh = src.h, sd = src.data;
     // per column: top / bottom side displacement; per row: left / right
     let Dt: Float32Array | null = null, Db: Float32Array | null = null, Dl: Float32Array | null = null, Dr: Float32Array | null = null;
+    let Ht: Float32Array | null = null, Hb: Float32Array | null = null, Hl: Float32Array | null = null, Hr: Float32Array | null = null, lx = 1, ly = 1;
+    let eT: Float32Array | null = null, eB: Float32Array | null = null, eL: Float32Array | null = null, eR: Float32Array | null = null;
     const span = W - 2 * m, spanY = H - 2 * m;
     if (bend && bend.some((a) => a.some((v) => v !== 0))) {
       Dt = new Float32Array(W * 2); Db = new Float32Array(W * 2); Dl = new Float32Array(H * 2); Dr = new Float32Array(H * 2);
-      for (let x = 0; x < W; x++) { const u = (x + 0.5 - m) / span; sideAt(bend[0], u, Dt, 2 * x); sideAt(bend[2], 1 - u, Db, 2 * x); }
-      for (let y = 0; y < H; y++) { const v = (y + 0.5 - m) / spanY; sideAt(bend[1], v, Dr, 2 * y); sideAt(bend[3], 1 - v, Dl, 2 * y); }
+      // a side's broad bow is blended across the whole page; its local waves (a bulge, a curled bit)
+      // only move the paper near that side
+      const lo = bend.map((a) => Array.from(a)), hi = lo.map((a) => bandSplit(a));
+      Ht = new Float32Array(W * 2); Hb = new Float32Array(W * 2); Hl = new Float32Array(H * 2); Hr = new Float32Array(H * 2);
+      for (let x = 0; x < W; x++) {
+        const u = (x + 0.5 - m) / span;
+        sideAt(lo[0], u, Dt, 2 * x); sideAt(lo[2], 1 - u, Db, 2 * x); sideAt(hi[0], u, Ht, 2 * x); sideAt(hi[2], 1 - u, Hb, 2 * x);
+      }
+      for (let y = 0; y < H; y++) {
+        const v = (y + 0.5 - m) / spanY;
+        sideAt(lo[1], v, Dr, 2 * y); sideAt(lo[3], 1 - v, Dl, 2 * y); sideAt(hi[1], v, Hr, 2 * y); sideAt(hi[3], 1 - v, Hl, 2 * y);
+      }
+      lx = Math.max(8, W * 0.06); ly = Math.max(8, H * 0.06);
+      lx = ly = Math.max(lx, ly) * 0.5 + Math.min(lx, ly) * 0.5;
+      eT = new Float32Array(H); eB = new Float32Array(H); eL = new Float32Array(W); eR = new Float32Array(W);
+      for (let y = 0; y < H; y++) { eT[y] = Math.exp(-Math.max(0, y + 0.5 - m) / ly); eB[y] = Math.exp(-Math.max(0, H - m - y - 0.5) / ly); }
+      for (let x = 0; x < W; x++) { eL[x] = Math.exp(-Math.max(0, x + 0.5 - m) / lx); eR[x] = Math.exp(-Math.max(0, W - m - x - 0.5) / lx); }
     }
     // straightened text lines: a vertical offset per column, from the strips' values at this row
     const fdy = field ? new Float32Array(W) : null;
@@ -194,8 +231,10 @@ export function scanKernels(): Kernels {
         if (Dt) {
           const u1 = (xc - m) / span, u0 = 1 - u1;
           const yy = yc < 0 ? 0 : yc >= H ? H - 1 : yc | 0, xx = xc < 0 ? 0 : xc >= W ? W - 1 : xc | 0;
-          u += v0 * Dt[2 * xx] + v1 * Db![2 * xx] + u0 * Dl![2 * yy] + u1 * Dr![2 * yy];
-          v += v0 * Dt[2 * xx + 1] + v1 * Db![2 * xx + 1] + u0 * Dl![2 * yy + 1] + u1 * Dr![2 * yy + 1];
+          // decay of the local waves with the distance from each side
+          const dT = eT![yy], dB = eB![yy], dL = eL![xx], dR = eR![xx];
+          u += v0 * Dt[2 * xx] + v1 * Db![2 * xx] + u0 * Dl![2 * yy] + u1 * Dr![2 * yy] + dT * Ht![2 * xx] + dB * Hb![2 * xx] + dL * Hl![2 * yy] + dR * Hr![2 * yy];
+          v += v0 * Dt[2 * xx + 1] + v1 * Db![2 * xx + 1] + u0 * Dl![2 * yy + 1] + u1 * Dr![2 * yy + 1] + dT * Ht![2 * xx + 1] + dB * Hb![2 * xx + 1] + dL * Hl![2 * yy + 1] + dR * Hr![2 * yy + 1];
         }
         const o = (y * W + x) * 4;
         if (u < -1 || v < -1 || u > sw || v > sh) { out[o] = out[o + 1] = out[o + 2] = 255; out[o + 3] = 255; continue; }
@@ -221,8 +260,9 @@ export function scanKernels(): Kernels {
     const { xs, ns, H, dy } = f; // H here is the page's width
     const yc = y + 0.5;
     let s = 0, t = 0;
-    if (ns === 1 || yc <= xs[0]) { s = 0; t = 0; }
-    else if (yc >= xs[ns - 1]) { s = ns - 1; t = 0; }
+    if (ns === 1) { s = 0; t = 0; }
+    else if (yc <= xs[0]) { s = 0; t = (yc - xs[0]) / (xs[1] - xs[0]); }
+    else if (yc >= xs[ns - 1]) { s = ns - 2; t = (yc - xs[ns - 2]) / (xs[ns - 1] - xs[ns - 2]); }
     else { while (s < ns - 2 && yc > xs[s + 1]) s++; t = (yc - xs[s]) / (xs[s + 1] - xs[s]); }
     const s1 = Math.min(ns - 1, s + 1);
     for (let x = 0; x < W; x++) { const xx = x < H ? x : H - 1; out[x] = dy[s * H + xx] * (1 - t) + dy[s1 * H + xx] * t; }
@@ -236,8 +276,9 @@ export function scanKernels(): Kernels {
     for (let x = 0; x < W; x++) {
       const xc = x + 0.5;
       while (s < ns - 2 && xc > xs[s + 1]) s++;
-      if (xc <= xs[0]) out[x] = dy[yy];
-      else if (xc >= xs[ns - 1]) out[x] = dy[(ns - 1) * H + yy];
+      // past the outer strips: carried on along the slope there (a curled edge keeps curling)
+      if (xc <= xs[0]) out[x] = dy[yy] + ((dy[yy] - dy[H + yy]) * (xs[0] - xc)) / (xs[1] - xs[0]);
+      else if (xc >= xs[ns - 1]) out[x] = dy[(ns - 1) * H + yy] + ((dy[(ns - 1) * H + yy] - dy[(ns - 2) * H + yy]) * (xc - xs[ns - 1])) / (xs[ns - 1] - xs[ns - 2]);
       else { const t = (xc - xs[s]) / (xs[s + 1] - xs[s]); out[x] = dy[s * H + yy] * (1 - t) + dy[(s + 1) * H + yy] * t; }
     }
   }
@@ -295,14 +336,20 @@ export function scanKernels(): Kernels {
     }
     // clearly sideways (a page not turned yet): left alone
     if (rv > rh * 1.5) return null;
-    const ns = Math.max(3, Math.min(24, Math.round(w / 53))), sw = w / ns;
-    // band centres in each strip
+    // narrow strips (half overlapping), band centres in each
+    const sw = w / Math.max(3, Math.min(24, Math.round(w / 53))), step = sw / 2;
+    const ns = Math.max(3, Math.floor((w - sw) / step + 1e-6) + 1);
+    const cx = new Float32Array(ns);
     const peaks: number[][] = [];
+    // running sums along each row, so a strip's ink per row is one subtraction
+    const CS = new Float32Array(h * (w + 1));
+    for (let y = 0; y < h; y++) { let a = 0; const o = y * (w + 1); for (let x = 0; x < w; x++) { a += D[y * w + x]; CS[o + x + 1] = a; } }
     const P = new Float32Array(h), Q = new Float32Array(h);
     const L = Math.max(6, Math.round(h / 120));
     for (let s = 0; s < ns; s++) {
-      const x0 = Math.round(s * sw), x1 = Math.round((s + 1) * sw);
-      for (let y = 0; y < h; y++) { let v = 0; for (let x = x0; x < x1; x++) v += D[y * w + x]; P[y] = v / (x1 - x0); }
+      const x0 = Math.round(s * step), x1 = Math.min(w, Math.round(s * step + sw));
+      cx[s] = (x0 + x1) / 2;
+      for (let y = 0; y < h; y++) P[y] = (CS[y * (w + 1) + x1] - CS[y * (w + 1) + x0]) / (x1 - x0);
       for (let y = 0; y < h; y++) { let v = 0, c = 0; for (let d = -2; d <= 2; d++) { const yy = y + d; if (yy >= 0 && yy < h) { v += P[yy]; c++; } } Q[y] = v / c; }
       const list: number[] = [];
       for (let y = 3; y < h - 3; y++) {
@@ -323,8 +370,22 @@ export function scanKernels(): Kernels {
         while (yb < h - 1 && Q[yb + 1] > half) yb++;
         const ft = yt > 0 ? yt - (Q[yt] - half) / Math.max(1e-6, Q[yt] - Q[yt - 1]) : yt;
         const fb = yb < h - 1 ? yb + (Q[yb] - half) / Math.max(1e-6, Q[yb] - Q[yb + 1]) : yb;
+        // a solid block (barcode, QR code, logo) is no line of text, but its top and bottom edges run
+        // level on flat paper just the same
+        if (yb - yt > L * 4) { if (yt > 0) list.push(ft); if (yb < h - 1) list.push(fb); continue; }
         list.push((ft + fb) / 2);
       }
+      // tall solid blocks: their top and bottom edges
+      for (let y = 1; y < h - 1; y++) {
+        if (Q[y] <= 0.45 || Q[y - 1] > 0.45) continue;
+        let e = y; while (e < h - 1 && Q[e + 1] > 0.45) e++;
+        if (e - y > L * 4 && e < h - 1) {
+          const a0 = y - (Q[y] - 0.45) / Math.max(1e-6, Q[y] - Q[y - 1]), a1 = e + (Q[e] - 0.45) / Math.max(1e-6, Q[e] - Q[e + 1]);
+          for (const v of [a0, a1]) if (!list.some((u) => Math.abs(u - v) < L * 0.5)) list.push(v);
+        }
+        y = e;
+      }
+      list.sort((a, b) => a - b);
       peaks.push(list);
     }
     // typical line spacing
@@ -333,101 +394,132 @@ export function scanKernels(): Kernels {
     if (gaps.length < 8) return null;
     gaps.sort((a, b) => a - b);
     const sp = gaps[gaps.length >> 1];
-    // link band centres from strip to strip (mutually nearest, close enough, a strip may be skipped)
+    // link band centres from strip to strip (mutually nearest, close enough). Gaps between the columns
+    // of a table may be wide: a line is followed across up to a fifth of the page
+    const gmax = Math.max(3, Math.ceil((w * 0.2) / step));
     interface Track { s: number[]; y: number[] }
     const tracks: Track[] = [];
     let open: Track[] = [];
     for (let s = 0; s < ns; s++) {
       const l = peaks[s], used = new Uint8Array(l.length), next: Track[] = [];
-      const cands = open.filter((t) => s - t.s[t.s.length - 1] <= 2);
-      for (const t of cands) {
+      const cands = open.filter((t) => s - t.s[t.s.length - 1] <= gmax);
+      const pred = (t: Track) => {
         const n0 = t.s.length, ly = t.y[n0 - 1];
-        // predicted from the track's own slope
-        const slope = n0 >= 2 ? (t.y[n0 - 1] - t.y[n0 - 2]) / (t.s[n0 - 1] - t.s[n0 - 2]) : 0;
-        const py = ly + slope * (s - t.s[n0 - 1]);
+        // the track's own slope over its last stretch (not much over a short one)
+        let k = n0 - 1; while (k > 0 && t.s[n0 - 1] - t.s[k - 1] <= 4) k--;
+        const slope = k < n0 - 1 ? ((t.y[n0 - 1] - t.y[k]) / (t.s[n0 - 1] - t.s[k])) * Math.min(1, (t.s[n0 - 1] - t.s[k]) / 3) : 0;
+        return ly + slope * (s - t.s[n0 - 1]);
+      };
+      const py = cands.map(pred);
+      cands.forEach((t, ti) => {
         let bi = -1, bd = sp * 0.3;
-        for (let i = 0; i < l.length; i++) { const d = Math.abs(l[i] - py); if (!used[i] && d < bd) { bd = d; bi = i; } }
-        if (bi < 0) { next.push(t); continue; }
-        // mutual: no other open track is closer to this centre
-        if (cands.some((o) => o !== t && Math.abs(o.y[o.y.length - 1] - l[bi]) < Math.abs(ly - l[bi]) - 0.5)) { next.push(t); continue; }
+        for (let i = 0; i < l.length; i++) { const d = Math.abs(l[i] - py[ti]); if (!used[i] && d < bd) { bd = d; bi = i; } }
+        if (bi < 0) { next.push(t); return; }
+        // mutual: no other open track expects this centre more closely
+        if (cands.some((o, oi) => o !== t && Math.abs(py[oi] - l[bi]) < bd - 0.5)) { next.push(t); return; }
         used[bi] = 1; t.s.push(s); t.y.push(l[bi]); next.push(t);
-      }
+      });
       for (let i = 0; i < l.length; i++) if (!used[i]) { const t = { s: [s], y: [l[i]] }; tracks.push(t); next.push(t); }
-      open = next.filter((t) => s - t.s[t.s.length - 1] <= 1);
+      open = next.filter((t) => s - t.s[t.s.length - 1] < gmax);
     }
-    const good = tracks.filter((t) => t.s.length >= 3);
-    if (good.length < 4) return null;
-    // where each line would lie flat: its mean height. Points per strip: (target, offset)
-    const pts: { t: number; d: number }[][] = Array.from({ length: ns }, () => []);
+    // Each piece of a line says how much higher or lower the paper sits at one place than at another
+    // along it. All pieces together, with the paper bending smoothly in between, give one offset per
+    // strip and height (least squares): lines broken by wide gaps still come out level end to end.
+    const gy = Math.max(3, sp * 0.5), G = Math.max(2, Math.ceil(h / gy) + 1), NN = ns * G;
+    const ea: number[] = [], eb: number[] = [], eg: number[] = [], et: number[] = [], er: number[] = [];
     const tol = Math.max(1.2, sp * 0.12);
-    for (const t0 of good) {
+    for (const t0 of tracks) {
+      if (t0.s.length < 2) continue;
       // a point that jumps away from both neighbours is a misread (a mark above or below the line)
       const keep = t0.y.map((y, i, a) => {
         const nb = [a[i - 1], a[i + 1]].filter((v) => v !== undefined);
         if (nb.length === 2) { const m3 = [nb[0], y, nb[1]].sort((p, q) => p - q)[1]; return Math.abs(y - m3) <= tol; }
         return Math.abs(y - nb[0]) <= tol * 2;
       });
-      const t = { s: t0.s.filter((_, i) => keep[i]), y: t0.y.filter((_, i) => keep[i]) };
-      if (t.s.length < 3) continue;
-      const m = t.y.reduce((a, b) => a + b, 0) / t.y.length;
-      // a line that wanders by more than about half the spacing is two lines mixed up
-      if (t.y.some((y) => Math.abs(y - m) > sp * 1.2)) continue;
-      t.s.forEach((s, i) => pts[s].push({ t: m, d: t.y[i] - m }));
+      const ts = t0.s.filter((_, i) => keep[i]), ty = t0.y.filter((_, i) => keep[i]);
+      if (ts.length < 2) continue;
+      const m = ty.reduce((a, b) => a + b, 0) / ty.length;
+      if (ty.some((y) => Math.abs(y - m) > sp * 1.2)) continue;
+      let g = m / gy; if (g > G - 1.001) g = G - 1.001;
+      for (let i = 1; i < ts.length; i++) { ea.push(ts[i - 1]); eb.push(ts[i]); eg.push(g | 0); et.push(g - (g | 0)); er.push(ty[i] - ty[i - 1]); }
     }
-    let total = 0;
-    for (const p of pts) { p.sort((a, b) => a.t - b.t); total += p.length; }
-    if (total < 12) return null;
-    // per strip, offsets at every full-size row (interpolated between lines, held beyond the ends)
-    const dy = new Float32Array(ns * H), have = new Uint8Array(ns);
-    let maxD = 0;
-    for (let s = 0; s < ns; s++) {
-      // drop points whose order disagrees with their neighbours (lines must not cross)
-      const p = pts[s].filter((q, i, a) => i === 0 || q.t + q.d > a[i - 1].t + a[i - 1].d);
-      if (p.length < 2) continue;
-      have[s] = 1;
-      let j = 0;
-      for (let Yr = 0; Yr < H; Yr++) {
-        const yt = (Yr + 0.5) / ky;
-        while (j < p.length - 2 && yt > p[j + 1].t) j++;
-        let v: number;
-        if (yt <= p[0].t) v = p[0].d; else if (yt >= p[p.length - 1].t) v = p[p.length - 1].d;
-        else { const a = p[j], b = p[j + 1], u = (yt - a.t) / Math.max(1e-6, b.t - a.t); v = a.d * (1 - u) + b.d * u; }
-        dy[s * H + Yr] = v * ky;
-        if (Math.abs(v * ky) > maxD) maxD = Math.abs(v * ky);
+    const NE = ea.length;
+    if (NE < 12) return null;
+    const ew = new Float32Array(NE).fill(1);
+    // smoothness: bends across (second differences along the row), and up the page
+    const LS2 = 0.35, LG2 = 1.2, LG1 = 0.06, L0 = 0.004, MU = 0.3;
+    // normal equations, solved exactly: unknowns ordered row by row (g, then strip), so every term
+    // couples unknowns at most two rows apart and the matrix is a band of width 2·ns
+    const idx = (st: number, g: number) => g * ns + st;
+    const bw = 2 * ns, BW1 = bw + 1;
+    const A = new Float64Array(NN * BW1), rhs = new Float64Array(NN), f = new Float64Array(NN);
+    // A[i][i - d] for d = 0…bw, kept as A[i·BW1 + d]
+    const add = (i: number, j: number, v: number) => { if (j > i) { const t = i; i = j; j = t; } A[i * BW1 + i - j] += v; };
+    const outer = (ix: number[], cf: number[], wgt: number) => {
+      for (let p = 0; p < ix.length; p++) for (let q = 0; q <= p; q++) {
+        const v = cf[p] * cf[q] * wgt;
+        if (ix[p] === ix[q]) add(ix[p], ix[q], p === q ? v : 2 * v); else add(ix[p], ix[q], v);
       }
+    };
+    const solve = () => {
+      A.fill(0); rhs.fill(0);
+      for (let e = 0; e < NE; e++) {
+        if (!ew[e]) continue;
+        const g0 = eg[e], t = et[e];
+        const ix = [idx(eb[e], g0), idx(eb[e], g0 + 1), idx(ea[e], g0), idx(ea[e], g0 + 1)], cf = [1 - t, t, t - 1, -t];
+        outer(ix, cf, ew[e]);
+        for (let p = 0; p < 4; p++) rhs[ix[p]] += cf[p] * er[e] * ew[e];
+      }
+      for (let st = 1; st < ns - 1; st++) for (let g = 0; g < G; g++) outer([idx(st - 1, g), idx(st, g), idx(st + 1, g)], [1, -2, 1], LS2 * LS2);
+      for (let st = 0; st < ns; st++) {
+        for (let g = 1; g < G - 1; g++) outer([idx(st, g - 1), idx(st, g), idx(st, g + 1)], [1, -2, 1], LG2 * LG2);
+        for (let g = 1; g < G; g++) outer([idx(st, g - 1), idx(st, g)], [-1, 1], LG1 * LG1);
+      }
+      for (let i = 0; i < NN; i++) A[i * BW1] += L0 * L0;
+      // only how the paper moves along each row is measured: its average is kept at zero
+      const ones = new Array(ns).fill(1);
+      for (let g = 0; g < G; g++) outer(Array.from({ length: ns }, (_, st) => idx(st, g)), ones, MU * MU);
+      // banded Cholesky, in place
+      for (let i = 0; i < NN; i++) {
+        const j0 = Math.max(0, i - bw);
+        for (let j = j0; j <= i; j++) {
+          let sum = A[i * BW1 + i - j];
+          const k0 = Math.max(j0, j - bw);
+          for (let k = k0; k < j; k++) sum -= A[i * BW1 + i - k] * A[j * BW1 + j - k];
+          if (j === i) A[i * BW1] = Math.sqrt(Math.max(sum, 1e-12));
+          else A[i * BW1 + i - j] = sum / A[j * BW1];
+        }
+      }
+      for (let i = 0; i < NN; i++) { let sum = rhs[i]; for (let k = Math.max(0, i - bw); k < i; k++) sum -= A[i * BW1 + i - k] * f[k]; f[i] = sum / A[i * BW1]; }
+      for (let i = NN - 1; i >= 0; i--) { let sum = f[i]; for (let k = i + 1; k <= Math.min(NN - 1, i + bw); k++) sum -= A[k * BW1 + k - i] * f[k]; f[i] = sum / A[i * BW1]; }
+    };
+    for (let round = 0; round < 3; round++) {
+      solve();
+      if (round === 2) break;
+      // pieces that disagree with the rest (two lines mixed up, a mark read as a line) count less
+      const res = new Float32Array(NE);
+      for (let e = 0; e < NE; e++) {
+        const g0 = eg[e], t = et[e];
+        res[e] = Math.abs((f[idx(eb[e], g0)] - f[idx(ea[e], g0)]) * (1 - t) + (f[idx(eb[e], g0 + 1)] - f[idx(ea[e], g0 + 1)]) * t - er[e]);
+      }
+      const srt = Array.from(res).sort((p, q) => p - q);
+      const c = Math.max(2.5, 4 * 1.4826 * srt[NE >> 1]);
+      for (let e = 0; e < NE; e++) { const u = res[e] / c; ew[e] = u >= 1 ? 0 : (1 - u * u) ** 2; }
+    }
+    // per strip, offsets at every full-size row; tiny ones (the letters' own shapes) left alone
+    const dy = new Float32Array(ns * H), sh = 0.5;
+    let maxD = 0;
+    for (let s = 0; s < ns; s++) for (let Yr = 0; Yr < H; Yr++) {
+      let g = (Yr + 0.5) / ky / gy; if (g > G - 1.001) g = G - 1.001;
+      const g0 = g | 0, t = g - g0;
+      const v0 = f[idx(s, g0)] * (1 - t) + f[idx(s, g0 + 1)] * t;
+      const v = v0 > sh ? v0 - sh : v0 < -sh ? v0 + sh : 0;
+      dy[s * H + Yr] = v * ky;
+      if (Math.abs(v * ky) > maxD) maxD = Math.abs(v * ky);
     }
     if (maxD < 0.6) return null;
-    // strips without lines: from their neighbours
-    for (let s = 0; s < ns; s++) {
-      if (have[s]) continue;
-      let a = s - 1; while (a >= 0 && !have[a]) a--;
-      let b = s + 1; while (b < ns && !have[b]) b++;
-      if (a < 0 && b >= ns) return null;
-      for (let Yr = 0; Yr < H; Yr++) {
-        dy[s * H + Yr] = a < 0 ? dy[b * H + Yr] : b >= ns ? dy[a * H + Yr] : dy[a * H + Yr] + (dy[b * H + Yr] - dy[a * H + Yr]) * ((s - a) / (b - a));
-      }
-    }
-    // smooth: along each strip over a third of a line, and across neighbouring strips
-    const sm = new Float32Array(ns * H), r = Math.max(1, Math.round(sp * ky * 0.3));
-    for (let s = 0; s < ns; s++) {
-      let acc = 0, c = 0;
-      const base = s * H;
-      for (let Yr = -r; Yr <= r; Yr++) if (Yr >= 0 && Yr < H) { acc += dy[base + Yr]; c++; }
-      for (let Yr = 0; Yr < H; Yr++) {
-        sm[base + Yr] = acc / c;
-        const add = Yr + r + 1, sub = Yr - r;
-        if (add < H) { acc += dy[base + add]; c++; }
-        if (sub >= 0) { acc -= dy[base + sub]; c--; }
-      }
-    }
-    for (let s = 0; s < ns; s++) for (let Yr = 0; Yr < H; Yr++) {
-      const a = sm[Math.max(0, s - 1) * H + Yr], b = sm[s * H + Yr], c2 = sm[Math.min(ns - 1, s + 1) * H + Yr];
-      // small offsets are within what the shapes of the letters alone produce: left alone
-      const v = 0.25 * a + 0.5 * b + 0.25 * c2, sh = 0.8 * ky;
-      dy[s * H + Yr] = v > sh ? v - sh : v < -sh ? v + sh : 0;
-    }
     const xs = new Float32Array(ns);
-    for (let s = 0; s < ns; s++) xs[s] = (s + 0.5) * sw * kx;
+    for (let s = 0; s < ns; s++) xs[s] = cx[s] * kx;
     return { xs, ns, H, dy };
   }
 
@@ -905,15 +997,64 @@ export function scanKernels(): Kernels {
       }
       return;
     }
+    if (mode === 'gray') {
+      for (let y = 0; y < h; y++) {
+        if (P) paperRow(P, y, w, ir, ig, ib, xi, xt);
+        for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
+          const f = FS[y * w + x];
+          d[i] = d[i + 1] = d[i + 2] = L((0.299 * d[i] * ir[x] + 0.587 * d[i + 1] * ig[x] + 0.114 * d[i + 2] * ib[x]) * f);
+        }
+      }
+      return;
+    }
+    // Colour: the same curve on each channel. A phone camera adds pink and green speckles to dark print
+    // (strongest in QR codes and barcodes); real coloured print has one colour across its strokes. So
+    // the colour is averaged over the print nearby (at half size, weighted by how dark each pixel is):
+    // the speckles cancel out, a blue logo or a red total keeps its colour, and black print stays black.
+    const w2 = (w + 1) >> 1, h2 = (h + 1) >> 1, n2 = w2 * h2;
+    const CR = new Float32Array(n2), CB = new Float32Array(n2), CA = new Float32Array(n2);
     for (let y = 0; y < h; y++) {
       if (P) paperRow(P, y, w, ir, ig, ib, xi, xt);
+      const o2 = (y >> 1) * w2;
       for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
-        const f = FS[y * w + x], r = d[i] * ir[x] * f, g = d[i + 1] * ig[x] * f, b = d[i + 2] * ib[x] * f;
-        if (mode === 'gray') { d[i] = d[i + 1] = d[i + 2] = L(0.299 * r + 0.587 * g + 0.114 * b); continue; }
-        // colour: the same curve on each channel, then a touch more saturation
-        const R = L(r), G = L(g), B = L(b);
+        const f = FS[y * w + x], R = L(d[i] * ir[x] * f), G = L(d[i + 1] * ig[x] * f), B = L(d[i + 2] * ib[x] * f);
+        const yy = 0.299 * R + 0.587 * G + 0.114 * B, a = 1 - yy / 255;
+        // the look so far, kept in the pixels (chroma is put back below)
+        d[i] = R; d[i + 1] = G; d[i + 2] = B;
+        if (a <= 0.02) continue;
+        const q = o2 + (x >> 1);
+        CR[q] += a * (R - yy); CB[q] += a * (B - yy); CA[q] += a;
+      }
+    }
+    const sg2 = Math.max(1, Math.max(w, h) / 1600);
+    const SR = boxSmooth(CR, w2, h2, sg2), SB = boxSmooth(CB, w2, h2, sg2), SA = boxSmooth(CA, w2, h2, sg2);
+    for (let q = 0; q < n2; q++) {
+      const a = SA[q];
+      if (a < 1e-4) { SR[q] = SB[q] = 0; continue; }
+      let cr = SR[q] / a, cb = SB[q] / a;
+      // faint average colour is what's left of the noise: grey
+      const m = Math.hypot(cr, cb);
+      let t = (m - 9) / 14; t = t < 0 ? 0 : t > 1 ? 1 : t; t = t * t * (3 - 2 * t);
+      cr *= t * sat; cb *= t * sat;
+      SR[q] = cr; SB[q] = cb; SA[q] = a / 4; // ink weight per full-size pixel
+    }
+    for (let y = 0; y < h; y++) {
+      let fy = (y + 0.5) / 2 - 0.5; if (fy < 0) fy = 0; if (fy > h2 - 1) fy = h2 - 1;
+      const y0 = fy | 0, y1 = y0 + 1 < h2 ? y0 + 1 : y0, ty = fy - y0;
+      for (let x = 0, i = y * w * 4; x < w; x++, i += 4) {
+        let fx = (x + 0.5) / 2 - 0.5; if (fx < 0) fx = 0; if (fx > w2 - 1) fx = w2 - 1;
+        const x0 = fx | 0, x1 = x0 + 1 < w2 ? x0 + 1 : x0, tx = fx - x0;
+        const q00 = y0 * w2 + x0, q01 = y0 * w2 + x1, q10 = y1 * w2 + x0, q11 = y1 * w2 + x1;
+        const w00 = (1 - tx) * (1 - ty), w01 = tx * (1 - ty), w10 = (1 - tx) * ty, w11 = tx * ty;
+        let cr = SR[q00] * w00 + SR[q01] * w01 + SR[q10] * w10 + SR[q11] * w11;
+        let cb = SB[q00] * w00 + SB[q01] * w01 + SB[q10] * w10 + SB[q11] * w11;
+        const R = d[i], G = d[i + 1], B = d[i + 2];
         const yy = 0.299 * R + 0.587 * G + 0.114 * B;
-        d[i] = yy + (R - yy) * sat; d[i + 1] = yy + (G - yy) * sat; d[i + 2] = yy + (B - yy) * sat;
+        // as much colour as this pixel has ink compared with its surroundings (no halo on the paper)
+        const al = SA[q00] * w00 + SA[q01] * w01 + SA[q10] * w10 + SA[q11] * w11, a = 1 - yy / 255;
+        const k = al > 1e-4 ? Math.min(1, a / al) : 0;
+        cr *= k; cb *= k;
+        d[i] = yy + cr; d[i + 2] = yy + cb; d[i + 1] = yy - (0.299 * cr + 0.114 * cb) / 0.587;
       }
     }
     void n;
