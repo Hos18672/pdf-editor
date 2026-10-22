@@ -7,7 +7,10 @@ import { useHistory, uid, Tool, ToolStyle, RunEdit } from './store';
 import { PageView, PageInfo, PageData, FillMark, lineRooms } from './PageView';
 import { SignatureModal, Stamp } from './SignatureModal';
 import { Organizer } from './Organizer';
+import { runBox } from './geometry';
 import { AddPagesSheet, type AddWhat } from './AddPages';
+import { FindBar, PrivacyCheck } from './FindBar';
+import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, OBJ_TITLE, Stepper, toolHasProps, fontLabel, Toggle } from './Panel';
@@ -38,7 +41,10 @@ export interface HostProps {
   takeIntent?: () => Promise<Incoming | null>;
   /** Android: a shared file's contents (base64) */
   readShared?: (uri: string) => Promise<string>;
+  /** Android: open the calendar app with an event filled in */
+  addToCalendar?: (e: CalEvent) => Promise<boolean>;
 }
+export interface CalEvent { title: string; begin: number; allDay: boolean; note: string }
 export interface Incoming {
   /** open: PDFs; import: other files / text to turn into a PDF and edit; convert: the "Convert to PDF" share entry
    *  (or, without files, the shortcut); scan / open / sign: shortcut or widget buttons */
@@ -87,6 +93,7 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
     { t: 'image', label: 'Image', icon: 'image', key: 'I' }] },
   { name: 'Mark up', tint: 'var(--tint-markup)', items: [
     { t: 'whiteout', label: 'Whiteout', icon: 'eraser', key: 'W' },
+    { t: 'redact', label: 'Redact', icon: 'eye-slash', key: 'X' },
     { t: 'highlight', label: 'Highlight', icon: 'highlighter', key: 'H', opts: true },
     { t: 'shapes', label: 'Shapes', icon: 'shapes', key: 'R', opts: true },
     { t: 'draw', label: 'Draw', icon: 'scribble', key: 'D', opts: true }] },
@@ -95,7 +102,7 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
 ];
 const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
 /** phone: every tool in the bottom bar, most used first (it scrolls sideways) */
-const DOCK: RailT[] = ['edit', 'text', 'sign', 'highlight', 'draw', 'shapes', 'whiteout', 'image', 'fill', 'pages'];
+const DOCK: RailT[] = ['edit', 'text', 'sign', 'highlight', 'draw', 'shapes', 'whiteout', 'redact', 'image', 'fill', 'pages'];
 const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line'];
 
 // phone dock: the 4 most recently used tools (slots stay put; a new tool replaces the least recent)
@@ -123,7 +130,7 @@ const useRecent = (r: Recent, t: RailT): Recent => {
 const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'], ['line', 'Line', 'line']];
 
 /** What the editor opens with when started from the tools page. */
-export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages';
+export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages' | 'privacy';
 
 export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onSaved, onAddPages }: {
   /** add pages to the document after this many pages; resolves to the first new page's source index */
@@ -147,6 +154,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [editing, setEditing] = useState<string | null>(null);
   // the list of pages on the right: open by default on big screens (and remembered there)
   const [addAfter, setAddAfter] = useState<number | null>(null); // the Add pages sheet: new pages after this many
+  // find in document / privacy check: matches drawn over the pages
+  const [findOpen, setFindOpen] = useState(false);
+  const [privOpen, setPrivOpen] = useState(start === 'privacy');
+  const [found, setFound] = useState<{ list: Hit[]; cur: number; priv: boolean }>({ list: [], cur: -1, priv: false });
   const [strip, setStripRaw] = useState<boolean>(() => {
     if (bp !== 'desktop' && bp !== 'large') return false;
     try { return localStorage.getItem('pe-strip') !== '0'; } catch { return true; }
@@ -653,7 +664,17 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const lines: LayerLine[] = [];
       for (const r of d.runs) {
         if (r.fontName !== 'ocr') continue;
-        const text = (snap.edits[r.key]?.text ?? r.str).replace(/\s+/g, ' ').trim();
+        let text = (snap.edits[r.key]?.text ?? r.str).replace(/\s+/g, ' ').trim();
+        // letters under a redaction are left out of the searchable text too
+        const reds = snap.objects.filter((o) => o.type === 'redact' && o.page === +src);
+        if (reds.length && infos[+src]) {
+          const b = runBox(r, infos[+src].vm);
+          const n = text.length;
+          text = [...text].map((ch, i) => {
+            const cx = b.x + ((i + 0.5) / n) * b.w, cy = b.y - b.h * 0.35;
+            return reds.some((o) => cx >= o.x && cx <= o.x + o.w && cy >= o.y && cy <= o.y + o.h) ? ' ' : ch;
+          }).join('').replace(/\s+/g, ' ').trim();
+        }
         if (!text) continue;
         const [ox, oy] = r.region.o, [ux, uy] = r.region.u;
         lines.push({ text, x0: ox, y0: oy, x1: ox + ux * r.region.width, y1: oy + uy * r.region.width, size: r.region.height * (snap.edits[r.key]?.sizeScale ?? 1) });
@@ -919,6 +940,44 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const el = wrapRef.current?.querySelector<HTMLElement>(`.pageOuter[data-src="${src}"]`);
     if (el && wrapRef.current) wrapRef.current.scrollTo({ top: el.offsetTop - 100 - safeTop(), behavior: 'smooth' });
   };
+  // ----- find / privacy check -----
+  const docRef = (): DocRef => ({
+    pdf, pages: snap.pages.map((p) => p.src), vm: (src) => infos[src].vm,
+    ocrRuns: (src) => pageData[src]?.runs.filter((r) => r.fontName === 'ocr') ?? [],
+  });
+  const goHit = (h: Hit) => {
+    const el = wrapRef.current?.querySelector<HTMLElement>(`.pageOuter[data-src="${h.page}"]`);
+    const r = h.rects[0];
+    if (!el || !wrapRef.current) return;
+    const y = el.offsetTop + (r ? r.y * zoom : 0);
+    wrapRef.current.scrollTo({ top: Math.max(0, y - wrapRef.current.clientHeight * 0.35), behavior: 'smooth' });
+    if (r && el.offsetWidth > wrapRef.current.clientWidth) wrapRef.current.scrollTo({ left: Math.max(0, el.offsetLeft + r.x * zoom - 40), behavior: 'smooth' });
+  };
+  const redactHits = (list: Hit[]) => {
+    const add: EditorObject[] = [];
+    for (const h of list) for (const r of h.rects) {
+      if (r.w <= 0 || r.h <= 0) continue;
+      add.push({ id: uid(), page: h.page, type: 'redact', x: r.x - 1, y: r.y - 1, w: r.w + 2, h: r.h + 2 });
+    }
+    if (!add.length) return;
+    commit((s) => ({ ...s, objects: [...s.objects, ...add] }));
+    setFound({ list: [], cur: -1, priv: false });
+    toast({ msg: `${add.length} ${add.length === 1 ? 'part' : 'parts'} blacked out. They are deleted from the file when you download.`, action: { label: 'Undo', run: hist.undo } });
+  };
+  const hitsByPage = useMemo(() => {
+    const m: Record<number, { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[]> = {};
+    found.list.forEach((h, i) => { for (const r of h.rects) (m[h.page] ??= []).push({ ...r, cur: i === found.cur, priv: found.priv }); });
+    return m;
+  }, [found]);
+  const scannedLeft = pictureOnly.filter((src) => !pageData[src]?.runs.some((r) => r.fontName === 'ocr')).length;
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); setPrivOpen(false); setFindOpen(true); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
   const focusField = (f?: FormField) => {
     if (!f) return;
     const el = wrapRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(f.id)}"]`);
@@ -976,7 +1035,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       out.push({ id: key, icon: e.text.trim() ? 'edit' : 'trash', label: e.text.trim() ? `Edited “${e.text.trim().slice(0, 28)}”` : 'Deleted a line', page: pageNo(src) });
     }
     for (const o of snap.objects) {
-      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check' };
+      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check' };
       out.push({ id: o.id, icon: ic[o.type], label: o.type === 'text' ? `Text “${o.text.trim().slice(0, 24) || '…'}”` : OBJ_TITLE[o.type], page: pageNo(o.page) });
     }
     const nf = Object.keys(snap.forms).length;
@@ -1048,6 +1107,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           </div>
         </div>
         <div className="group">
+          <button className={`ibtn${findOpen ? ' on' : ''}`} onClick={() => { setPrivOpen(false); setFindOpen((v) => !v); }} aria-label="Find in document" title="Find (Ctrl+F)"><Icon name="magnifying-glass" size={19} /></button>
+          {!mobile && <button className={`ibtn${privOpen ? ' on' : ''}`} onClick={() => { setFindOpen(false); setPrivOpen((v) => !v); }} aria-label="Privacy check" title="Privacy check: find and black out personal data"><Icon name="shield-check" size={20} /></button>}
           <button className="ibtn" onClick={hist.undo} disabled={!hist.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)"><Icon name="undo" /></button>
           <button className="ibtn" onClick={hist.redo} disabled={!hist.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /></button>
         </div>
@@ -1102,6 +1163,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                     setFonts((m) => ({ ...m, ...f }));
                   }}
                   onSelect={(id) => { setSelected(id); if (id === null) setSheetFor(null); }} onEditing={setEditing} onStopEditing={stopEditing}
+                  hits={hitsByPage[p.src]}
                   onRunEdit={setRunEdit} onAdd={addObject} onChange={changeObject}
                   onPlace={() => false}
                   onDelete={removeObject} onDuplicate={duplicateObject}
@@ -1255,7 +1317,14 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                 </div>
               </div>
             ))}
-            <button className="more-tools" onClick={() => { setMoreOpen(false); onTools(); }}>More tools: combine, extract, convert<Icon name="right" size={16} /></button>
+            <div className="tsg">
+              <span className="kicker">Check</span>
+              <div className="tiles">
+                <button className="tile" onClick={() => { setMoreOpen(false); setFindOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="magnifying-glass" size={21} weight="duotone" /></span>Find</button>
+                <button className="tile" onClick={() => { setMoreOpen(false); setPrivOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="shield-check" size={21} weight="duotone" /></span>Privacy</button>
+              </div>
+            </div>
+            <button className="more-tools" onClick={() => { setMoreOpen(false); onTools(); }}>More tools: compress, password, split…<Icon name="right" size={16} /></button>
           </div>
         </>
       )}
@@ -1275,6 +1344,17 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       )}
 
       <input ref={imgInput} type="file" accept="image/*" hidden onChange={(e) => { onImage(e.target.files?.[0]); e.target.value = ''; }} />
+      {findOpen && view === 'doc' && (
+        <FindBar doc={docRef} mobile={mobile} onClose={() => { setFindOpen(false); setFound({ list: [], cur: -1, priv: false }); }}
+          onHits={(list, cur) => setFound({ list, cur, priv: false })} onGo={goHit} onRedact={redactHits} />
+      )}
+      {privOpen && view === 'doc' && (
+        <PrivacyCheck doc={docRef} mobile={mobile} scannedLeft={scannedLeft}
+          onReadScans={pictureOnly.length > 1 ? () => readAll() : undefined}
+          onClose={() => { setPrivOpen(false); setFound({ list: [], cur: -1, priv: false }); }}
+          onHits={(list) => setFound({ list, cur: -1, priv: true })} onGo={(h) => { goHit(h); if (mobile) setPrivOpen(false); }}
+          onRedact={(h) => { redactHits(h); setPrivOpen(false); }} />
+      )}
       {addAfter !== null && onAddPages && (
         <AddPagesSheet after={addAfter} total={snap.pages.length} mobile={mobile} onClose={() => setAddAfter(null)}
           onAdd={(w) => { const at = addAfter; setAddAfter(null); onAddPages(at, w).then((first) => { if (first !== null && view === 'doc') setTimeout(() => goToPage(first), 400); }); }} />

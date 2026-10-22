@@ -10,6 +10,10 @@ import PdfEditorDom from '../components/PdfEditorDom';
 import { PeIntents } from '../../modules/pe-intents';
 
 const takeIntent = async () => PeIntents?.takeIntent() ?? null;
+const addToCalendar = async (e: { title: string; begin: number; allDay: boolean; note: string }) => {
+  if (!PeIntents) return false;
+  try { return PeIntents.addCalendarEvent(e.title, e.begin, e.allDay, e.note); } catch { return false; }
+};
 const readShared = (uri: string) => (PeIntents ? PeIntents.readUri(uri) : Promise.reject(new Error('Not available')));
 
 async function pickPdf() {
@@ -123,6 +127,7 @@ function NativeShell({ dark }: { dark: boolean }) {
         getInsets={getInsets}
         takeIntent={takeIntent}
         readShared={readShared}
+        addToCalendar={addToCalendar}
         dom={{
           style: { flex: 1, backgroundColor: desk },
           // react-native-webview supports <input type="file"> (signature photos, images) on Android

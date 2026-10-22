@@ -61,6 +61,8 @@ export type EditorObject =
   | (Base & { type: 'image' | 'signature'; src: string })
   | (Base & { type: 'rect' | 'ellipse'; stroke: string; fill: string | null; strokeWidth: number })
   | (Base & { type: 'whiteout'; fill: string })
+  /** black box: what is under it is removed from the file (text, picture pixels) */
+  | (Base & { type: 'redact' })
   | (Base & { type: 'highlight'; fill: string })
   | (Base & { type: 'line'; stroke: string; strokeWidth: number; x2: number; y2: number })
   | (Base & { type: 'draw'; stroke: string; strokeWidth: number; points: number[] }) // relative to x,y

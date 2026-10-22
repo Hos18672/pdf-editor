@@ -136,7 +136,7 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
 
 export const OBJ_TITLE: Record<EditorObject['type'], string> = {
   text: 'Text', image: 'Image', signature: 'Signature', rect: 'Box', ellipse: 'Circle',
-  whiteout: 'Whiteout', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark',
+  whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark',
 };
 
 export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact }: {
@@ -183,6 +183,9 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact 
       {o.type === 'whiteout' && (
         <div className="field"><div className="label">Colour</div><Swatches value={o.fill} list={['#ffffff', '#f4f4f4', '#000000']} onPick={(fill) => set({ fill: fill ?? '#ffffff' })} /></div>
       )}
+      {o.type === 'redact' && (
+        <div className="note"><Icon name="eye-slash" size={16} /><span>When you download, the text and picture parts under this box are deleted from the file, not just covered. They can’t be copied or found any more.</span></div>
+      )}
       {o.type === 'highlight' && (
         <div className="field"><div className="label">Colour</div><Swatches value={o.fill} list={HIGHLIGHTS} custom={false} onPick={(fill) => set({ fill: fill ?? HIGHLIGHTS[0] })} /></div>
       )}
@@ -200,11 +203,12 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact 
   );
 }
 
-const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', draw: 'Draw', highlight: 'Highlight', whiteout: 'Whiteout' };
+const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', draw: 'Draw', highlight: 'Highlight', whiteout: 'Whiteout', redact: 'Redact' };
 const TOOL_HINTS: Partial<Record<Tool, string>> = {
   text: 'Click anywhere on a page to start typing.', rect: 'Drag on the page to draw a box.', ellipse: 'Drag on the page to draw a circle.',
   line: 'Drag on the page to draw a line.', draw: 'Draw freely with mouse, finger or pen.', highlight: 'Drag over the area to highlight.',
   whiteout: 'Drag over anything you want to hide. To change a line of text, use Edit and click it instead.',
+  redact: 'Drag over what must go: names, numbers, signatures. On download it is deleted from the file, not only covered. Use the privacy check to find personal data.',
 };
 export const toolHasProps = (t: Tool) => !!TOOL_NAMES[t];
 

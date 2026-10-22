@@ -7,17 +7,18 @@ import { Seg, Stepper, Toggle } from './Panel';
 import { saveFile, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { parseRange, formatRange, loadDoc, pickPages, imageBytes, addImagePage, addOutline, save, baseName, fmtSize } from './pdfops';
 import { Convert } from './Convert';
+import { Compress, Password, PageNumbers, Watermark, Split, ToImages, ExtractText, Deadlines, SafeCopy } from './MoreTools';
 import { SortableArea, useSortableItem } from './sortable';
 import type { Bp } from './hooks';
 import type { PageState } from '../engine/types';
 import { PDFDocument } from 'pdf-lib';
 
-export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert';
+export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert' | 'compress' | 'password' | 'numbers' | 'watermark' | 'split' | 'images' | 'text' | 'deadlines' | 'safecopy';
 
-interface Current { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; changed: boolean }
-interface Src { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; fromEditor: boolean }
+export interface Current { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; changed: boolean }
+export interface Src { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; fromEditor: boolean }
 
-interface Props {
+export interface Props {
   initial: ToolId; bp: Bp; host: HostProps; current: Current | null;
   toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
   onBack: () => void; onEdit: (start: EditorStart) => void;
@@ -42,6 +43,15 @@ export function Tools(p: Props) {
     remove: ['Remove pages', 'Delete pages you don’t need'],
     insert: ['Insert pages', 'Add blank pages, images or another PDF'],
     convert: ['Convert to PDF', 'Images, Office files, text and web pages'],
+    compress: ['Compress PDF', 'Smaller files for e-mail and upload portals'],
+    password: ['Password', 'Protect a PDF, or remove its password'],
+    numbers: ['Page numbers', 'Number the pages'],
+    watermark: ['Watermark', 'Text across the pages'],
+    split: ['Split PDF', 'Cut a PDF into several files'],
+    images: ['PDF to pictures', 'Every page as a JPG or PNG'],
+    text: ['Extract text', 'All the text, also from scans'],
+    deadlines: ['Deadline finder', 'Dates from a letter into your calendar'],
+    safecopy: ['Safe ID copy', 'A copy that can only be used for one purpose'],
   };
   const conv = (k: string) => () => { setConvertKind(k); setTool('convert'); };
   const groups: { name: string; items: HubItem[] }[] = [
@@ -49,11 +59,20 @@ export function Tools(p: Props) {
       { name: 'Edit PDF', desc: 'Retype text, add text, images and shapes', icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
       { name: 'Fill a form', desc: 'Type in fields, tick boxes, pick options', icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
       { name: 'Sign', desc: 'Draw, type or upload a signature', icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
+      { name: 'Privacy check', desc: 'Find personal data and black it out for real', icon: 'shield-check:duotone', tile: TILE.edit, go: () => p.onEdit('privacy') },
+      { name: 'Safe ID copy', desc: '“COPY – only for …” burned into ID scans', icon: 'identification-badge:duotone', tile: TILE.edit, go: () => setTool('safecopy') },
+      { name: 'Deadline finder', desc: 'Dates in a letter, into your calendar', icon: 'calendar-plus:duotone', tile: TILE.edit, go: () => setTool('deadlines') },
     ] },
     { name: 'Scan', items: [
       { name: 'Scan a document', desc: 'Camera or photos: auto-crop, straighten and clean up', icon: 'scan:duotone', tile: '#DDF1E4', go: p.onScan },
       { name: 'Scan an ID card', desc: 'Front and back on one page, actual size', icon: 'identification-card:duotone', tile: '#DDF1E4', go: () => { try { localStorage.setItem('pe.scan.mode', 'id'); } catch { /* private */ } p.onScan(); } },
       { name: 'Scan a receipt or invoice', desc: 'Long receipts and bills, sharp and white', icon: 'receipt:duotone', tile: '#DDF1E4', go: () => { try { localStorage.setItem('pe.scan.mode', 'receipt'); } catch { /* private */ } p.onScan(); } },
+    ] },
+    { name: 'Optimize & protect', items: [
+      { name: 'Compress PDF', desc: 'Smaller files, also under a size limit', icon: 'arrows-in-line-vertical:duotone', tile: '#FFE3D6', go: () => setTool('compress') },
+      { name: 'Password', desc: 'Protect a PDF or remove its password', icon: 'lock-key:duotone', tile: '#FFE3D6', go: () => setTool('password') },
+      { name: 'Page numbers', desc: '1, 2, 3 or “Seite 1 von 9”', icon: 'list-numbers:duotone', tile: '#FFE3D6', go: () => setTool('numbers') },
+      { name: 'Watermark', desc: 'CONFIDENTIAL, COPY or your own text', icon: 'stamp:duotone', tile: '#FFE3D6', go: () => setTool('watermark') },
     ] },
     { name: 'Organize pages', items: [
       { name: 'Combine PDFs', desc: 'Merge several files into one', icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },
@@ -61,6 +80,11 @@ export function Tools(p: Props) {
       { name: 'Remove pages', desc: 'Delete pages you don’t need', icon: 'file-minus:duotone', tile: TILE.org, go: () => setTool('remove') },
       { name: 'Insert pages', desc: 'Add blank pages, images or another PDF', icon: 'file-plus:duotone', tile: TILE.org, go: () => setTool('insert') },
       { name: 'Reorder & rotate', desc: 'Drag pages into place, turn them', icon: 'squares-four:duotone', tile: TILE.org, go: () => p.onEdit('pages') },
+      { name: 'Split PDF', desc: 'Every few pages, by ranges or per page', icon: 'scissors:duotone', tile: TILE.org, go: () => setTool('split') },
+    ] },
+    { name: 'From PDF', items: [
+      { name: 'PDF to pictures', desc: 'Every page as a JPG or PNG', icon: 'images:duotone', tile: TILE.conv, go: () => setTool('images') },
+      { name: 'Extract text', desc: 'All the text, also from scans', icon: 'article:duotone', tile: TILE.conv, go: () => setTool('text') },
     ] },
     { name: 'Convert to PDF', items: [
       { name: 'Images to PDF', desc: 'JPG, PNG, HEIC, WebP', icon: 'image:duotone', tile: TILE.conv, go: conv('image') },
@@ -105,6 +129,15 @@ export function Tools(p: Props) {
       {tool === 'combine' && <Combine {...p} desk={desk} mobile={mobile} />}
       {(tool === 'extract' || tool === 'remove') && <PagePick {...p} desk={desk} mobile={mobile} mode={tool} onMode={setTool} />}
       {tool === 'insert' && <Insert {...p} desk={desk} mobile={mobile} />}
+      {tool === 'compress' && <Compress {...p} desk={desk} mobile={mobile} />}
+      {tool === 'password' && <Password {...p} desk={desk} mobile={mobile} />}
+      {tool === 'numbers' && <PageNumbers {...p} desk={desk} mobile={mobile} />}
+      {tool === 'watermark' && <Watermark {...p} desk={desk} mobile={mobile} />}
+      {tool === 'split' && <Split {...p} desk={desk} mobile={mobile} />}
+      {tool === 'images' && <ToImages {...p} desk={desk} mobile={mobile} />}
+      {tool === 'text' && <ExtractText {...p} desk={desk} mobile={mobile} />}
+      {tool === 'deadlines' && <Deadlines {...p} desk={desk} mobile={mobile} />}
+      {tool === 'safecopy' && <SafeCopy {...p} desk={desk} mobile={mobile} />}
       {tool === 'convert' && <Convert host={p.host} toast={p.toast} desk={desk} mobile={mobile} kind={convertKind} onOpenInEditor={p.onOpenInEditor} />}
     </div>
   );
@@ -112,7 +145,7 @@ export function Tools(p: Props) {
 
 // ---------------- shared bits ----------------
 
-function useSource(current: Current | null) {
+export function useSource(current: Current | null) {
   const [src, setSrc] = useState<Src | null>(current ? { ...current, fromEditor: true } : null);
   const [err, setErr] = useState<string | null>(null);
   const load = async (f: File) => {
@@ -128,7 +161,7 @@ function useSource(current: Current | null) {
   return { src, load, err, setSrc };
 }
 
-function PickPdf({ onFile, err, title }: { onFile: (f: File) => void; err: string | null; title: string }) {
+export function PickPdf({ onFile, err, title }: { onFile: (f: File) => void; err: string | null; title: string }) {
   const ref = useRef<HTMLInputElement>(null);
   const [over, setOver] = useState(false);
   return (
@@ -148,11 +181,11 @@ function PickPdf({ onFile, err, title }: { onFile: (f: File) => void; err: strin
   );
 }
 
-function Side({ desk, children, cta, bar }: { desk: boolean; children: React.ReactNode; cta: React.ReactNode; bar: { title: string; sub: string; extra?: React.ReactNode } }) {
+export function Side({ desk, children, cta, bar }: { desk: boolean; children: React.ReactNode; cta: React.ReactNode; bar: { title: string; sub: string; extra?: React.ReactNode } }) {
   if (desk) return <aside className="tside"><div className="sb">{children}</div><div className="sf">{cta}</div></aside>;
   return null;
 }
-function Bar({ desk, bar, cta }: { desk: boolean; bar: { title: string; sub: string; extra?: React.ReactNode }; cta: React.ReactNode }) {
+export function Bar({ desk, bar, cta }: { desk: boolean; bar: { title: string; sub: string; extra?: React.ReactNode }; cta: React.ReactNode }) {
   if (desk) return null;
   return <div className="tbar"><div className="t"><b>{bar.title}</b><span>{bar.sub}</span></div>{bar.extra}{cta}</div>;
 }

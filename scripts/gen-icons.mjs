@@ -13,7 +13,7 @@ const icons = {
   'arrow-left': R, 'arrow-u-up-left': R, 'arrow-u-up-right': R, minus: R, plus: [...R, 'bold'], 'arrows-horizontal': R,
   'download-simple': B, x: [...R, 'bold'], trash: [...R, 'bold'], copy: R, 'arrows-out-cardinal': R, 'arrows-out-simple': B,
   'caret-down': [...R, 'bold'], 'caret-up': [...R, 'bold'], 'caret-right': R, 'caret-left': R, 'arrow-clockwise': [...R, 'bold'],
-  'arrow-counter-clockwise': R, 'dots-six-vertical': [...R, 'bold'], check: B, 'lock-simple': F, 'lock-key': F,
+  'arrow-counter-clockwise': R, 'dots-six-vertical': [...R, 'bold'], check: B, 'lock-simple': F, 'lock-key': [...F, 'duotone'],
   'wifi-slash': F, 'folder-open': B, 'file-arrow-down': [...F, 'duotone'], keyboard: R, 'upload-simple': R, square: R, circle: [...RF],
   'line-segment': R, 'sliders-horizontal': R, info: R, eye: R, 'calendar-blank': R, sun: R, moon: R, export: [...R, 'bold', 'duotone'],
   'dots-three': B, 'pencil-simple': R, 'pencil-simple-line': D, stack: [...D, 'bold'], 'file-minus': D, 'file-plus': D,
@@ -24,7 +24,7 @@ const icons = {
   'cloud-slash': R, 'device-mobile': R, 'file-text': D, 'files': D, eyedropper: R, 'dots-nine': [...R, 'bold'], 'arrow-right': B, 'android-logo': R, 'hand-grabbing': B, 'clipboard-text': R,
   'identification-card': [...R, 'duotone'], 'book-open': [...R, 'duotone'], receipt: [...R, 'duotone'], 'camera-slash': R, lightning: F, flashlight: [...RF],
   scan: [...R, 'bold', 'duotone'], crop: R, 'magic-wand': R, sparkle: [...RF], 'circle-half': [...R, 'fill'], palette: R, 'text-aa': R, 'frame-corners': R,
-  'selection-all': R, 'arrows-clockwise': R, 'drop-half': R, 'camera-plus': R, 'image-square': R, 'split-horizontal': R
+  'selection-all': R, 'arrows-clockwise': R, 'drop-half': R, 'camera-plus': R, 'image-square': R, 'split-horizontal': R, 'arrows-in-line-vertical': [...R, 'duotone'], 'file-zip': D, 'lock-key-open': [...R, 'duotone'], 'list-numbers': [...R, 'duotone'], stamp: [...R, 'duotone'], scissors: [...R, 'duotone'], images: [...R, 'duotone'], article: [...R, 'duotone'], 'magnifying-glass': [...R, 'bold', 'duotone'], prohibit: [...R, 'duotone'], 'shield-check': [...R, 'duotone'], 'calendar-plus': [...R, 'duotone'], 'identification-badge': [...R, 'duotone'], 'eye-slash': [...R, 'duotone'], 'copy-simple': R
 };
 const out = {};
 for (const [name, weights] of Object.entries(icons)) {

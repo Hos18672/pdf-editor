@@ -3,7 +3,7 @@
 import React from 'react';
 import EditorApp from '../ui/EditorApp';
 import type { ChromeColors } from '../ui/hooks';
-import type { Incoming } from '../ui/Editor';
+import type { Incoming, CalEvent } from '../ui/Editor';
 
 // Android: react-native-webview hands the page its start-up values (host OS, initial props) with an
 // async evaluateJavascript call, which can lose the race against the page's own start-up script.
@@ -16,7 +16,7 @@ if (bridge) {
     let injected: any = null;
     try { injected = JSON.parse(bridge.injectedObjectJson?.() ?? 'null'); } catch { /* not there yet */ }
     w.$$EXPO_DOM_HOST_OS ??= injected?.EXPO_DOM_HOST_OS ?? 'android';
-    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets', 'exitApp', 'takeIntent', 'readShared'], props: { isNative: true } };
+    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets', 'exitApp', 'takeIntent', 'readShared', 'addToCalendar'], props: { isNative: true } };
   }
 }
 
@@ -48,6 +48,7 @@ const native = bridge ? {
   exitApp: () => { callNative('exitApp', []).catch(() => null); },
   takeIntent: () => callNative<Incoming | null>('takeIntent', []),
   readShared: (uri: string) => callNative<string>('readShared', [uri]),
+  addToCalendar: (e: CalEvent) => callNative<boolean>('addToCalendar', [e]),
 } : null;
 
 // The whole editor is a DOM component: on the web it renders directly, on
@@ -63,6 +64,7 @@ export default function PdfEditorDom(props: {
   /** Android: what the app was opened with (a PDF, shared files, a shortcut) */
   takeIntent?: () => Promise<Incoming | null>;
   readShared?: (uri: string) => Promise<string>;
+  addToCalendar?: (e: CalEvent) => Promise<boolean>;
   /** Android: the WebView handle (the shell sends the back button through it) */
   ref?: React.Ref<unknown>;
 }) {

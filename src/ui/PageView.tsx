@@ -25,6 +25,8 @@ const FAMILY_CSS: Record<string, string> = {
 };
 
 interface Props {
+  /** search / privacy-check matches on this page (viewport units) */
+  hits?: { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[];
   src: number;
   index: number;
   rotation: number;
@@ -209,7 +211,7 @@ export function PageView(p: Props) {
     toLocal(e.clientX, e.clientY, pageRef.current!, info.w, info.h, zoom, rotation);
 
   // ---- creating shapes / placing things ----
-  const dragTools: Tool[] = ['whiteout', 'highlight', 'rect', 'ellipse', 'line', 'draw'];
+  const dragTools: Tool[] = ['whiteout', 'redact', 'highlight', 'rect', 'ellipse', 'line', 'draw'];
   const onLayerClick = (e: React.MouseEvent) => {
     if (gesture.multi) return;
     if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
@@ -288,10 +290,11 @@ export function PageView(p: Props) {
       return;
     }
     if (w < 4 || h < 4) {
-      if (p.tool !== 'whiteout' && p.tool !== 'highlight') return;
+      if (p.tool !== 'whiteout' && p.tool !== 'highlight' && p.tool !== 'redact') return;
       w = 120; h = 22;
     }
     if (p.tool === 'whiteout') p.onAdd({ id, page: p.src, type: 'whiteout', x, y, w, h, fill: '#ffffff' });
+    else if (p.tool === 'redact') p.onAdd({ id, page: p.src, type: 'redact', x, y, w, h });
     else if (p.tool === 'highlight') p.onAdd({ id, page: p.src, type: 'highlight', x, y, w, h, fill: st.highlight, opacity: 0.4 });
     else p.onAdd({ id, page: p.src, type: p.tool as 'rect' | 'ellipse', x, y, w, h, stroke: st.stroke, fill: st.fill, strokeWidth: st.strokeWidth });
     p.onSelect(id);
@@ -329,6 +332,9 @@ export function PageView(p: Props) {
       >
         <canvas ref={canvasRef} />
         <div className={`layer${passive ? ' passive' : ''}`}>
+          {p.hits?.map((h, i) => (
+            <div key={i} className={`hitbox${h.cur ? ' cur' : ''}${h.priv ? ' priv' : ''}`} style={{ left: (h.x - 1) * zoom, top: (h.y - 1) * zoom, width: (h.w + 2) * zoom, height: (h.h + 2) * zoom }} />
+          ))}
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
               edit={p.edits[r.key]} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={liveRun(r.key)}
@@ -393,7 +399,7 @@ function Draft({ d, zoom, tool, style }: { d: { x0: number; y0: number; x1: numb
   }
   const x = Math.min(d.x0, d.x1) * zoom, y = Math.min(d.y0, d.y1) * zoom;
   const w = Math.abs(d.x1 - d.x0) * zoom, h = Math.abs(d.y1 - d.y0) * zoom;
-  const bg = tool === 'whiteout' ? '#fff' : tool === 'highlight' ? style.highlight + '66' : 'transparent';
+  const bg = tool === 'whiteout' ? '#fff' : tool === 'redact' ? '#111' : tool === 'highlight' ? style.highlight + '66' : 'transparent';
   return <div className="draft" style={{ left: x, top: y, width: w, height: h, background: bg, borderRadius: tool === 'ellipse' ? '50%' : 0 }} />;
 }
 
@@ -863,6 +869,9 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     case 'whiteout':
       inner = <div style={{ position: 'absolute', inset: 0, background: o.fill }} />;
       break;
+    case 'redact':
+      inner = <div className="redbox" />;
+      break;
     case 'highlight':
       inner = <div style={{ position: 'absolute', inset: 0, background: o.fill, opacity: o.opacity ?? 0.4, mixBlendMode: 'multiply' }} />;
       break;
@@ -932,7 +941,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       <button type="button" aria-label="Turn 90°" title="Turn 90°" onClick={quarter}><Icon name="arrow-clockwise" size={18} /></button>
       <button type="button" aria-label="Duplicate" title="Duplicate (Ctrl+D)" onClick={onDuplicate}><Icon name="copy" size={18} /></button>
       <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={18} /></button>
-      {mobile && !editing && o.type !== 'whiteout' && (
+      {mobile && !editing && o.type !== 'whiteout' && o.type !== 'redact' && (
         <><span className="sep" /><button type="button" aria-label="More options" title="More options" onClick={onMore}><Icon name="more" size={18} /></button></>
       )}
     </div>, document.body) : null;

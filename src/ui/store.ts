@@ -2,7 +2,7 @@ import { useCallback, useReducer } from 'react';
 import type { EditorObject, PageState, FontFamily, FormValues } from '../engine/types';
 
 export type Tool =
-  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'highlight' | 'rect' | 'ellipse' | 'line' | 'draw';
+  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'redact' | 'highlight' | 'rect' | 'ellipse' | 'line' | 'draw';
 
 export interface RunEdit {
   text: string;

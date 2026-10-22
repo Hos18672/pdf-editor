@@ -8,6 +8,75 @@ import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
 import { addTextLayer } from './textLayer';
 import type { ExportInput, EditorObject, FontFamily, TextEdit } from './types';
+import { decodeImage, writeJpeg } from './images';
+
+type Box = { x0: number; y0: number; x1: number; y1: number };
+const applyM = (m: M, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
+const boxOf = (pts: [number, number][]): Box => ({
+  x0: Math.min(...pts.map((p) => p[0])), y0: Math.min(...pts.map((p) => p[1])), x1: Math.max(...pts.map((p) => p[0])), y1: Math.max(...pts.map((p) => p[1])),
+});
+/** the area a glyph's letter takes (user space) */
+function glyphBox(g: Glyph): Box {
+  const [ox, oy] = g.origin, [ex, ey] = g.end;
+  let dx = ex - ox, dy = ey - oy;
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+  const up = g.height * 0.78, down = g.height * 0.2;
+  return boxOf([[ox - dy * up, oy + dx * up], [ex - dy * up, ey + dx * up], [ex + dy * down, ey - dx * down], [ox + dy * down, oy - dx * down]]);
+}
+/** how much of `a` lies inside `b` (0–1) */
+function coverShare(a: Box, b: Box): number {
+  const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+  if (w <= 0 || h <= 0) return 0;
+  const area = Math.max(1e-6, (a.x1 - a.x0) * (a.y1 - a.y0));
+  return (w * h) / area;
+}
+
+const mulM = (a: M, b: M): M => [
+  a[0] * b[0] + a[1] * b[2], a[0] * b[1] + a[1] * b[3],
+  a[2] * b[0] + a[3] * b[2], a[2] * b[1] + a[3] * b[3],
+  a[4] * b[0] + a[5] * b[2] + b[4], a[4] * b[1] + a[5] * b[3] + b[5],
+];
+
+/** Black out the pixels under the boxes in the pictures drawn on the page (also inside forms). */
+async function redactPictures(doc: PDFDocument, resources: PDFDict | undefined, draws: { name: string; ctm: M }[], boxes: Box[], done = new Set<string>(), depth = 0) {
+  const xo = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
+  if (!xo) return;
+  for (const d of draws) {
+    const ref = xo.get(PDFName.of(d.name));
+    if (!(ref instanceof PDFRef) || done.has(ref.toString())) continue;
+    const st = doc.context.lookup(ref);
+    if (!(st instanceof PDFRawStream)) continue;
+    const sub = st.dict.get(PDFName.of('Subtype'))?.toString();
+    if (sub === '/Form' && depth < 6) {
+      // a form draws its own content: follow it with its matrix
+      let body: Uint8Array;
+      try { body = decodePDFRawStream(st).decode(); } catch { continue; }
+      const mx = st.dict.lookupMaybe(PDFName.of('Matrix'), PDFArray);
+      const fm: M = mx ? (mx.asArray().map((v: any) => (typeof v.asNumber === 'function' ? v.asNumber() : 0)) as M) : [1, 0, 0, 1, 0, 0];
+      const inner = interpret(tokenize(body), () => undefined).draws.map((x) => ({ name: x.name, ctm: mulM(mulM(x.ctm, fm), d.ctm) }));
+      const res = st.dict.lookupMaybe(PDFName.of('Resources'), PDFDict) ?? resources;
+      await redactPictures(doc, res, inner, boxes, done, depth + 1);
+      continue;
+    }
+    if (sub !== '/Image') continue;
+    const area = boxOf([[0, 0], [1, 0], [1, 1], [0, 1]].map(([u, v]) => applyM(d.ctm, u, v)));
+    const hits = boxes.filter((b) => coverShare(b, area) > 0);
+    if (!hits.length) continue;
+    const px = await decodeImage(doc, st);
+    if (!px) continue; // a kind of picture we can't change: it stays covered by the black box
+    const back = invert(d.ctm);
+    for (const b of hits) {
+      const uv = [[b.x0, b.y0], [b.x1, b.y0], [b.x1, b.y1], [b.x0, b.y1]].map(([x, y]) => applyM(back, x, y));
+      const xs = uv.map((p) => p[0] * px.w), ys = uv.map((p) => (1 - p[1]) * px.h);
+      const x0 = Math.max(0, Math.floor(Math.min(...xs)) - 1), x1 = Math.min(px.w, Math.ceil(Math.max(...xs)) + 1);
+      const y0 = Math.max(0, Math.floor(Math.min(...ys)) - 1), y1 = Math.min(px.h, Math.ceil(Math.max(...ys)) + 1);
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const i = (y * px.w + x) * 4; px.rgba[i] = px.rgba[i + 1] = px.rgba[i + 2] = 0; }
+    }
+    await writeJpeg(doc, ref, st, px, 0.9);
+    done.add(ref.toString());
+  }
+}
 
 const f = fmtNum;
 
@@ -121,7 +190,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
 
     const original = readContents(doc, leaf);
     const ops = tokenize(original);
-    const { glyphs, shows } = interpret(ops, fonts);
+    const { glyphs, shows, draws } = interpret(ops, fonts);
 
     const edits = input.edits.filter((e) => e.page === pi);
     const family = edits.length ? fontFamilies(glyphs, toUni) : null;
@@ -129,6 +198,14 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     let add = '';
 
     const vm = input.viewMatrices[pi];
+    // redactions: the text and picture pixels under the boxes are deleted, then the boxes are drawn
+    const reds = vm ? input.objects.filter((o) => o.page === pi && o.type === 'redact') : [];
+    if (reds.length) {
+      const inv = invert(vm);
+      const boxes = reds.map((o) => boxOf([[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]].map(([x, y]) => applyM(inv, x, y))));
+      for (const g of glyphs) if (boxes.some((b) => coverShare(glyphBox(g), b) > 0.3)) remove.add(g);
+      await redactPictures(doc, resources, draws, boxes).catch((err) => console.warn('redact pictures', err));
+    }
     const rules = edits.length && input.rules && vm ? await input.rules(pi).catch(() => []) : [];
     const cover = (e: TextEdit, scan = false) => whiteoutRegion(e, scan) + rulesOver(coverPts(e, scan), rules, vm);
     for (const e of edits) {
@@ -481,6 +558,9 @@ async function drawObject(
     case 'whiteout':
     case 'highlight':
       s += `${rgb(o.fill, 'rg')} ${f(o.x)} ${f(o.y)} ${f(o.w)} ${f(o.h)} re f `;
+      break;
+    case 'redact':
+      s += `0 0 0 rg ${f(o.x)} ${f(o.y)} ${f(o.w)} ${f(o.h)} re f `;
       break;
     case 'rect': {
       if (o.fill) s += rgb(o.fill, 'rg') + ' ';

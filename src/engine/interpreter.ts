@@ -69,6 +69,8 @@ interface GState {
 export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undefined) {
   const glyphs: Glyph[] = [];
   const shows = new Map<number, ShowOp>();
+  /** XObjects drawn (pictures, forms) and where: the unit square through `ctm` */
+  const draws: { name: string; ctm: M; opIndex: number }[] = [];
   let gs: GState = { ctm: IDENT, fontRes: '', fontSize: 0, Tc: 0, Tw: 0, Tz: 100, TL: 0, Ts: 0, Tr: 0, fill: [] };
   const stack: GState[] = [];
   let tm: M = IDENT;
@@ -120,6 +122,7 @@ export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undef
         break;
       case 'cs': gs = { ...gs, fill: [serializeOp('cs', a)] }; break;
       case 'BT': tm = IDENT; tlm = IDENT; break;
+      case 'Do': if (a[0]?.t === 'name') draws.push({ name: a[0].v, ctm: gs.ctm, opIndex: index }); break;
       case 'Tf':
         gs = { ...gs, fontRes: a[0]?.t === 'name' ? a[0].v : gs.fontRes, fontSize: a[1]?.t === 'num' ? a[1].v : gs.fontSize };
         break;
@@ -168,7 +171,7 @@ export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undef
         break;
     }
   });
-  return { glyphs, shows };
+  return { glyphs, shows, draws };
 }
 
 /**

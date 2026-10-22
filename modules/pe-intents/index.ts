@@ -14,6 +14,7 @@ interface PeIntentsModule {
   takeIntent(): Incoming | null;
   readUri(uri: string): Promise<string>;
   refreshShortcuts(): void;
+  addCalendarEvent(title: string, beginMs: number, allDay: boolean, description: string): boolean;
   addListener(event: 'onIntent', fn: () => void): { remove(): void };
 }
 

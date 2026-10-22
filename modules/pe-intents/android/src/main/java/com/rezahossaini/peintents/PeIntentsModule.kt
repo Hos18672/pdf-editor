@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.provider.CalendarContract
 import android.provider.OpenableColumns
 import android.util.Base64
 import android.webkit.MimeTypeMap
@@ -48,6 +49,21 @@ class PeIntentsModule : Module() {
       val bytes = context.contentResolver.openInputStream(Uri.parse(uri))?.use { it.readBytes() }
         ?: throw IllegalStateException("Cannot read the file")
       Base64.encodeToString(bytes, Base64.NO_WRAP)
+    }
+
+    // opens the calendar app with the event filled in (the person saves it there)
+    Function("addCalendarEvent") { title: String, beginMs: Double, allDay: Boolean, description: String ->
+      val intent = Intent(Intent.ACTION_INSERT)
+        .setData(CalendarContract.Events.CONTENT_URI)
+        .putExtra(CalendarContract.Events.TITLE, title)
+        .putExtra(CalendarContract.Events.DESCRIPTION, description)
+        .putExtra(CalendarContract.EXTRA_EVENT_BEGIN_TIME, beginMs.toLong())
+        .putExtra(CalendarContract.EXTRA_EVENT_END_TIME, beginMs.toLong() + (if (allDay) 86400000L else 3600000L))
+        .putExtra(CalendarContract.EXTRA_EVENT_ALL_DAY, allDay)
+        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      val activity = appContext.currentActivity
+      if (activity != null) activity.startActivity(intent) else context.startActivity(intent)
+      true
     }
 
     Function("refreshShortcuts") {

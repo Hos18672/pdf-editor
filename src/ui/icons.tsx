@@ -5,7 +5,7 @@ export type Weight = 'regular' | 'fill' | 'bold' | 'duotone';
 
 // app names → Phosphor icon names (and a preferred weight)
 const ALIAS: Record<string, string> = {
-  edit: 'cursor-text', fill: 'textbox', text: 'text-t', sign: 'signature', whiteout: 'eraser', highlight: 'highlighter',
+  edit: 'cursor-text', fill: 'textbox', text: 'text-t', sign: 'signature', whiteout: 'eraser', redact: 'eye-slash', highlight: 'highlighter',
   rect: 'square', ellipse: 'circle', line: 'line-segment', draw: 'scribble', pages: 'squares-four',
   undo: 'arrow-u-up-left', redo: 'arrow-u-up-right', download: 'download-simple:bold', close: 'x', back: 'arrow-left',
   rotate: 'arrow-clockwise', restore: 'arrow-counter-clockwise', up: 'caret-up', down: 'caret-down', left: 'caret-left',
