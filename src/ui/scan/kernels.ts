@@ -653,6 +653,12 @@ export function scanKernels(): Kernels {
     const tmp: number[] = [], tc: number[] = [];
     const bC = new Float32Array(gn);
     for (let k = 0; k < gn; k++) bC[k] = Math.max(bR[k], bG[k], bB[k]) - Math.min(bR[k], bG[k], bB[k]);
+    // The page's own paper level (its bright blocks). Inside a large dark area (a navy letterhead
+    // banner, a photo) a block's neighbours are all dark too, so the local test alone would take
+    // it for paper in shadow and turn it white in patches. Shadows rarely take paper below a third
+    // of its brightness; printed dark areas are far below that.
+    const sortedY = Float32Array.from(bgY).sort();
+    const floorY = sortedY[Math.min(gn - 1, (gn * 0.8) | 0)] * 0.33;
     let good = 0;
     for (let by = 0; by < gh; by++) for (let bx = 0; bx < gw; bx++) {
       tmp.length = 0; tc.length = 0;
@@ -661,7 +667,7 @@ export function scanKernels(): Kernels {
       tmp.sort((a, b) => a - b); tc.sort((a, b) => a - b);
       const med = tmp[(tmp.length * 0.6) | 0], medC = tc[(tc.length * 0.5) | 0];
       const k = by * gw + bx;
-      if (bgY[k] >= med * 0.8 && bgY[k] > 40 && bC[k] <= medC + 8) { ok[k] = 1; good++; }
+      if (bgY[k] >= med * 0.8 && bgY[k] > 40 && bgY[k] >= floorY && bC[k] <= medC + 8) { ok[k] = 1; good++; }
     }
     if (good < gn * 0.25) return null;
     // fill the gaps from valid neighbours
