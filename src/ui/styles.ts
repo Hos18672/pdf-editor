@@ -456,9 +456,11 @@ button { cursor: pointer; }
 .run textarea { position: absolute; left: 0; margin: 0; padding: 0; border: 0; border-radius: 3px; resize: none; overflow: hidden; white-space: pre; outline: none; box-shadow: 0 0 0 1.5px #1E2559; font-kerning: normal; }
 .run.selected:not(.editing) { outline: 2px solid #1E2559; outline-offset: 3px; }
 .run.changed, .run.edited { z-index: 1; }
+.run.editing { z-index: 3; }
+.draft, .draftline { z-index: 3; }
 .layer.passive .run { pointer-events: none; }
 
-.obj { position: absolute; touch-action: none; }
+.obj { position: absolute; touch-action: none; z-index: 2; }
 .obj.selected { outline: 1.5px solid var(--sel); outline-offset: 0; }
 :root[data-theme="dark"] .obj.selected { outline-color: #3446C9; }
 .obj .dotc { position: absolute; width: 9px; height: 9px; background: #fff; border: 1.5px solid #3446C9; border-radius: 50%; pointer-events: none; }

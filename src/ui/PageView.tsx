@@ -249,6 +249,8 @@ export function PageView(p: Props) {
   const onLayerDown = (e: React.PointerEvent) => {
     hadSelection.current = p.selected !== null || p.editing !== null;
     if (e.button !== 0 || gesture.multi) return;
+    // a second finger (pinch starting): drop the stroke the first one began
+    if (e.pointerType === 'touch' && !e.isPrimary) { setDraft(null); return; }
     if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
     if (p.tool === 'text' || (p.tool === 'fill' && p.fillMark)) return;
@@ -282,7 +284,10 @@ export function PageView(p: Props) {
       if (pts.length < 4) return;
       const xs = pts.filter((_, i) => i % 2 === 0), ys = pts.filter((_, i) => i % 2 === 1);
       // a tap (a finger always wobbles a little) is not a stroke: it left stray dots on the page
-      if (Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < Math.max(3, 6 / zoom)) return;
+      let len = 0;
+      for (let i = 2; i < pts.length; i += 2) len += Math.hypot(pts[i] - pts[i - 2], pts[i + 1] - pts[i - 1]);
+      const ext = Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+      if (ext < Math.max(4, 12 / zoom, st.strokeWidth * 2) || len < Math.max(6, 16 / zoom)) return;
       const minX = Math.min(...xs), minY = Math.min(...ys);
       p.onAdd({ id, page: p.src, type: 'draw', x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY,
         stroke: st.stroke, strokeWidth: st.strokeWidth, points: pts.map((v, i) => v - (i % 2 ? minY : minX)) });
@@ -395,14 +400,14 @@ export function PageView(p: Props) {
 function Draft({ d, zoom, tool, style }: { d: { x0: number; y0: number; x1: number; y1: number; pts?: number[] }; zoom: number; tool: Tool; style: ToolStyle }) {
   if (d.pts) {
     return (
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+      <svg className="draftline" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
         <polyline points={d.pts.map((v) => v * zoom).join(' ')} fill="none" stroke={style.stroke} strokeWidth={style.strokeWidth * zoom} strokeLinecap="round" strokeLinejoin="round" />
       </svg>
     );
   }
   if (tool === 'line') {
     return (
-      <svg style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+      <svg className="draftline" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
         <line x1={d.x0 * zoom} y1={d.y0 * zoom} x2={d.x1 * zoom} y2={d.y1 * zoom} stroke={style.stroke} strokeWidth={style.strokeWidth * zoom} strokeLinecap="round" />
       </svg>
     );
