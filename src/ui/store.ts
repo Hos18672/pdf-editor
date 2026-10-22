@@ -2,7 +2,7 @@ import { useCallback, useReducer } from 'react';
 import type { EditorObject, PageState, FontFamily, FormValues } from '../engine/types';
 
 export type Tool =
-  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'redact' | 'highlight' | 'rect' | 'ellipse' | 'line' | 'draw';
+  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'redact' | 'highlight' | 'underline' | 'strike' | 'rect' | 'ellipse' | 'line' | 'arrow' | 'draw' | 'link';
 
 export interface RunEdit {
   text: string;
@@ -25,6 +25,8 @@ export interface ToolStyle {
   fontSize: number;
   family: FontFamily;
   highlight: string;
+  /** underline / strike-through colour */
+  ink: string;
 }
 
 interface State {

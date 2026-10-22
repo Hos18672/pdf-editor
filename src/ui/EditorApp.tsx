@@ -290,7 +290,7 @@ export default function EditorApp(host: HostProps) {
       {route.name === 'editor' && file && pdf ? (
         <Editor key={docId} onAddPages={addPages} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
-          onSaved={(bytes) => { saveRecent({ id: recentId.current ?? undefined, name: file.name, kind: 'edited', bytes }).then((i) => { if (i) recentId.current = i; }); }}
+          onSaved={(bytes, name) => { saveRecent({ id: recentId.current ?? undefined, name, kind: 'edited', bytes }).then((i) => { if (i) recentId.current = i; }); }}
           toast={setToastMsg} setBusy={setBusy} />
       ) : route.name === 'scan' ? (
         <Scanner host={host} bp={bp} toast={setToastMsg} setBusy={setBusy}
@@ -313,6 +313,12 @@ export default function EditorApp(host: HostProps) {
             const b = await recentBytes(d.id);
             if (b) open(d.name, b, undefined, d.kind, d.id);
             else setToastMsg({ msg: 'That file is no longer stored here', kind: 'err' });
+          }}
+          onShareRecent={async (d) => {
+            const b = await recentBytes(d.id);
+            if (!b) { setToastMsg({ msg: 'That file is no longer stored here', kind: 'err' }); return; }
+            const { shareFile } = await import('./share');
+            await shareFile(host, b, /\.pdf$/i.test(d.name) ? d.name : d.name + '.pdf', 'application/pdf', setToastMsg);
           }} />
       )}
       </Suspense>

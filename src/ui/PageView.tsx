@@ -18,6 +18,10 @@ export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
 export interface PageInfo { w: number; h: number; vm: M; }
 export interface PageData { runs: TextRun[]; colors: Record<string, { bg: string; fg: string }>; }
 
+/** underline / strike-through: where the line runs in the marked box (fraction of its height) and how thick */
+export const MARK_UNDER = 0.83, MARK_STRIKE = 0.5;
+export const markWidth = (h: number) => Math.max(0.6, Math.min(3, h * 0.075));
+
 const FAMILY_CSS: Record<string, string> = {
   Helvetica: 'Arial, Helvetica, sans-serif',
   Times: '"Times New Roman", Times, serif',
@@ -46,7 +50,7 @@ interface Props {
   onEditing: (id: string | null) => void;
   onStopEditing: (id: string) => void;
   onRunEdit: (key: string, e: RunEdit | null) => void;
-  onAdd: (o: EditorObject) => void;
+  onAdd: (o: EditorObject | EditorObject[]) => void;
   onChange: (id: string, patch: Partial<EditorObject>, merge: boolean) => void;
   onPlace: (src: number, x: number, y: number) => boolean;
   onDelete: (id: string) => void;
@@ -213,7 +217,7 @@ export function PageView(p: Props) {
     toLocal(e.clientX, e.clientY, pageRef.current!, info.w, info.h, zoom, rotation);
 
   // ---- creating shapes / placing things ----
-  const dragTools: Tool[] = ['whiteout', 'redact', 'highlight', 'rect', 'ellipse', 'line', 'draw'];
+  const dragTools: Tool[] = ['whiteout', 'redact', 'highlight', 'underline', 'strike', 'rect', 'ellipse', 'line', 'arrow', 'draw', 'link'];
   const onLayerClick = (e: React.MouseEvent) => {
     if (gesture.multi) return;
     if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
@@ -293,21 +297,74 @@ export function PageView(p: Props) {
         stroke: st.stroke, strokeWidth: st.strokeWidth, points: pts.map((v, i) => v - (i % 2 ? minY : minX)) });
       return;
     }
-    if (p.tool === 'line') {
+    if (p.tool === 'line' || p.tool === 'arrow') {
       if (Math.hypot(d.x1 - d.x0, d.y1 - d.y0) < 4) return;
-      p.onAdd({ id, page: p.src, type: 'line', x: d.x0, y: d.y0, x2: d.x1, y2: d.y1, w: 0, h: 0, stroke: st.stroke, strokeWidth: st.strokeWidth });
+      p.onAdd({ id, page: p.src, type: 'line', x: d.x0, y: d.y0, x2: d.x1, y2: d.y1, w: 0, h: 0, stroke: st.stroke, strokeWidth: st.strokeWidth, ...(p.tool === 'arrow' ? { arrow: true } : null) });
       p.onSelect(id);
       return;
     }
+    const markup = p.tool === 'highlight' || p.tool === 'underline' || p.tool === 'strike';
+    if (markup) {
+      // over text: follows the lines like a text selection (from where the drag started to where it ended)
+      const lines = textSpans(d);
+      if (lines.length) {
+        const objs = lines.map((l, i): EditorObject => markObj(i ? uid() : id, l.x, l.y, l.w, l.h));
+        p.onAdd(objs);
+        if (objs.length === 1) p.onSelect(id);
+        return;
+      }
+    }
     if (w < 4 || h < 4) {
-      if (p.tool !== 'whiteout' && p.tool !== 'highlight' && p.tool !== 'redact') return;
+      if (!markup && p.tool !== 'whiteout' && p.tool !== 'redact' && p.tool !== 'link') return;
       w = 120; h = 22;
     }
+    if (markup) { p.onAdd(markObj(id, x, y, w, h)); p.onSelect(id); return; }
+    if (p.tool === 'link') { p.onAdd({ id, page: p.src, type: 'link', x, y, w, h, url: '' }); p.onSelect(id); return; }
     if (p.tool === 'whiteout') p.onAdd({ id, page: p.src, type: 'whiteout', x, y, w, h, fill: '#ffffff' });
     else if (p.tool === 'redact') p.onAdd({ id, page: p.src, type: 'redact', x, y, w, h });
     else if (p.tool === 'highlight') p.onAdd({ id, page: p.src, type: 'highlight', x, y, w, h, fill: st.highlight, opacity: 0.4 });
     else p.onAdd({ id, page: p.src, type: p.tool as 'rect' | 'ellipse', x, y, w, h, stroke: st.stroke, fill: st.fill, strokeWidth: st.strokeWidth });
     p.onSelect(id);
+  };
+
+  /** a highlight / underline / strike-through box */
+  const markObj = (id: string, x: number, y: number, w: number, h: number): EditorObject => {
+    const st = p.style;
+    return p.tool === 'highlight'
+      ? { id, page: p.src, type: 'highlight', x, y, w, h, fill: st.highlight, opacity: 0.4 }
+      : { id, page: p.src, type: 'highlight', style: p.tool === 'underline' ? 'underline' : 'strike', x, y, w, h, fill: st.ink, opacity: 1 };
+  };
+  /** the stretches of text lines between the drag's start and end (a tap: the word's whole line piece) */
+  const textSpans = (d: { x0: number; y0: number; x1: number; y1: number }) => {
+    const boxes = (p.data?.runs ?? []).map((r) => runBox(r, info.vm)).filter((b) => Math.abs(b.angle) < 0.02 && b.w > 0)
+      .map((b) => ({ x0: b.x, x1: b.x + b.w, top: b.top, bot: b.top + b.height, base: b.y, h: b.h }));
+    if (!boxes.length) return [];
+    const [a, z] = d.y0 <= d.y1 ? [{ x: d.x0, y: d.y0 }, { x: d.x1, y: d.y1 }] : [{ x: d.x1, y: d.y1 }, { x: d.x0, y: d.y0 }];
+    const ylo = a.y, yhi = z.y;
+    // pieces touched by the drag's height (a flat drag: the line it runs along)
+    const hit = boxes.filter((b) => (yhi - ylo < 3 ? b.top - 2 <= ylo && ylo <= b.bot + 2 : Math.min(b.bot, yhi) - Math.max(b.top, ylo) > (b.bot - b.top) * 0.3 || (b.top <= ylo && ylo <= b.bot) || (b.top <= yhi && yhi <= b.bot)));
+    if (!hit.length) return [];
+    // group into lines by baseline
+    hit.sort((p1, p2) => p1.base - p2.base);
+    const lines: (typeof hit)[] = [];
+    for (const b of hit) { const l = lines[lines.length - 1]; if (l && Math.abs(l[0].base - b.base) < Math.max(l[0].h, b.h) * 0.5) l.push(b); else lines.push([b]); }
+    const tap = Math.abs(d.x1 - d.x0) < 4 && Math.abs(d.y1 - d.y0) < 4;
+    const out: { x: number; y: number; w: number; h: number }[] = [];
+    lines.forEach((l, i) => {
+      const lx0 = Math.min(...l.map((b) => b.x0)), lx1 = Math.max(...l.map((b) => b.x1));
+      const top = Math.min(...l.map((b) => b.top)), bot = Math.max(...l.map((b) => b.bot));
+      let xa = lx0, xb = lx1;
+      if (tap) {
+        const b = l.find((q) => q.x0 - 2 <= a.x && a.x <= q.x1 + 2);
+        if (!b) return;
+        xa = b.x0; xb = b.x1;
+      } else if (lines.length === 1) { xa = Math.max(lx0, Math.min(d.x0, d.x1)); xb = Math.min(lx1, Math.max(d.x0, d.x1)); }
+      else if (i === 0) xa = Math.max(lx0, Math.min(lx1, a.x));
+      else if (i === lines.length - 1) xb = Math.min(lx1, Math.max(lx0, z.x));
+      if (xb - xa < 2) return;
+      out.push({ x: xa, y: top, w: xb - xa, h: bot - top });
+    });
+    return out;
   };
 
   // existing text stays clickable (= editable) with the Edit and Add-text tools
@@ -397,6 +454,14 @@ export function PageView(p: Props) {
   );
 }
 
+/** the filled head of an arrow ending at (x1, y1), in page units */
+export function arrowHead(x0: number, y0: number, x1: number, y1: number, sw: number): [number, number][] {
+  const len = Math.hypot(x1 - x0, y1 - y0) || 1, ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+  const L = Math.min(len * 0.45, Math.max(8, sw * 4.5)), W = L * 0.55;
+  const bx = x1 - ux * L, by = y1 - uy * L;
+  return [[x1 + ux * sw * 0.5, y1 + uy * sw * 0.5], [bx - uy * W, by + ux * W], [bx + uy * W, by - ux * W]];
+}
+
 function Draft({ d, zoom, tool, style }: { d: { x0: number; y0: number; x1: number; y1: number; pts?: number[] }; zoom: number; tool: Tool; style: ToolStyle }) {
   if (d.pts) {
     return (
@@ -405,17 +470,18 @@ function Draft({ d, zoom, tool, style }: { d: { x0: number; y0: number; x1: numb
       </svg>
     );
   }
-  if (tool === 'line') {
+  if (tool === 'line' || tool === 'arrow') {
     return (
       <svg className="draftline" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
         <line x1={d.x0 * zoom} y1={d.y0 * zoom} x2={d.x1 * zoom} y2={d.y1 * zoom} stroke={style.stroke} strokeWidth={style.strokeWidth * zoom} strokeLinecap="round" />
+        {tool === 'arrow' && <polygon points={arrowHead(d.x0, d.y0, d.x1, d.y1, style.strokeWidth).map(([x, y]) => `${x * zoom},${y * zoom}`).join(' ')} fill={style.stroke} />}
       </svg>
     );
   }
   const x = Math.min(d.x0, d.x1) * zoom, y = Math.min(d.y0, d.y1) * zoom;
   const w = Math.abs(d.x1 - d.x0) * zoom, h = Math.abs(d.y1 - d.y0) * zoom;
-  const bg = tool === 'whiteout' ? '#fff' : tool === 'redact' ? '#111' : tool === 'highlight' ? style.highlight + '66' : 'transparent';
-  return <div className="draft" style={{ left: x, top: y, width: w, height: h, background: bg, borderRadius: tool === 'ellipse' ? '50%' : 0 }} />;
+  const bg = tool === 'whiteout' ? '#fff' : tool === 'redact' ? '#111' : tool === 'highlight' ? style.highlight + '66' : tool === 'underline' || tool === 'strike' ? style.ink + '22' : tool === 'link' ? 'rgba(37,99,235,.08)' : 'transparent';
+  return <div className={`draft${tool === 'link' ? ' link' : ''}`} style={{ left: x, top: y, width: w, height: h, background: bg, borderRadius: tool === 'ellipse' ? '50%' : 0 }} />;
 }
 
 // ---------------- existing text runs ----------------
@@ -889,7 +955,12 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       inner = <div className="redbox" />;
       break;
     case 'highlight':
-      inner = <div style={{ position: 'absolute', inset: 0, background: o.fill, opacity: o.opacity ?? 0.4, mixBlendMode: 'multiply' }} />;
+      inner = o.style
+        ? <div style={{ position: 'absolute', left: 0, right: 0, top: `${(o.style === 'underline' ? MARK_UNDER : MARK_STRIKE) * 100}%`, height: Math.max(1, markWidth(o.h) * zoom), marginTop: -Math.max(1, markWidth(o.h) * zoom) / 2, background: o.fill, opacity: o.opacity ?? 1 }} />
+        : <div style={{ position: 'absolute', inset: 0, background: o.fill, opacity: o.opacity ?? 0.4, mixBlendMode: 'multiply' }} />;
+      break;
+    case 'link':
+      inner = <div className="linkbox" title={o.url || (o.target !== undefined ? 'Link to a page' : 'Link')}><Icon name="link" size={Math.max(10, Math.min(16, o.h * zoom * 0.6))} /></div>;
       break;
     case 'rect':
     case 'ellipse':
@@ -905,6 +976,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       inner = (
         <svg width="100%" height="100%" overflow="visible">
           <line x1={(o.x - bx) * zoom} y1={(o.y - by) * zoom} x2={(o.x2 - bx) * zoom} y2={(o.y2 - by) * zoom} stroke={o.stroke} strokeWidth={o.strokeWidth * zoom} strokeLinecap="round" />
+          {o.arrow && <polygon points={arrowHead(o.x, o.y, o.x2, o.y2, o.strokeWidth).map(([x, y]) => `${(x - bx) * zoom},${(y - by) * zoom}`).join(' ')} fill={o.stroke} />}
         </svg>
       );
       break;
@@ -973,7 +1045,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
           <div className="handle" aria-label="Resize" onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><Icon name="resize" size={10} /></div>
         </>
       )}
-      {selected && !isLine && !editing && (
+      {selected && !isLine && !editing && o.type !== 'link' && !(o.type === 'highlight' && o.style) && (
         <div className="rothandle" role="slider" aria-label="Turn" aria-valuenow={Math.round(o.rot ?? 0)} title="Drag to turn"
           onPointerDown={start('rotate')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
           <Icon name="arrow-clockwise:bold" size={13} />

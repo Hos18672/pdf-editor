@@ -63,8 +63,11 @@ export type EditorObject =
   | (Base & { type: 'whiteout'; fill: string })
   /** black box: what is under it is removed from the file (text, picture pixels) */
   | (Base & { type: 'redact' })
-  | (Base & { type: 'highlight'; fill: string })
-  | (Base & { type: 'line'; stroke: string; strokeWidth: number; x2: number; y2: number })
+  /** a highlight, or (style) a line under / through the text */
+  | (Base & { type: 'highlight'; fill: string; style?: 'underline' | 'strike' })
+  | (Base & { type: 'line'; stroke: string; strokeWidth: number; x2: number; y2: number; arrow?: boolean })
+  /** a clickable area: a web address, or a page of the document (original index) */
+  | (Base & { type: 'link'; url: string; target?: number })
   | (Base & { type: 'draw'; stroke: string; strokeWidth: number; points: number[] }) // relative to x,y
   | (Base & { type: 'mark'; kind: 'check' | 'cross' | 'dot'; color: string });
 

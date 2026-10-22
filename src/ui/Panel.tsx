@@ -136,16 +136,23 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
 
 export const OBJ_TITLE: Record<EditorObject['type'], string> = {
   text: 'Text', image: 'Image', signature: 'Signature', rect: 'Box', ellipse: 'Circle',
-  whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark',
+  whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark', link: 'Link',
 };
+/** the name of an object as shown (an underline is a "highlight" with a style) */
+export const objTitle = (o: EditorObject) => o.type === 'highlight' && o.style ? (o.style === 'underline' ? 'Underline' : 'Strike-through')
+  : o.type === 'line' && o.arrow ? 'Arrow' : OBJ_TITLE[o.type];
+export const MARK_INKS = ['#D93025', '#1E2559', '#2F5BD3', '#14161F', '#1E7A4C'];
 
-export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact }: {
+export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact, order }: {
   o: EditorObject; onChange: (p: Partial<EditorObject>) => void; onDelete: () => void; onDuplicate: () => void; onClose?: () => void; compact?: boolean;
+  /** the document's pages in order (original indices), for links to a page */
+  order?: number[];
 }) {
   const set = (p: any) => onChange(p);
   return (
     <div className="props">
-      {!compact && <Head kicker="Added object" title={OBJ_TITLE[o.type]} onClose={onClose} />}
+      {!compact && <Head kicker="Added object" title={objTitle(o)} onClose={onClose} />}
+      {o.type === 'link' && <LinkProps o={o} order={order ?? []} onChange={set} />}
       {o.type === 'text' && (
         <>
           <div className="field"><div className="label">Font</div><Family value={o.family} onChange={(family) => set({ family })} /></div>
@@ -172,6 +179,7 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact 
         <>
           <div className="field"><div className="label">Colour</div><Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></div>
           <div className="field"><div className="label">Width</div><Stepper value={o.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} label="width" unit="pt" /></div>
+          {o.type === 'line' && <Toggle label="Arrow head" checked={!!o.arrow} onChange={(arrow) => set({ arrow })} />}
         </>
       )}
       {o.type === 'mark' && (
@@ -187,7 +195,19 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact 
         <div className="note"><Icon name="eye-slash" size={16} /><span>When you download, the text and picture parts under this box are deleted from the file, not just covered. They can’t be copied or found any more.</span></div>
       )}
       {o.type === 'highlight' && (
-        <div className="field"><div className="label">Colour</div><Swatches value={o.fill} list={HIGHLIGHTS} custom={false} onPick={(fill) => set({ fill: fill ?? HIGHLIGHTS[0] })} /></div>
+        <>
+          <div className="field"><div className="label">Style</div>
+            <Seg value={o.style ?? 'highlight'} options={[['highlight', 'Highlight'], ['underline', 'Underline'], ['strike', 'Strike']]}
+              onChange={(v) => set(v === 'highlight'
+                ? { style: undefined, fill: HIGHLIGHTS.includes(o.fill) ? o.fill : HIGHLIGHTS[0], opacity: 0.4 }
+                : { style: v, fill: HIGHLIGHTS.includes(o.fill) ? MARK_INKS[0] : o.fill, opacity: 1 })} />
+          </div>
+          <div className="field"><div className="label">Colour</div>
+            {o.style
+              ? <Swatches value={o.fill} list={MARK_INKS} onPick={(fill) => set({ fill: fill ?? MARK_INKS[0] })} />
+              : <Swatches value={o.fill} list={HIGHLIGHTS} custom={false} onPick={(fill) => set({ fill: fill ?? HIGHLIGHTS[0] })} />}
+          </div>
+        </>
       )}
       {(o.type === 'image' || o.type === 'signature') && (
         <div className="field"><div className="label">Opacity</div>
@@ -203,10 +223,37 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact 
   );
 }
 
-const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', draw: 'Draw', highlight: 'Highlight', whiteout: 'Whiteout', redact: 'Redact' };
+/** Where a link goes: a web address (or e-mail), or a page of this document. */
+function LinkProps({ o, order, onChange }: { o: Extract<EditorObject, { type: 'link' }>; order: number[]; onChange: (p: any) => void }) {
+  const kind = o.target !== undefined ? 'page' : 'web';
+  const pageNo = o.target !== undefined ? Math.max(1, order.indexOf(o.target) + 1) : 1;
+  return (
+    <>
+      <div className="field"><div className="label">Opens</div>
+        <Seg value={kind} options={[['web', 'Web address'], ['page', 'A page']]}
+          onChange={(v) => onChange(v === 'page' ? { target: order[0] ?? 0 } : { target: undefined })} />
+      </div>
+      {kind === 'web' ? (
+        <div className="field"><div className="label">Address</div>
+          <input className="input" type="url" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="https://example.com or name@mail.com"
+            value={o.url} onChange={(e) => onChange({ url: e.target.value })} onKeyDown={(e) => e.stopPropagation()} aria-label="Web address" />
+        </div>
+      ) : (
+        <div className="field"><div className="label">Page</div>
+          <Stepper value={pageNo} min={1} max={Math.max(1, order.length)} onChange={(n) => onChange({ target: order[Math.max(0, Math.min(order.length - 1, n - 1))] })} label="page" />
+        </div>
+      )}
+      <div className="hint">The box is invisible in the saved PDF; tapping it there opens the {kind === 'web' ? 'address' : 'page'}.</div>
+    </>
+  );
+}
+
+const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', arrow: 'Arrow', draw: 'Draw', highlight: 'Highlight', underline: 'Underline', strike: 'Strike-through', whiteout: 'Whiteout', redact: 'Redact', link: 'Link' };
 const TOOL_HINTS: Partial<Record<Tool, string>> = {
   text: 'Click anywhere on a page to start typing.', rect: 'Drag on the page to draw a box.', ellipse: 'Drag on the page to draw a circle.',
-  line: 'Drag on the page to draw a line.', draw: 'Draw freely with mouse, finger or pen.', highlight: 'Drag over the area to highlight.',
+  line: 'Drag on the page to draw a line.', arrow: 'Drag from where the arrow starts to where it points.', draw: 'Draw freely with mouse, finger or pen.',
+  highlight: 'Drag across the text to highlight it, or tap a word.', underline: 'Drag across the text to underline it, or tap a word.', strike: 'Drag across the text to strike it through, or tap a word.',
+  link: 'Drag a box over text or a picture, then type the web address or pick a page.',
   whiteout: 'Drag over anything you want to hide. To change a line of text, use Edit and click it instead.',
   redact: 'Drag over what must go: names, numbers, signatures. On download it is deleted from the file, not only covered. Use the privacy check to find personal data.',
 };
@@ -224,7 +271,7 @@ export function ToolProps({ tool, style, onChange, compact }: { tool: Tool; styl
           <div className="field"><div className="label">Colour</div><Swatches value={style.color} onPick={(color) => onChange({ color: color ?? '#000000' })} /></div>
         </>
       )}
-      {(tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'draw') && (
+      {(tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'arrow' || tool === 'draw') && (
         <>
           <div className="field"><div className="label">Colour</div><Swatches value={style.stroke} onPick={(stroke) => onChange({ stroke: stroke ?? '#000000' })} /></div>
           {(tool === 'rect' || tool === 'ellipse') && <div className="field"><div className="label">Fill</div><Swatches value={style.fill} allowNone onPick={(fill) => onChange({ fill })} /></div>}
@@ -232,6 +279,7 @@ export function ToolProps({ tool, style, onChange, compact }: { tool: Tool; styl
         </>
       )}
       {tool === 'highlight' && <div className="field"><div className="label">Colour</div><Swatches value={style.highlight} list={HIGHLIGHTS} custom={false} onPick={(highlight) => onChange({ highlight: highlight ?? HIGHLIGHTS[0] })} /></div>}
+      {(tool === 'underline' || tool === 'strike') && <div className="field"><div className="label">Colour</div><Swatches value={style.ink} list={MARK_INKS} onPick={(ink) => onChange({ ink: ink ?? MARK_INKS[0] })} /></div>}
     </div>
   );
 }

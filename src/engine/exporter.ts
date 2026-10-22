@@ -1,6 +1,6 @@
 import {
   PDFDocument, PDFDict, PDFName, PDFRef, PDFArray, PDFRawStream, PDFStream, StandardFonts,
-  decodePDFRawStream, degrees, PDFFont, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList, PDFBool,
+  decodePDFRawStream, degrees, PDFFont, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList, PDFBool, PDFString,
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
@@ -313,11 +313,28 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     const body = rebuild(original, ops, replacements);
 
     // Objects drawn in viewport space
-    const objs = input.objects.filter((o) => o.page === pi);
+    const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link');
     if (objs.length) {
       add += 'q ' + invert(vm).map(f).join(' ') + ' cm\n';
       for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe);
       add += 'Q\n';
+    }
+    // links: clickable areas (annotations), nothing drawn
+    for (const o of input.objects) {
+      if (o.page !== pi || o.type !== 'link' || !vm) continue;
+      const dest = o.target !== undefined ? pages[o.target] : null;
+      const uri = linkUri(o.url);
+      if (!dest && !uri) continue;
+      const inv = invert(vm);
+      const pts = [[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]].map(([x, y]) => [inv[0] * x + inv[2] * y + inv[4], inv[1] * x + inv[3] * y + inv[5]]);
+      const xs = pts.map((q) => q[0]), ys = pts.map((q) => q[1]);
+      const annot = doc.context.obj({
+        Type: 'Annot', Subtype: 'Link', Rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map((v) => +v.toFixed(2)), Border: [0, 0, 0],
+        ...(dest ? { Dest: [dest.ref, PDFName.of('Fit')] } : { A: { Type: 'Action', S: 'URI', URI: PDFString.of(uri!) } }),
+      });
+      const ref = doc.context.register(annot);
+      const annots = leaf.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      if (annots) annots.push(ref); else leaf.set(PDFName.of('Annots'), doc.context.obj([ref]));
     }
 
     const head = latin1('q\n');
@@ -542,15 +559,34 @@ function encodeMixed(
 
 const KAPPA = 0.5522847498;
 
+/** what a typed link address opens: web pages get https://, e-mail addresses mailto:, phone numbers tel: */
+export function linkUri(raw: string): string | null {
+  const t = raw.trim();
+  if (!t) return null;
+  if (/^[a-z][a-z0-9+.-]*:/i.test(t)) return t;
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return 'mailto:' + t;
+  if (/^\+?[\d\s()/-]{6,}$/.test(t)) return 'tel:' + t.replace(/[^\d+]/g, '');
+  return 'https://' + t.replace(/^\/+/, '');
+}
+
+/** filled arrow head at (x1, y1) (same shape as on screen) */
+function arrowHeadPts(x0: number, y0: number, x1: number, y1: number, sw: number): [number, number][] {
+  const len = Math.hypot(x1 - x0, y1 - y0) || 1, ux = (x1 - x0) / len, uy = (y1 - y0) / len;
+  const L = Math.min(len * 0.45, Math.max(8, sw * 4.5)), W = L * 0.55;
+  const bx = x1 - ux * L, by = y1 - uy * L;
+  return [[x1 + ux * sw * 0.5, y1 + uy * sw * 0.5], [bx - uy * W, by + ux * W], [bx + uy * W, by - ux * W]];
+}
+
 async function drawObject(
   doc: PDFDocument, leaf: any, o: EditorObject,
   stdFont: (fam: FontFamily, b: boolean, i: boolean) => Promise<PDFFont>,
   safe: (f: PDFFont, s: string) => string,
 ): Promise<string> {
   let s = 'q ';
-  const opacity = o.type === 'highlight' ? (o.opacity ?? 0.4) : o.opacity;
+  const marker = o.type === 'highlight' && !o.style;
+  const opacity = o.type === 'highlight' ? (o.opacity ?? (o.style ? 1 : 0.4)) : o.opacity;
   if (opacity !== undefined && opacity < 1) {
-    const gs = doc.context.obj({ Type: 'ExtGState', ca: opacity, CA: opacity, ...(o.type === 'highlight' ? { BM: 'Multiply' } : {}) });
+    const gs = doc.context.obj({ Type: 'ExtGState', ca: opacity, CA: opacity, ...(marker ? { BM: 'Multiply' } : {}) });
     const key = leaf.newExtGState('GSo', doc.context.register(gs)).asString();
     s += `${key} gs `;
   }
@@ -561,9 +597,15 @@ async function drawObject(
   }
   switch (o.type) {
     case 'whiteout':
-    case 'highlight':
       s += `${rgb(o.fill, 'rg')} ${f(o.x)} ${f(o.y)} ${f(o.w)} ${f(o.h)} re f `;
       break;
+    case 'highlight': {
+      if (!o.style) { s += `${rgb(o.fill, 'rg')} ${f(o.x)} ${f(o.y)} ${f(o.w)} ${f(o.h)} re f `; break; }
+      // underline / strike-through: a bar across the box (same place as on screen)
+      const t = Math.max(0.6, Math.min(3, o.h * 0.075)), cy = o.y + o.h * (o.style === 'underline' ? 0.83 : 0.5);
+      s += `${rgb(o.fill, 'rg')} ${f(o.x)} ${f(cy - t / 2)} ${f(o.w)} ${f(t)} re f `;
+      break;
+    }
     case 'redact':
       s += `0 0 0 rg ${f(o.x)} ${f(o.y)} ${f(o.w)} ${f(o.h)} re f `;
       break;
@@ -587,6 +629,10 @@ async function drawObject(
     }
     case 'line':
       s += `${rgb(o.stroke, 'RG')} ${f(o.strokeWidth)} w 1 J ${f(o.x)} ${f(o.y)} m ${f(o.x2)} ${f(o.y2)} l S `;
+      if (o.arrow) {
+        const [a, b, c] = arrowHeadPts(o.x, o.y, o.x2, o.y2, o.strokeWidth);
+        s += `${rgb(o.stroke, 'rg')} ${f(a[0])} ${f(a[1])} m ${f(b[0])} ${f(b[1])} l ${f(c[0])} ${f(c[1])} l h f `;
+      }
       break;
     case 'draw': {
       s += `${rgb(o.stroke, 'RG')} ${f(o.strokeWidth)} w 1 J 1 j `;

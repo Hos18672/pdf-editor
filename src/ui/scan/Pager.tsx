@@ -17,8 +17,8 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
   pages: ScanPage[]; renders: Record<string, PagerRender>; cur: number;
   onCur: (i: number) => void; onAdd: () => void; keyOf: (p: ScanPage) => string;
   compare: boolean; orig: string | undefined; label: string; onCheck: (id: string) => void;
-  /** a sharper picture of a page for looking closely (zoomed in) */
-  sharp?: Record<string, { key: string; url: string }>; onSharp?: (id: string) => void;
+  /** the page at the screen's sharpness, or sharper for looking closely (zoomed in) */
+  sharp?: Record<string, { key: string; url: string; long: number }>; onSharp?: (id: string, long: number) => void;
 }) {
   const vp = useRef<HTMLDivElement>(null);
   const track = useRef<HTMLDivElement>(null);
@@ -70,7 +70,20 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
     setZ(clampZ({ k, x: p.x - c.x - r * (p.x - c.x - from.x), y: p.y - c.y - r * (p.y - c.y - from.y) }));
   };
   const zoomed = z.k > 1.001;
-  useEffect(() => { if (zoomed && pages[cur]) onSharp?.(pages[cur].id); }, [zoomed, cur]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the page on screen at the screen's own sharpness (a moment after it's ready), and in full detail when
+  // zoomed in: the quick picture is sized for speed, phone screens have far more pixels
+  const curR = pages[cur] ? renders[pages[cur].id] : undefined;
+  const ready = !!curR && !curR.quick && curR.key === keyOf(pages[cur]);
+  useEffect(() => {
+    const p = pages[cur];
+    if (!p || !ready || !box.w) return;
+    if (zoomed) { onSharp?.(p.id, 0); return; }
+    const ps = picSize();
+    const need = Math.max(ps.w, ps.h) * Math.min(3, window.devicePixelRatio || 1);
+    if (need <= Math.max(curR!.w, curR!.h) * 1.1) return;
+    const t = setTimeout(() => onSharp?.(p.id, need), 450);
+    return () => clearTimeout(t);
+  }, [zoomed, cur, ready, curR?.key, box.w, box.h]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const down = (e: React.PointerEvent) => {
     if (!box.w) return;
@@ -196,7 +209,7 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
           const sz = shapeOf(p);
           const on = i === cur;
           const stale = !!r && r.key !== keyOf(p);
-          const hi = on && zoomed && r && sharp?.[p.id]?.key === r.key ? sharp[p.id].url : null;
+          const hi = near && r && !r.quick && sharp?.[p.id]?.key === r.key ? sharp[p.id].url : null;
           return (
             <div key={p.id} className="sc-slide" style={{ width: box.w }} aria-hidden={!on}>
               <div className="sc-pic" style={{ ...fit(sz.w, sz.h), ...(on && zoomed ? { transform: `translate(${z.x}px, ${z.y}px) scale(${z.k})`, zIndex: 2 } : null) }}>

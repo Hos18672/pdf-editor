@@ -13,7 +13,7 @@ import { FindBar, PrivacyCheck } from './FindBar';
 import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
-import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, OBJ_TITLE, Stepper, toolHasProps, fontLabel, Toggle } from './Panel';
+import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, objTitle, Stepper, toolHasProps, fontLabel, Toggle } from './Panel';
 import { readFields, FormField, isFilled } from './Fields';
 import { exportPdf } from '../engine/exporter';
 import { pageNeedsText, LayerLine } from '../engine/textLayer';
@@ -56,31 +56,14 @@ export interface Incoming {
 export interface ToastMsg { msg: string; kind?: 'ok' | 'err'; action?: { label: string; run: () => void } }
 export interface BusyMsg { title: string; detail?: string; progress?: number }
 
-export const toB64 = (bytes: Uint8Array) => {
-  let s = '';
-  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
-  return btoa(s);
-};
-
-/** Save bytes as a file: share sheet in the Android app, a download on the web. */
-export async function saveFile(host: HostProps, bytes: Uint8Array, name: string, type: string, toast: (t: ToastMsg) => void) {
-  if (host.isNative && host.savePdf) {
-    await host.savePdf(toB64(bytes), name);
-    return;
-  }
-  const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type }));
-  const a = document.createElement('a');
-  a.href = url; a.download = name;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 120000);
-  toast({ msg: `Saved ${name}`, action: type === 'application/pdf' ? { label: 'Open', run: () => window.open(url, '_blank') } : undefined });
-}
+export { toB64, saveFile, shareFile, canShareFiles, printPdf } from './share';
+import { saveFile, shareFile, printPdf } from './share';
 
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const MIN_Z = 0.25, MAX_Z = 4;
 const clampZ = (z: number) => Math.max(MIN_Z, Math.min(MAX_Z, z));
 
-type RailT = Tool | 'shapes' | 'pages';
+type RailT = Tool | 'shapes' | 'markup' | 'pages';
 type RailItem = { t: RailT; label: string; icon: string; key: string; opts?: boolean };
 /** Tools grouped by intent (rail, mobile "All tools" sheet). `opts`: the tool has a flyout with options. */
 const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
@@ -90,11 +73,12 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
   { name: 'Add', tint: 'var(--tint-add)', items: [
     { t: 'text', label: 'Text', icon: 'text-t', key: 'T', opts: true },
     { t: 'sign', label: 'Sign', icon: 'signature', key: 'S' },
-    { t: 'image', label: 'Image', icon: 'image', key: 'I' }] },
+    { t: 'image', label: 'Image', icon: 'image', key: 'I' },
+    { t: 'link', label: 'Link', icon: 'link', key: 'K' }] },
   { name: 'Mark up', tint: 'var(--tint-markup)', items: [
     { t: 'whiteout', label: 'Whiteout', icon: 'eraser', key: 'W' },
     { t: 'redact', label: 'Redact', icon: 'eye-slash', key: 'X' },
-    { t: 'highlight', label: 'Highlight', icon: 'highlighter', key: 'H', opts: true },
+    { t: 'markup', label: 'Highlight', icon: 'highlighter', key: 'H', opts: true },
     { t: 'shapes', label: 'Shapes', icon: 'shapes', key: 'R', opts: true },
     { t: 'draw', label: 'Draw', icon: 'scribble', key: 'D', opts: true }] },
   { name: 'Document', tint: 'var(--tint-doc)', items: [
@@ -102,8 +86,11 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
 ];
 const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
 /** phone: every tool in the bottom bar, most used first (it scrolls sideways) */
-const DOCK: RailT[] = ['edit', 'text', 'sign', 'highlight', 'draw', 'shapes', 'whiteout', 'redact', 'image', 'fill', 'pages'];
-const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line'];
+const DOCK: RailT[] = ['edit', 'text', 'sign', 'markup', 'draw', 'shapes', 'whiteout', 'redact', 'image', 'link', 'fill', 'pages'];
+const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line', 'arrow'];
+/** highlight, underline, strike-through: one rail button, picked in its flyout */
+const MARK_TOOLS: Tool[] = ['highlight', 'underline', 'strike'];
+const MARK_TILES: [Tool, string, string][] = [['highlight', 'Highlight', 'highlighter'], ['underline', 'Underline', 'text-underline'], ['strike', 'Strike', 'text-strikethrough']];
 
 // phone dock: the 4 most recently used tools (slots stay put; a new tool replaces the least recent)
 const RECENT_KEY = 'pe-recent-tools';
@@ -113,7 +100,7 @@ const readRecent = (): Recent => {
     const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? 'null');
     if (v && Array.isArray(v.slots) && v.slots.length === 4 && v.slots.every((t: string) => RAIL.some((r) => r.t === t))) return v;
   } catch { /* storage unavailable */ }
-  return { slots: ['edit', 'text', 'highlight', 'sign'], used: {} };
+  return { slots: ['edit', 'text', 'markup', 'sign'], used: {} };
 };
 const useRecent = (r: Recent, t: RailT): Recent => {
   const used = { ...r.used, [t]: Date.now() };
@@ -127,7 +114,7 @@ const useRecent = (r: Recent, t: RailT): Recent => {
   try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)); } catch { /* storage unavailable */ }
   return next;
 };
-const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'], ['line', 'Line', 'line']];
+const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'], ['line', 'Line', 'line'], ['arrow', 'Arrow', 'arrow-up-right']];
 
 /** What the editor opens with when started from the tools page. */
 export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages' | 'privacy';
@@ -140,7 +127,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   theme: Theme; onTheme: () => void; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
   start?: EditorStart;
   /** the edited PDF was saved (for the recent documents list) */
-  onSaved?: (bytes: Uint8Array) => void;
+  onSaved?: (bytes: Uint8Array, name: string) => void;
 }) {
   const { snap, commit } = hist;
   // looks of scanned lines belong to this document
@@ -148,7 +135,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const mobile = bp === 'mobile', tablet = bp === 'tablet', large = bp === 'large', desk = bp === 'desktop' || large;
   const [tool, setTool] = useState<Tool>('edit');
   const [style, setStyle] = useState<ToolStyle>({
-    color: '#000000', stroke: '#1E2559', fill: null, strokeWidth: 2, fontSize: 14, family: 'Helvetica', highlight: '#FFE14D',
+    color: '#000000', stroke: '#1E2559', fill: null, strokeWidth: 2, fontSize: 14, family: 'Helvetica', highlight: '#FFE14D', ink: '#D93025',
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -182,6 +169,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [recent, setRecent] = useState<Recent>(readRecent);
   const railBtns = useRef<Partial<Record<RailT, HTMLButtonElement | null>>>({});
   const lastShape = useRef<Tool>('rect');
+  const lastMark = useRef<Tool>('highlight');
   const [sheetFor, setSheetFor] = useState<string | null>(null);
   const [slimOpen, setSlimOpen] = useState(false);
   const [dragInfo, setDragInfo] = useState<{ x: number; y: number; id: string; page: number } | null>(null);
@@ -399,7 +387,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ----- object helpers -----
-  const addObject = (o: EditorObject) => commit((s) => ({ ...s, objects: [...s.objects, o] }));
+  const addObject = (o: EditorObject | EditorObject[]) => commit((s) => ({ ...s, objects: [...s.objects, ...(Array.isArray(o) ? o : [o])] }));
   const changeObject = (id: string, patch: Partial<EditorObject>, merge: boolean) =>
     commit((s) => ({ ...s, objects: s.objects.map((o) => (o.id === id ? ({ ...o, ...patch } as EditorObject) : o)) }), merge);
   const removeObject = (id: string) => {
@@ -691,26 +679,33 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     return out;
   };
   const droppedText = () => Object.fromEntries(Object.entries(dropped).map(([k, rs]) => [k, rs.map((r) => r.region)]));
-  const download = async (): Promise<boolean> => {
+  // the file's name: renamed by you, or the original with "-edited"
+  const [docName, setDocName] = useState<string | null>(null);
+  const outName = (n = docName) => ((n ?? file.name.replace(/\.pdf$/i, '') + '-edited').replace(/[\\/:*?"<>|]+/g, '-').trim() || 'document') + '.pdf';
+  const [fileMenu, setFileMenu] = useState(false);
+  const download = (how: 'save' | 'share' | 'print' = 'save', name?: string) => deliver(how, name);
+  const deliver = async (how: 'save' | 'share' | 'print', rename?: string): Promise<boolean> => {
     setEditing(null);
     (document.activeElement as HTMLElement | null)?.blur?.();
     await new Promise((r) => setTimeout(r, 30));
-    setBusy({ title: 'Preparing your PDF', detail: `Writing ${editCount || 'your'} ${editCount === 1 ? 'change' : 'changes'} into ${snap.pages.length} ${snap.pages.length === 1 ? 'page' : 'pages'}. Nothing is uploaded.` });
+    setBusy({ title: how === 'print' ? 'Preparing to print' : 'Preparing your PDF', detail: `Writing ${editCount || 'your'} ${editCount === 1 ? 'change' : 'changes'} into ${snap.pages.length} ${snap.pages.length === 1 ? 'page' : 'pages'}. Nothing is uploaded.` });
     try {
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
         viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage, rules: rulesOf,
         ocrLayer: ocrLayer(), dropText: droppedText(),
       });
-      const name = file.name.replace(/\.pdf$/i, '') + '-edited.pdf';
+      const name = outName(rename ?? docName);
       setBusy(null);
-      await saveFile(host, bytes, name, 'application/pdf', toast);
+      if (how === 'print') { printPdf(bytes); return true; }
+      if (how === 'share') await shareFile(host, bytes, name, 'application/pdf', toast);
+      else await saveFile(host, bytes, name, 'application/pdf', toast);
       savedSnap.current = snap;
-      onSaved?.(bytes);
+      onSaved?.(bytes, name);
       return true;
     } catch (e: any) {
       console.error(e);
-      toast({ msg: 'The PDF could not be saved: ' + (e?.message || 'unknown error'), kind: 'err', action: { label: 'Retry', run: download } });
+      toast({ msg: 'The PDF could not be saved: ' + (e?.message || 'unknown error'), kind: 'err', action: { label: 'Retry', run: () => { deliver(how); } } });
       return false;
     } finally {
       setBusy(null);
@@ -937,9 +932,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (mobile) setRecent((v) => useRecent(v, r.t));
     if (r.t === 'pages') { setFlyout(null); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }
     const same = railActive(r);
-    if (r.t === 'shapes') {
-      if (!SHAPE_TOOLS.includes(tool) || view === 'pages') pickTool(lastShape.current);
-      if (same && flyout?.t === 'shapes') setFlyout(null); else openFlyout('shapes');
+    if (r.t === 'shapes' || r.t === 'markup') {
+      const group = r.t === 'shapes' ? SHAPE_TOOLS : MARK_TOOLS;
+      if (!group.includes(tool) || view === 'pages') pickTool(r.t === 'shapes' ? lastShape.current : lastMark.current);
+      if (same && flyout?.t === r.t) setFlyout(null); else openFlyout(r.t);
       return;
     }
     if (same && r.opts && !mobile) { if (flyout?.t === r.t) setFlyout(null); else openFlyout(r.t); return; }
@@ -949,9 +945,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const railActive = (r: RailItem) => r.t === 'pages' ? view === 'pages'
     : view === 'pages' ? false
     : r.t === 'shapes' ? SHAPE_TOOLS.includes(tool)
+    : r.t === 'markup' ? MARK_TOOLS.includes(tool)
     : r.t === 'sign' ? !!showSig || selObj?.type === 'signature'
     : r.t === tool;
-  useEffect(() => { if (SHAPE_TOOLS.includes(tool)) lastShape.current = tool; }, [tool]);
+  useEffect(() => { if (SHAPE_TOOLS.includes(tool)) lastShape.current = tool; if (MARK_TOOLS.includes(tool)) lastMark.current = tool; }, [tool]);
   // the flyout closes on a click outside it (and outside the rail / dock)
   useEffect(() => {
     if (!flyout) return;
@@ -1070,8 +1067,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       out.push({ id: key, icon: e.text.trim() ? 'edit' : 'trash', label: e.text.trim() ? `Edited “${e.text.trim().slice(0, 28)}”` : 'Deleted a line', page: pageNo(src) });
     }
     for (const o of snap.objects) {
-      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check' };
-      out.push({ id: o.id, icon: ic[o.type], label: o.type === 'text' ? `Text “${o.text.trim().slice(0, 24) || '…'}”` : OBJ_TITLE[o.type], page: pageNo(o.page) });
+      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check', link: 'link' };
+      out.push({ id: o.id, icon: ic[o.type], label: o.type === 'text' ? `Text “${o.text.trim().slice(0, 24) || '…'}”` : objTitle(o), page: pageNo(o.page) });
     }
     const nf = Object.keys(snap.forms).length;
     if (nf) out.push({ id: 'forms', icon: 'fill', label: `Filled ${nf} form ${nf === 1 ? 'field' : 'fields'}`, page: 1 });
@@ -1092,7 +1089,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       onReset={() => afterBlur(() => setRunEdit(selRun.key, null))} onClose={() => setSelected(null)} />
   );
   const objProps = (compact: boolean) => selObj && (
-    <ObjProps o={selObj} compact={compact} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
+    <ObjProps o={selObj} compact={compact} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
       onDuplicate={() => duplicateObject(selObj.id)} onClose={() => { setSelected(null); setSheetFor(null); }} />
   );
   const fillPanel = (
@@ -1136,18 +1133,20 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         <button className="ibtn" onClick={requestClose} aria-label="Close document" title="Close"><Icon name="back" /></button>
         <div className="doc">
           <div className="names">
-            <div className="fname" title={file.name}>{file.name}</div>
+            <button className="fname fbtn" title="Rename, share, print" onClick={() => setFileMenu(true)} aria-haspopup="dialog">
+              <span>{docName ? docName + '.pdf' : file.name}</span><Icon name="caret-down:bold" size={13} />
+            </button>
             <div className="fmeta"><span>{snap.pages.length} {snap.pages.length === 1 ? 'page' : 'pages'}</span>
               {editCount > 0 && <span className="chg">{editCount} {editCount === 1 ? 'change' : 'changes'}</span>}</div>
           </div>
         </div>
         <div className="group">
-          <button className={`ibtn${findOpen ? ' on' : ''}`} onClick={() => { setPrivOpen(false); setFindOpen((v) => !v); }} aria-label="Find in document" title="Find (Ctrl+F)"><Icon name="magnifying-glass" size={19} /></button>
-          {!mobile && <button className={`ibtn${privOpen ? ' on' : ''}`} onClick={() => { setFindOpen(false); setPrivOpen((v) => !v); }} aria-label="Privacy check" title="Privacy check: find and black out personal data"><Icon name="shield-check" size={20} /></button>}
+          {!mobile && view === 'doc' && <button className={`ibtn${findOpen ? ' on' : ''}`} onClick={() => { setPrivOpen(false); setFindOpen((v) => !v); }} aria-label="Find in document" title="Find (Ctrl+F)"><Icon name="magnifying-glass" size={19} /></button>}
+          {!mobile && view === 'doc' && <button className={`ibtn${privOpen ? ' on' : ''}`} onClick={() => { setFindOpen(false); setPrivOpen((v) => !v); }} aria-label="Privacy check" title="Privacy check: find and black out personal data"><Icon name="shield-check" size={20} /></button>}
           <button className="ibtn" onClick={hist.undo} disabled={!hist.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)"><Icon name="undo" /></button>
           <button className="ibtn" onClick={hist.redo} disabled={!hist.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /></button>
         </div>
-        {!mobile && (
+        {!mobile && view === 'doc' && (
           <div className="zoompill">
             <button className="ibtn" onClick={() => zoomStep(-1)} aria-label="Zoom out" title="Zoom out"><Icon name="minus" size={16} /></button>
             <button className="pct" onClick={() => zoomTo(fitZoom())} title="Fit width (Ctrl+0)" aria-label={`Zoom ${Math.round(zoom * 100)}%, fit width`}>{Math.round(zoom * 100)}%</button>
@@ -1158,10 +1157,17 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         {!mobile && <button className={`ibtn${strip ? ' on' : ''}`} onClick={() => setStrip((v) => !v)} aria-pressed={strip} aria-label="Pages panel" title="Pages panel"><Icon name="sidebar-simple" size={20} weight={strip ? 'fill' : 'regular'} /></button>}
         {!mobile && <button className="ibtn" onClick={onTools} aria-label="All tools" title="All tools: combine, extract, convert"><Icon name="dots-nine" size={20} /></button>}
         {!mobile && <ThemeButton theme={theme} onToggle={onTheme} />}
+        <button className="ibtn" onClick={() => download('share')} aria-label="Share PDF" title="Share"><Icon name="share-network" size={20} /></button>
         {mobile
-          ? <button className="ibtn primary" onClick={download} aria-label="Download PDF"><Icon name="download" size={20} /></button>
-          : <button className="btn primary dl" onClick={download}><Icon name="download" size={18} />Download</button>}
+          ? <button className="ibtn primary" onClick={() => download()} aria-label={host.isNative ? 'Save PDF' : 'Download PDF'}><Icon name="download" size={20} /></button>
+          : <button className="btn primary dl" onClick={() => download()}><Icon name="download" size={18} />Download</button>}
       </header>
+      {fileMenu && (
+        <FileSheet name={docName ?? file.name.replace(/\.pdf$/i, '') + '-edited'} original={file.name} mobile={mobile} native={!!host.isNative}
+          pages={snap.pages.length} changes={editCount}
+          onRename={(n) => setDocName(n)} onClose={() => setFileMenu(false)}
+          onAct={(a, n) => { setFileMenu(false); if (a === 'find') { setPrivOpen(false); setView('doc'); setFindOpen(true); } else download(a, n); }} />
+      )}
 
       <div className="body">
         {!mobile && (
@@ -1281,15 +1287,17 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         )}
         {flyout && (() => {
           const item = RAIL.find((r) => r.t === flyout.t)!;
-          const t: Tool = flyout.t === 'shapes' ? (SHAPE_TOOLS.includes(tool) ? tool : lastShape.current) : flyout.t as Tool;
+          const t: Tool = flyout.t === 'shapes' ? (SHAPE_TOOLS.includes(tool) ? tool : lastShape.current)
+            : flyout.t === 'markup' ? (MARK_TOOLS.includes(tool) ? tool : lastMark.current) : flyout.t as Tool;
+          const tiles = flyout.t === 'shapes' ? SHAPES : flyout.t === 'markup' ? MARK_TILES : null;
           return (
             <div className={`flyout2${mobile ? ' m' : ''}`} role="dialog" aria-label={`${item.label} options`}
               style={mobile ? undefined : { top: Math.max(8, flyout.top) }}>
               <div className="fh"><b>{item.label}</b>{!mobile && <kbd>{item.key}</kbd>}</div>
-              {flyout.t === 'shapes' && (
-                <div className="ftiles" role="radiogroup" aria-label="Shape">
-                  {SHAPES.map(([st, label, ic]) => (
-                    <button key={st} role="radio" aria-checked={tool === st} className={tool === st ? 'on' : ''} onClick={() => { pickTool(st); if (!mobile) openFlyout('shapes'); }}>
+              {tiles && (
+                <div className="ftiles" role="radiogroup" aria-label={flyout.t === 'shapes' ? 'Shape' : 'Mark'}>
+                  {tiles.map(([st, label, ic]) => (
+                    <button key={st} role="radio" aria-checked={tool === st} className={tool === st ? 'on' : ''} onClick={() => { const ft = flyout.t; pickTool(st); if (!mobile) openFlyout(ft); }}>
                       <Icon name={ic} size={20} weight={tool === st ? 'fill' : 'regular'} />{label}
                     </button>
                   ))}
@@ -1371,7 +1379,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           <div className="sheet-scrim" onClick={() => setSheetFor(null)} />
           <div className="bsheet" role="dialog" aria-label="Object properties">
             <div className="grab" />
-            <ObjProps o={sheetObj} onChange={(p) => changeObject(sheetObj.id, p, false)} onDelete={() => removeObject(sheetObj.id)}
+            <ObjProps o={sheetObj} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(sheetObj.id, p, false)} onDelete={() => removeObject(sheetObj.id)}
               onDuplicate={() => { duplicateObject(sheetObj.id); setSheetFor(null); }} onClose={() => setSheetFor(null)} />
           </div>
         </>
@@ -1406,6 +1414,46 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         return <Loupe x={dragInfo.x} y={dragInfo.y} page={dragInfo.page} obj={obj} pdf={src} pageW={infos[dragInfo.page].w} pageH={infos[dragInfo.page].h} rotation={pg.rotation} zoom={zoom} />;
       })()}
     </div>
+  );
+}
+
+// ---------------- the file: rename, share, print, save ----------------
+function FileSheet({ name, original, mobile, native, pages, changes, onRename, onClose, onAct }: {
+  name: string; original: string; mobile: boolean; native: boolean; pages: number; changes: number;
+  onRename: (n: string) => void; onClose: () => void; onAct: (a: 'save' | 'share' | 'print' | 'find', name?: string) => void;
+}) {
+  const [v, setV] = useState(name);
+  const commit = () => { const t = v.replace(/\.pdf$/i, '').trim(); if (t && t !== name) { onRename(t); return t; } return undefined; };
+  const close = () => { commit(); onClose(); };
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('keydown', k);
+    return () => window.removeEventListener('keydown', k);
+  });
+  const act = (a: 'save' | 'share' | 'print' | 'find') => onAct(a, commit());
+  return (
+    <>
+      <div className="sheet-scrim filescrim" onClick={close} />
+      <div className={`bsheet filesheet${mobile ? '' : ' center'}`} role="dialog" aria-label="File">
+        {mobile && <div className="grab" />}
+        <div className="fs-h"><span className="fs-ic"><Icon name="file-pdf:duotone" size={26} /></span>
+          <div><b>File</b><span>{pages} {pages === 1 ? 'page' : 'pages'}{changes ? ` · ${changes} ${changes === 1 ? 'change' : 'changes'}` : ''}</span></div>
+          <button className="ibtn round" onClick={close} aria-label="Close"><Icon name="x:bold" size={18} /></button>
+        </div>
+        <label className="fs-name">
+          <span className="kicker">Name</span>
+          <span className="sc-name"><input className="input" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { commit(); onClose(); } }}
+            aria-label="File name" autoComplete="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} /><em>.pdf</em></span>
+          <small>Opened as {original}</small>
+        </label>
+        <div className="fs-acts">
+          <button onClick={() => act('share')}><span className="ic"><Icon name="share-network:duotone" size={22} /></span><b>Share</b><span>Send to an app, mail or chat</span></button>
+          {!native && <button onClick={() => act('print')}><span className="ic"><Icon name="printer:duotone" size={22} /></span><b>Print</b><span>Opens the print dialog</span></button>}
+          <button onClick={() => act('save')}><span className="ic"><Icon name="file-arrow-down:duotone" size={22} /></span><b>{native ? 'Save' : 'Download'}</b><span>{native ? 'To Files, Drive or another app' : 'To your downloads'}</span></button>
+          {mobile && <button onClick={() => act('find')}><span className="ic"><Icon name="magnifying-glass:duotone" size={22} /></span><b>Find</b><span>Search the text</span></button>}
+        </div>
+      </div>
+    </>
   );
 }
 

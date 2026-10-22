@@ -9,6 +9,7 @@ export const MODES: { id: ScanMode; label: string; icon: string }[] = [
   { id: 'id', label: 'ID card', icon: 'identification-card' },
   { id: 'passport', label: 'Passport', icon: 'book-open' },
   { id: 'receipt', label: 'Receipt', icon: 'receipt' },
+  { id: 'book', label: 'Book', icon: 'book-open-text' },
 ];
 
 type Status = 'starting' | 'live' | 'denied' | 'none' | 'error';
@@ -20,8 +21,10 @@ const saveAuto = (v: boolean) => { try { localStorage.setItem('pe.scan.auto', v 
  * Live camera with document outline, auto-capture when the page is held still and sharp, torch,
  * and photo import. Hands each shot to `onShot` as a JPEG (full camera resolution when possible).
  */
-export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport, onDone, onClose }: {
+export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, onImport, onDone, onClose }: {
   mode: ScanMode; onMode: (m: ScanMode) => void; count: number; lastThumb: string | null;
+  /** Done was tapped while the last page is still being read */
+  waiting?: boolean;
   /** extra line under the hint, e.g. "Front side" */
   step: string | null;
   onShot: (blob: Blob) => void; onImport: (files: File[]) => void; onDone: () => void; onClose: () => void;
@@ -47,10 +50,22 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
   const autoRef = useRef(auto); autoRef.current = auto;
   const busyRef = useRef(false);
   const shotRef = useRef<() => void>(() => {});
+  // Done tapped during a shot: carried out when the photo is in
+  const doneAfter = useRef(false);
+  const [doneWait, setDoneWait] = useState(false);
+  const onDoneRef = useRef(onDone); onDoneRef.current = onDone;
+  // lenses and zoom: the back cameras (when the phone lists several) and the zoom steps it allows
+  const [dev, setDev] = useState<string | null>(null);
+  const [gen, setGen] = useState(0);
+  const [lenses, setLenses] = useState<string[]>([]);
+  const [zooms, setZooms] = useState<number[]>([]);
+  const [zoom, setZoom] = useState(1);
+  const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
 
   // ---- start / stop the camera
   useEffect(() => {
     let alive = true;
+    setStatus('starting');
     (async () => {
       if (!navigator.mediaDevices?.getUserMedia) { setStatus('none'); return; }
       try {
@@ -62,17 +77,20 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
           video: {
             ...(dev ? { deviceId: { exact: dev } } : { facingMode: { ideal: 'environment' } }),
             width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4 / 3 }, frameRate: { ideal: 30 },
+            // the camera's own frame size, never one cut out of a bigger frame (that looks zoomed in)
+            resizeMode: { ideal: 'none' },
             advanced: [{ focusMode: 'continuous' } as any],
           } as any,
         });
-        let s = await navigator.mediaDevices.getUserMedia(want());
+        let s = dev ? await navigator.mediaDevices.getUserMedia(want(dev)).catch(() => navigator.mediaDevices.getUserMedia(want())) : await navigator.mediaDevices.getUserMedia(want());
         // phones with several back lenses: the main one (Android lists it as "camera2 0" / "camera 0"),
         // not a tele or a cropped lens the browser happened to choose
         try {
           const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && /back|rear|environment|r\u00fcck/i.test(d.label));
+          if (alive) setLenses(cams.map((d) => d.deviceId).filter(Boolean));
           const main = cams.find((d) => /\b(camera2? )?0\b/.test(d.label)) ?? null;
           const curId = s.getVideoTracks()[0]?.getSettings?.().deviceId;
-          if (main && curId && main.deviceId !== curId) {
+          if (!dev && main && curId && main.deviceId !== curId) {
             s.getTracks().forEach((t) => t.stop());
             s = await navigator.mediaDevices.getUserMedia(want(main.deviceId)).catch(() => navigator.mediaDevices.getUserMedia(want()));
           }
@@ -85,17 +103,28 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
         const track = s.getVideoTracks()[0];
         const caps: any = track.getCapabilities?.() ?? {};
         setTorch({ can: !!caps.torch, on: false });
-        // some phones start the camera zoomed in: back to 1× (not below: wide lenses bend the page)
+        // some phones start the camera zoomed in: back to 1× (wider is offered as a choice: the 0.5×
+        // lens bends the page's edges a little)
         try {
-          const z = caps.zoom ? Math.max(caps.zoom.min ?? 1, Math.min(1, caps.zoom.max ?? 1)) : null;
+          const zc = caps.zoom;
+          const z = zc ? Math.max(zc.min ?? 1, Math.min(1, zc.max ?? 1)) : null;
           const cur = (track.getSettings?.() as any)?.zoom;
-          if (z != null && cur != null && cur > z + 0.01) await track.applyConstraints({ advanced: [{ zoom: z } as any] });
+          if (z != null && cur != null && Math.abs(cur - z) > 0.01) await track.applyConstraints({ advanced: [{ zoom: z } as any] });
+          const steps: number[] = [];
+          if (zc && (zc.max ?? 1) > (zc.min ?? 1)) {
+            if ((zc.min ?? 1) < 0.95) steps.push(Math.round(zc.min * 10) / 10);
+            steps.push(z ?? 1);
+            if ((zc.max ?? 1) >= 2) steps.push(2);
+          }
+          if (alive) { setZooms(steps.length > 1 ? steps : []); setZoom(z ?? 1); }
         } catch { /* zoom not adjustable */ }
         try {
           const st: any = track.getSettings?.() ?? {};
           const r = st.width && st.height ? Math.max(st.width, st.height) / Math.min(st.width, st.height) : 4 / 3;
-          if (Math.abs(r - 4 / 3) > 0.05) await track.applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { exact: 4 / 3 } } as any);
+          if (Math.abs(r - 4 / 3) > 0.05) await track.applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { exact: 4 / 3 }, resizeMode: { ideal: 'none' } } as any);
         } catch { /* only this shape is offered */ }
+        // another app took the camera (the phone's camera app, a call): start again when we're back
+        track.addEventListener('ended', () => { if (alive) setGen((g) => g + 1); });
         setStatus('live');
       } catch (e: any) {
         if (!alive) return;
@@ -103,7 +132,28 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       }
     })();
     return () => { alive = false; stream.current?.getTracks().forEach((t) => t.stop()); stream.current = null; };
+  }, [dev, gen]);
+  // back from another app with the camera stopped
+  useEffect(() => {
+    const on = () => {
+      if (document.visibilityState !== 'visible') return;
+      const t = stream.current?.getVideoTracks()[0];
+      if (!t || t.readyState === 'ended') setGen((g) => g + 1);
+    };
+    document.addEventListener('visibilitychange', on);
+    return () => document.removeEventListener('visibilitychange', on);
   }, []);
+  const setZoomTo = async (z: number) => {
+    const t = stream.current?.getVideoTracks()[0];
+    if (!t) return;
+    try { await t.applyConstraints({ advanced: [{ zoom: z } as any] }); setZoom(z); } catch { /* not adjustable */ }
+  };
+  const nextLens = () => {
+    if (lenses.length < 2) return;
+    const cur = stream.current?.getVideoTracks()[0]?.getSettings?.().deviceId ?? dev;
+    const i = lenses.indexOf(cur ?? '');
+    setDev(lenses[(i + 1) % lenses.length]);
+  };
 
   // ---- fit the whole camera frame into the space between the top bar and the controls
   useEffect(() => {
@@ -285,8 +335,13 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       console.warn('capture failed', e);
     } finally {
       busyRef.current = false; setBusy(false);
+      if (doneAfter.current) { doneAfter.current = false; setDoneWait(false); onDoneRef.current(); }
     }
   }, [onShot, torch.on]);
+  const done = () => {
+    if (busyRef.current) { doneAfter.current = true; setDoneWait(true); return; }
+    onDone();
+  };
   shotRef.current = shoot;
 
   const toggleTorch = async () => {
@@ -336,6 +391,14 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
             <Icon name="lightning:fill" size={15} />Auto {auto ? 'on' : 'off'}
           </button>
         )}
+        {status === 'live' && coarse && (
+          <button className="scam-pill" onClick={() => camIn.current?.click()} title="Take the photo with your phone's camera app: its full quality">
+            <Icon name="camera" size={15} />HD photo
+          </button>
+        )}
+        {status === 'live' && zooms.length === 0 && lenses.length > 1 && (
+          <button className="scam-round" onClick={nextLens} aria-label="Switch camera lens" title="Switch lens"><Icon name="aperture" size={20} /></button>
+        )}
         {torch.can && <button className={`scam-round${torch.on ? ' on' : ''}`} onClick={toggleTorch} aria-label={torch.on ? 'Turn torch off' : 'Turn torch on'} aria-pressed={torch.on}><Icon name={torch.on ? 'flashlight:fill' : 'flashlight'} size={20} /></button>}
       </div>
 
@@ -347,6 +410,15 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       )}
 
       <div className="scam-bottom">
+        {status === 'live' && zooms.length > 1 && (
+          <div className="scam-zoom" role="radiogroup" aria-label="Zoom">
+            {zooms.map((z) => (
+              <button key={z} role="radio" aria-checked={Math.abs(zoom - z) < 0.05} className={Math.abs(zoom - z) < 0.05 ? 'on' : ''} onClick={() => setZoomTo(z)}>
+                {String(z).replace(/^0\./, '.')}{Math.abs(zoom - z) < 0.05 ? '×' : ''}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="scam-modes" role="radiogroup" aria-label="What are you scanning?">
           {MODES.map((m) => (
             <button key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => onMode(m.id)}>{m.label}</button>
@@ -363,14 +435,19 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
             </svg>
             <i />
           </button>
-          <button className="scam-side done" onClick={onDone} disabled={!count} aria-label={count ? `Review ${count} ${count === 1 ? 'page' : 'pages'}` : 'No pages yet'}>
-            <span className="stack">{lastThumb ? <img src={lastThumb} alt="" /> : <Icon name="files:duotone" size={22} />}{count > 0 && <em>{count}</em>}</span>
+          <button className={`scam-side done${waiting || doneWait ? ' wait' : ''}`} onClick={done} disabled={!count && !busy} aria-label={count ? `Review ${count} ${count === 1 ? 'page' : 'pages'}` : 'No pages yet'}>
+            <span className="stack">{lastThumb ? <img src={lastThumb} alt="" /> : <Icon name="files:duotone" size={22} />}{count > 0 && <em>{count}</em>}{(waiting || doneWait) && <span className="spinner" />}</span>
             <span className="lb">{count ? 'Done' : 'Pages'}</span>
           </button>
         </div>
       </div>
       <input ref={fileIn} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => { pickFiles(e.target.files); e.target.value = ''; }} />
-      <input ref={camIn} type="file" accept="image/*" capture="environment" hidden onChange={(e) => { pickFiles(e.target.files); e.target.value = ''; }} />
+      <input ref={camIn} type="file" accept="image/*" capture="environment" hidden onChange={(e) => {
+        const f = e.target.files ? Array.from(e.target.files) : [];
+        e.target.value = '';
+        // the phone's camera app: its photo joins the pages; the live camera carries on
+        if (status === 'live') f.forEach((x) => onShot(x)); else if (f.length) onImport(f);
+      }} />
     </div>
   );
 }

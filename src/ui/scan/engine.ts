@@ -6,7 +6,7 @@ import { aspectOf, dist, FORMATS, fullQuad, snapRatio, type Quad } from './geom'
 import { scanKernels, type Filter, type JobResult, type Kernels, type PixelImage } from './kernels';
 import { bendReach, scaleBend, traceBend, turnBend, type Bend } from './bend';
 
-export type ScanMode = 'doc' | 'id' | 'passport' | 'receipt';
+export type ScanMode = 'doc' | 'id' | 'passport' | 'receipt' | 'book';
 export type Quality = 'small' | 'standard' | 'high';
 
 export interface ScanPage {
@@ -33,9 +33,9 @@ export interface ScanPage {
   ver: number;
 }
 
-export const DEFAULT_FILTER: Record<ScanMode, Filter> = { doc: 'auto', id: 'color', passport: 'color', receipt: 'auto' };
+export const DEFAULT_FILTER: Record<ScanMode, Filter> = { doc: 'auto', id: 'color', passport: 'color', receipt: 'auto', book: 'auto' };
 export const MODE_RATIOS: Record<ScanMode, number[] | undefined> = {
-  doc: undefined, id: [FORMATS.id1.ratio], passport: [FORMATS.id3.ratio], receipt: undefined,
+  doc: undefined, id: [FORMATS.id1.ratio], passport: [FORMATS.id3.ratio], receipt: undefined, book: undefined,
 };
 export const newId = () => Math.random().toString(36).slice(2, 10);
 
@@ -211,7 +211,7 @@ export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: S
   const mw = Math.max(1, Math.round(w * km)), mh = Math.max(1, Math.round(h * km));
   let det: { score: number; support: number[]; agree?: number } | null = null, rel: { x: number; y: number }[] | null = null, relBend: Bend | null = null;
   // cards and passports are stiff: only sheets of paper are followed along curved sides
-  const bend = mode === 'doc' || mode === 'receipt';
+  const bend = mode === 'doc' || mode === 'receipt' || mode === 'book';
   try {
     const small = await sourceOf(bmp, full, sw, sh), mid = await sourceOf(bmp, full, mw, mh);
     const r = await post<{ det: any; quad: { x: number; y: number }[] | null; bend: Bend | null }>({ type: 'find', small, mid, bend, opts: { ratios: MODE_RATIOS[mode] } }, [...transferOf(small), ...transferOf(mid)]);
@@ -246,7 +246,8 @@ export function shapeOf(quad: Quad, w: number, h: number, mode: ScanMode, bent =
     const s = snapRatio(r, [f.id], 0.16);
     return s.format ? { format: f.id, ratio: s.ratio } : { format: null, ratio: r };
   }
-  if (mode === 'receipt') return { format: null, ratio: r };
+  // receipts, and book pages (any trim size): their own proportions
+  if (mode === 'receipt' || mode === 'book') return { format: null, ratio: r };
   // a page whose sides bend is paper, never a stiff card
   const s = snapRatio(r, bent ? ['a4', 'letter', 'legal', 'a5'] : ['a4', 'letter', 'legal', 'a5', 'id1', 'id3']);
   // sheets lie in either orientation, but a "landscape legal" is far more likely an ID card
@@ -345,7 +346,7 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
 }
 
 /** sheets of paper get their printed lines straightened (cards and passports are stiff) */
-const flattens = (p: ScanPage) => (p.kind === 'doc' || p.kind === 'receipt') && p.format !== 'id1' && p.format !== 'id3';
+const flattens = (p: ScanPage) => (p.kind === 'doc' || p.kind === 'receipt' || p.kind === 'book') && p.format !== 'id1' && p.format !== 'id3';
 
 // ---------------------------------------------------------------- the page on screen
 // The straightened page (and its sharpened copy) is kept for the pages being looked at, so changing the

@@ -36,9 +36,9 @@ const QUICK: [QuickAction, string, string, string][] = [
   ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
 ];
 
-export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onRecent, theme, onTheme, mobile, isNative }: {
+export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative }: {
   state: OpenState; onFile: (f: File) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
-  onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
+  onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; onShareRecent?: (d: RecentDoc) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
 }) {
   const [recent, setRecent] = useState<RecentDoc[]>([]);
   useEffect(() => {
@@ -160,7 +160,7 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onR
           <div className="rh"><h2>Recent</h2><span className="rs">Kept on this device only</span></div>
           <div className="rl">
             {recent.map((d) => (
-              <div key={d.id} className={`rc${d.hasBytes ? '' : ' off'}`}>
+              <div key={d.id} className={`rc${d.hasBytes ? '' : ' off'}${d.hasBytes && onShareRecent ? ' sh' : ''}`}>
                 <button className="ro" onClick={() => d.hasBytes && onRecent(d)} disabled={!d.hasBytes} aria-label={`Open ${d.name}`}>
                   <span className="rt">{d.thumb ? <img src={d.thumb} alt="" draggable={false} /> : <Icon name="file-pdf:duotone" size={26} />}</span>
                   <span className="ri">
@@ -168,6 +168,7 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onR
                     <span><i className={`rk ${d.kind}`}>{d.kind === 'edited' ? 'Edited' : d.kind === 'scanned' ? 'Scanned' : 'Opened'}</i>{d.pages} {d.pages === 1 ? 'page' : 'pages'} · {ago(d.at)}</span>
                   </span>
                 </button>
+                {d.hasBytes && onShareRecent && <button className="rsh" onClick={() => onShareRecent(d)} aria-label={`Share ${d.name}`} title="Share"><Icon name="share-network" size={17} /></button>}
                 <button className="rx" onClick={() => removeRecent(d.id)} aria-label={`Remove ${d.name} from the list`} title="Remove from the list"><Icon name="x" size={16} /></button>
               </div>
             ))}

@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom';
 import { Icon } from '../icons';
 import { Seg, Toggle } from '../Panel';
-import { saveFile, type BusyMsg, type HostProps, type ToastMsg } from '../Editor';
+import type { BusyMsg, HostProps, ToastMsg } from '../Editor';
+import { canShareFiles, saveFile, shareFile } from '../share';
 import { ConfirmClose } from '../ConfirmClose';
 import { useBack } from '../back';
 import { SortableArea, useSortableItem } from '../sortable';
@@ -12,7 +13,8 @@ import type { Filter } from './kernels';
 import { Camera, MODES } from './Camera';
 import { CropEditor } from './CropEditor';
 import { Pager } from './Pager';
-import { DEFAULT_FILTER, decode, findDocument, forget, forgetBases, newId, outputSize, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
+import { DEFAULT_FILTER, decode, findDocument, forget, forgetBases, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
+import { findGutter, splitSpread } from './book';
 import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
 
 const FILTERS: { id: Filter; label: string }[] = [
@@ -27,7 +29,7 @@ const keyOf = (p: ScanPage) => `${p.id}:${p.ver}`;
 /** crop + turns: what the look previews and the compare picture depend on */
 const geoKey = (p: ScanPage) => `${p.id}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 1 : 0}:${p.rot}`;
 
-const readMode = (): ScanMode => { try { const m = localStorage.getItem('pe.scan.mode'); return (['doc', 'id', 'passport', 'receipt'] as const).find((x) => x === m) ?? 'doc'; } catch { return 'doc'; } };
+const readMode = (): ScanMode => { try { const m = localStorage.getItem('pe.scan.mode'); return (['doc', 'id', 'passport', 'receipt', 'book'] as const).find((x) => x === m) ?? 'doc'; } catch { return 'doc'; } };
 const stamp = () => {
   const d = new Date(), z = (n: number) => String(n).padStart(2, '0');
   return `Scan ${d.getFullYear()}-${z(d.getMonth() + 1)}-${z(d.getDate())} ${z(d.getHours())}.${z(d.getMinutes())}`;
@@ -49,11 +51,14 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   const [crop, setCrop] = useState<string | null>(null);
   const [renders, setRenders] = useState<Record<string, Render>>({});
   const [previews, setPreviews] = useState<Record<string, Record<string, string>>>({});
-  // a sharper picture of the page you zoom into (one at a time)
-  const [sharp, setSharp] = useState<Record<string, { key: string; url: string }>>({});
+  // the page at the screen's full sharpness (and sharper still when you zoom in): a few pages' worth
+  const [sharp, setSharp] = useState<Record<string, { key: string; url: string; long: number }>>({});
   const sharpBusy = useRef('');
   const [finding, setFinding] = useState(0);
-  const [quality, setQuality] = useState<Quality>('standard');
+  const findingRef = useRef(0);
+  // Best by default: the page at the photo's full detail (remembered when changed)
+  const [quality, setQualityState] = useState<Quality>(() => { try { const q = localStorage.getItem('pe.scan.quality'); return q === 'small' || q === 'standard' || q === 'high' ? q : 'high'; } catch { return 'high'; } });
+  const setQuality = (q: Quality) => { setQualityState(q); try { localStorage.setItem('pe.scan.quality', q); } catch { /* private */ } };
   const [paper, setPaper] = useState<PaperOpt>('auto');
   const [cardSheet, setCardSheet] = useState(true);
   const [ocr, setOcr] = useState(false);
@@ -73,11 +78,28 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   // ---- adding photos
   const add = useCallback(async (blob: Blob, kind: ScanMode, side?: 'front' | 'back') => {
     const id = newId();
+    findingRef.current++;
     setFinding((n) => n + 1);
     try {
       const bmp = await decode(blob);
       const w = bmp.width, h = bmp.height;
       let found = await findDocument(bmp, kind);
+      if (kind === 'book') {
+        // an open book: the two pages of the spread, cut at the gutter
+        const px = pixelsOf(bmp, 700);
+        const L = new Float32Array(px.w * px.h);
+        for (let i = 0, j = 0; i < L.length; i++, j += 4) L[i] = 0.299 * px.data[j] + 0.587 * px.data[j + 1] + 0.114 * px.data[j + 2];
+        const halves = splitSpread(found.quad, found.bend, w, h, findGutter(found.quad, found.bend, L, px.w, px.h, px.scale));
+        if (halves) {
+          const made = halves.map((hf): ScanPage => ({
+            id: newId(), blob, w, h, quad: hf.quad, auto: hf.quad, bend: hf.bend, autoBend: hf.bend, sure: found.sure, rot: 0,
+            filter: DEFAULT_FILTER.book, kind: 'book', ...shapeOf(hf.quad, w, h, 'book', !!hf.bend), ver: 1,
+          }));
+          setPages((ps) => [...ps, ...made]);
+          setSaved(false);
+          return made[0];
+        }
+      }
       // a long narrow strip photographed in document mode is a till receipt: receipt page size
       if (kind === 'doc' && !found.format && found.sure && (found.ratio < 0.5 || found.ratio > 2)) {
         kind = 'receipt';
@@ -96,8 +118,20 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       console.warn('scan: photo not usable', e);
       toast({ msg: 'That photo couldn’t be read.', kind: 'err' });
       return null;
-    } finally { setFinding((n) => n - 1); }
+    } finally { findingRef.current--; setFinding((n) => n - 1); }
   }, [toast]);
+
+  // Done in the camera while the last photo is still being taken or read: the review opens once it is in
+  const [toReview, setToReview] = useState(false);
+  const goReview = () => {
+    if (findingRef.current > 0) { setToReview(true); return; }
+    setView('review'); setCur(Math.max(0, pagesRef.current.length - 1));
+  };
+  useEffect(() => {
+    if (!toReview || finding > 0) return;
+    setToReview(false);
+    if (pagesRef.current.length) { setView('review'); setCur(Math.max(0, pagesRef.current.length - 1)); }
+  }, [toReview, finding]);
 
   const idCount = pages.filter((p) => p.kind === 'id').length;
   const onShot = useCallback((blob: Blob) => {
@@ -213,21 +247,29 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   }, []);
 
   const page = pages[Math.min(cur, pages.length - 1)] as ScanPage | undefined;
-  const wantSharp = (id: string) => {
+  const wantSharp = (id: string, want: number) => {
     const q = pagesRef.current.find((x) => x.id === id);
     if (!q) return;
     const key = keyOf(q);
-    if (live.current.sharp[id]?.key === key || sharpBusy.current === id + key) return;
-    sharpBusy.current = id + key;
-    renderLook(q, { long: mobile ? 2800 : 3400, jpeg: 0.9 }).then((r) => {
+    const cap = mobile ? 2800 : 3400;
+    // a little over the screen's pixels, in steps (so a small change in size doesn't render again)
+    const long = want > 0 ? Math.min(cap, Math.ceil(want / 200) * 200) : cap;
+    const have = live.current.sharp[id];
+    if ((have?.key === key && have.long >= long) || sharpBusy.current.startsWith(id + key)) return;
+    sharpBusy.current = id + key + ':' + long;
+    renderLook(q, { long, jpeg: 0.9 }).then((r) => {
       setSharp((m) => {
-        for (const v of Object.values(m)) URL.revokeObjectURL(v.url); // keep only this one
-        return { [id]: { key, url: r.url } };
+        const next = { ...m, [id]: { key, url: r.url, long } };
+        if (m[id]) URL.revokeObjectURL(m[id].url);
+        // keep the latest three pages
+        const ids = Object.keys(next);
+        for (const k of ids.slice(0, Math.max(0, ids.length - 3))) { URL.revokeObjectURL(next[k].url); delete next[k]; }
+        return next;
       });
-    }, () => { /* the normal picture stays */ }).finally(() => { if (sharpBusy.current === id + key) sharpBusy.current = ''; });
+    }, () => { /* the normal picture stays */ }).finally(() => { if (sharpBusy.current === id + key + ':' + long) sharpBusy.current = ''; });
   };
   const lastThumb = pages.length ? renders[pages[pages.length - 1].id]?.url ?? null : null;
-  const step = mode === 'id' ? (idCount % 2 === 0 ? 'Front side' : 'Back side') : mode === 'passport' ? 'Photo page' : null;
+  const step = mode === 'id' ? (idCount % 2 === 0 ? 'Front side' : 'Back side') : mode === 'passport' ? 'Photo page' : mode === 'book' ? 'Both pages of the open book' : null;
 
   // ---- page actions
   const rotate = (d: number) => page && patch(page.id, (p) => ({ rot: (p.rot + d + 4) % 4 }));
@@ -274,11 +316,12 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       });
     } finally { setBusy(null); }
   };
-  const save = async (): Promise<boolean> => {
+  const save = async (share = false): Promise<boolean> => {
     if (!pages.length) return false;
     try {
       const bytes = await build();
-      await saveFile(host, bytes, fileName, 'application/pdf', toast);
+      if (share) await shareFile(host, bytes, fileName, 'application/pdf', toast);
+      else await saveFile(host, bytes, fileName, 'application/pdf', toast);
       onSaved?.(fileName, bytes);
       setSaved(true); setSheetOpen(false);
       return true;
@@ -293,6 +336,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     catch (e) { console.warn(e); toast({ msg: 'The PDF couldn’t be made on this device.', kind: 'err' }); }
   };
   const close = () => (pages.length && !saved ? setAskClose(true) : onClose());
+  // the web app on a phone: a separate Share (the Android app's Save already opens the share sheet)
+  const canShare = useMemo(() => !host.isNative && canShareFiles(), [host.isNative]);
 
   // phone / browser back: sheet → camera → leave (asks first when pages aren't saved)
   useBack(() => {
@@ -333,9 +378,9 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   if (view === 'camera') {
     return (
       <>
-        <Camera mode={mode} onMode={setMode} count={pages.length} lastThumb={lastThumb} step={step}
-          onShot={onShot} onImport={onImport} onDone={() => { setView('review'); setCur(Math.max(0, pages.length - 1)); }} onClose={pages.length ? () => setView('review') : close} />
-        {finding > 0 && <div className="scam-finding" role="status"><span className="spinner" />Finding the page…</div>}
+        <Camera mode={mode} onMode={setMode} count={pages.length + finding} lastThumb={lastThumb} step={step} waiting={toReview}
+          onShot={onShot} onImport={onImport} onDone={goReview} onClose={pages.length ? () => setView('review') : close} />
+        {finding > 0 && <div className="scam-finding" role="status"><span className="spinner" />{toReview ? 'Finishing the last page…' : 'Finding the page…'}</div>}
         {crumbs}
       </>
     );
@@ -373,7 +418,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
         {!mobile && <div className="privacy-pill"><Icon name="lock" size={14} />Processed on this device</div>}
         {mobile
           ? <button className="btn primary dl" onClick={() => setSheetOpen(true)} disabled={!pages.length}><Icon name="download" size={18} />Save</button>
-          : <button className="btn primary dl" onClick={save} disabled={!pages.length}><Icon name="download" size={18} />Save PDF</button>}
+          : <button className="btn primary dl" onClick={() => save()} disabled={!pages.length}><Icon name="download" size={18} />Save PDF</button>}
       </header>
       <div className="sc-body">
         <main className="sc-main">
@@ -431,7 +476,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
             <h3>Save as PDF</h3>
             {settings}
             <div className="sc-go">
-              <button className="btn primary lg block" onClick={save} disabled={!pages.length}><Icon name="download" size={18} />Save PDF</button>
+              <button className="btn primary lg block" onClick={() => save()} disabled={!pages.length}><Icon name="download" size={18} />Save PDF</button>
+              {canShare && <button className="btn secondary lg block" onClick={() => save(true)} disabled={!pages.length}><Icon name="share-network" size={18} />Share PDF</button>}
               <button className="btn secondary lg block" onClick={edit} disabled={!pages.length}><Icon name="pencil-simple" size={18} />Open in the editor</button>
             </div>
             <p className="sc-note"><Icon name="lock" size={13} />Photos and PDF stay on this device.</p>
@@ -445,7 +491,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
             <h2>Save as PDF</h2>
             {settings}
             <div className="sc-go">
-              <button className="btn primary lg block" onClick={save}><Icon name="download" size={18} />{host.isNative ? 'Save or share PDF' : 'Save PDF'}</button>
+              <button className="btn primary lg block" onClick={() => save()}><Icon name="download" size={18} />{host.isNative ? 'Save or share PDF' : 'Save PDF'}</button>
+              {canShare && <button className="btn secondary lg block" onClick={() => save(true)}><Icon name="share-network" size={18} />Share PDF</button>}
               <button className="btn secondary lg block" onClick={edit}><Icon name="pencil-simple" size={18} />Open in the editor</button>
             </div>
           </div>
