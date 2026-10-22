@@ -27,6 +27,8 @@ export interface ToolStyle {
   highlight: string;
   /** underline / strike-through colour */
   ink: string;
+  /** new text takes the font, size and colour of the page's text next to it */
+  match: boolean;
 }
 
 interface State {

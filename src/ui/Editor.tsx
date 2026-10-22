@@ -21,7 +21,8 @@ import { scanStyles } from './scanStyle';
 import { ConfirmClose } from './ConfirmClose';
 import { useBack } from './back';
 import { cloneLineText, pageGlyphs, PageCtx } from './scanGlyphs';
-import type { EditorObject, TextEdit, FontFamily, ClonedText } from '../engine/types';
+import type { EditorObject, TextEdit, FontFamily, ClonedText, DocFont } from '../engine/types';
+import { docFontOf, plainFontName, matchFontBytes } from './textFonts';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop } from './hooks';
@@ -135,7 +136,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const mobile = bp === 'mobile', tablet = bp === 'tablet', large = bp === 'large', desk = bp === 'desktop' || large;
   const [tool, setTool] = useState<Tool>('edit');
   const [style, setStyle] = useState<ToolStyle>({
-    color: '#000000', stroke: '#1E2559', fill: null, strokeWidth: 2, fontSize: 14, family: 'Helvetica', highlight: '#FFE14D', ink: '#D93025',
+    color: '#000000', stroke: '#1E2559', fill: null, strokeWidth: 2, fontSize: 14, family: 'Helvetica', highlight: '#FFE14D', ink: '#D93025', match: true,
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -693,7 +694,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
         viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage, rules: rulesOf,
-        ocrLayer: ocrLayer(), dropText: droppedText(),
+        ocrLayer: ocrLayer(), dropText: droppedText(), matchFont: matchFontBytes,
       });
       const name = outName(rename ?? docName);
       setBusy(null);
@@ -711,6 +712,28 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       setBusy(null);
     }
   };
+
+  // fonts of the document that new text can use (one per typeface and cut, the one with most letters)
+  const docFonts = useMemo(() => {
+    const by = new Map<string, { f: DocFont; n: number }>();
+    for (const [src, d] of Object.entries(pageData)) {
+      for (const r of d.runs) {
+        if (!r.str.trim()) continue;
+        // also the fonts of a few words inside a line (a bold amount)
+        for (const fn of [r.fontName, ...Object.keys(r.fontChars ?? {})]) {
+          const info = fonts[fn];
+          if (!info?.editFamily) continue;
+          const n = Object.keys(info.charMap).length;
+          const label = plainFontName(info.name);
+          const had = by.get(label);
+          if (had && had.n >= n) continue;
+          const f = docFontOf(r, fonts, pageData[+src].runs, fn);
+          if (f) by.set(label, { f, n });
+        }
+      }
+    }
+    return [...by.values()].map((v) => v.f).sort((a, b) => a.label.localeCompare(b.label)).slice(0, 12);
+  }, [pageData, fonts]);
 
   const findRun = (key: string) => pageData[+key.split(':')[0]]?.runs.find((r) => r.key === key);
   const selRun = selected?.includes(':') ? findRun(selected) : undefined;
@@ -1089,7 +1112,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       onReset={() => afterBlur(() => setRunEdit(selRun.key, null))} onClose={() => setSelected(null)} />
   );
   const objProps = (compact: boolean) => selObj && (
-    <ObjProps o={selObj} compact={compact} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
+    <ObjProps o={selObj} compact={compact} docFonts={docFonts} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
       onDuplicate={() => duplicateObject(selObj.id)} onClose={() => { setSelected(null); setSheetFor(null); }} />
   );
   const fillPanel = (
@@ -1315,7 +1338,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             size: selRun.region.height * (snap.edits[selRun.key]?.sizeScale ?? 1),
             color: snap.edits[selRun.key]?.color ?? pageData[+selRun.key.split(':')[0]]?.colors[selRun.key]?.fg ?? '#000',
             onSize: (v) => { const cur = snap.edits[selRun.key] ?? { text: selRun.str, sizeScale: 1, color: null }; setRunEdit(selRun.key, { ...cur, sizeScale: v / selRun.region.height }); } } : undefined}
-          obj={selObj?.type === 'text' ? selObj : undefined}
+          obj={selObj?.type === 'text' ? selObj : undefined} docFonts={docFonts.length > 0}
           onObj={(p) => selObj && changeObject(selObj.id, p, false)}>
           {selRun ? runProps(true) : objProps(true)}
         </SlimBar>
@@ -1379,7 +1402,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           <div className="sheet-scrim" onClick={() => setSheetFor(null)} />
           <div className="bsheet" role="dialog" aria-label="Object properties">
             <div className="grab" />
-            <ObjProps o={sheetObj} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(sheetObj.id, p, false)} onDelete={() => removeObject(sheetObj.id)}
+            <ObjProps o={sheetObj} docFonts={docFonts} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(sheetObj.id, p, false)} onDelete={() => removeObject(sheetObj.id)}
               onDuplicate={() => { duplicateObject(sheetObj.id); setSheetFor(null); }} onClose={() => setSheetFor(null)} />
           </div>
         </>
@@ -1493,10 +1516,12 @@ function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize, onA
 }
 
 // ---------------- phone: slim properties bar above the keyboard ----------------
-function SlimBar({ open, onOpen, onDone, run, obj, onObj, children }: {
+function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: {
   open: boolean; onOpen: (v: boolean) => void; onDone: () => void;
   run?: { label: string; css?: string; size: number; color: string; onSize: (v: number) => void };
   obj?: Extract<EditorObject, { type: 'text' }>; onObj: (p: any) => void; children: React.ReactNode;
+  /** the document has fonts new text can use */
+  docFonts?: boolean;
 }) {
   const fams: FontFamily[] = ['Helvetica', 'Times', 'Courier'];
   const famLabel: Record<FontFamily, string> = { Helvetica: 'Sans', Times: 'Serif', Courier: 'Mono' };
@@ -1525,9 +1550,14 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children }: {
       <div className="row">
         {run && <button className="chipb" onClick={onToggle} aria-label={`Font ${run.label}`}><span style={{ fontFamily: run.css }}>Aa</span><span className="fn">{run.label}</span></button>}
         {obj && (
-          <button className="chipb" aria-label="Change font" onClick={() => onObj({ family: fams[(fams.indexOf(obj.family) + 1) % 3] })}>
-            <span style={{ fontFamily: famCss[obj.family] }}>Aa</span><span className="fn">{famLabel[obj.family]}</span>
-          </button>
+          obj.font || docFonts
+            // the document's fonts: pick one in the options
+            ? <button className="chipb" aria-label={`Font ${obj.font?.label ?? famLabel[obj.family]}`} onClick={onToggle}>
+                <span style={{ fontFamily: obj.font?.css ?? famCss[obj.family], fontSynthesis: 'none' } as any}>Aa</span><span className="fn">{obj.font?.label ?? famLabel[obj.family]}</span>
+              </button>
+            : <button className="chipb" aria-label="Change font" onClick={() => onObj({ family: fams[(fams.indexOf(obj.family) + 1) % 3] })}>
+                <span style={{ fontFamily: famCss[obj.family] }}>Aa</span><span className="fn">{famLabel[obj.family]}</span>
+              </button>
         )}
         {run && <Stepper soft value={run.size} min={2} max={300} onChange={run.onSize} label="size" />}
         {obj && <Stepper soft value={obj.size} min={4} max={200} onChange={(size) => onObj({ size })} label="size" />}

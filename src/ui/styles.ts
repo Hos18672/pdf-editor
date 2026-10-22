@@ -533,6 +533,11 @@ button { cursor: pointer; }
 .bstyle { height: 44px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line-2); display: grid; grid-template-columns: 1fr 1fr; padding: 3px; gap: 3px; }
 .bstyle button { border: 0; border-radius: 11px; background: none; font-size: 15px; }
 .bstyle button.on { background: var(--ink); color: var(--on-ink); }
+.bstyle button:disabled { opacity: .35; }
+.fontpick { display: flex; flex-wrap: wrap; gap: 6px; }
+.fontpick button { min-height: 36px; max-width: 100%; padding: 0 12px; border: 0; border-radius: 11px; background: var(--surface-3); color: var(--text); font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fontpick button.std { color: var(--muted-2); }
+.fontpick button.on { background: var(--ink); color: var(--on-ink); }
 .range { width: 100%; accent-color: var(--ink); height: 44px; }
 
 /* ---------- mobile ---------- */

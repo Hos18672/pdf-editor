@@ -1,14 +1,10 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import type { EditorObject } from '../engine/types';
-import { BASELINE } from '../engine/exporter';
+import { textBase, textSize } from '../engine/matchFonts';
+import { objectFontCss } from './textFonts';
 
 const W = 248;
 const H = 112;
-const FAMILY_CSS: Record<string, string> = {
-  Helvetica: 'Arial, Helvetica, sans-serif',
-  Times: '"Times New Roman", Times, serif',
-  Courier: '"Courier New", Courier, monospace',
-};
 
 type Tile = { canvas: HTMLCanvasElement; x0: number; y0: number; w: number; h: number; k: number };
 
@@ -27,7 +23,8 @@ export function Loupe({ x, y, page, obj, pdf, pageW, pageH, rotation, zoom }: {
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
   const s = Math.max(zoom * 2, 1.8); // CSS px per page unit inside the magnifier
   const viewW = W / s, viewH = H / s;
-  const base = obj.y + obj.size * BASELINE[obj.family];
+  const tsz = textSize(obj);
+  const base = obj.y + tsz * textBase(obj);
   // text start sits at ~22% from the left, baseline a bit below the middle
   const fx = obj.x - viewW * 0.22 + viewW / 2;
   const fy = base + viewH * 0.08;
@@ -93,9 +90,9 @@ export function Loupe({ x, y, page, obj, pdf, pageW, pageH, rotation, zoom }: {
     ctx.setLineDash([]);
     // the text itself
     ctx.fillStyle = obj.color;
-    ctx.font = `${obj.italic ? 'italic ' : ''}${obj.bold ? 700 : 400} ${obj.size}px ${FAMILY_CSS[obj.family]}`;
+    ctx.font = obj.font ? `${tsz}px ${objectFontCss(obj)}` : `${obj.italic ? 'italic ' : ''}${obj.bold ? 700 : 400} ${obj.size}px ${objectFontCss(obj)}`;
     ctx.textBaseline = 'alphabetic';
-    (obj.text || ' ').split('\n').forEach((line, i) => ctx.fillText(line, obj.x, base + obj.size * 1.2 * i));
+    (obj.text || ' ').split('\n').forEach((line, i) => ctx.fillText(line, obj.x, base + tsz * 1.2 * i));
     ctx.restore();
   });
 

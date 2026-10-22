@@ -44,6 +44,30 @@ export interface ScanStyle {
   inkUp?: number; inkDown?: number;
 }
 
+/** A font embedded in the document, used again for new text. */
+export interface DocFont {
+  /** pdf.js name of the font (the UI's key) and its name as shown */
+  key: string;
+  label: string;
+  /** its name in the file (without a subset prefix) */
+  name?: string;
+  /** a line of the document written in it: original page index and region (PDF user space) */
+  page: number;
+  region: TextEdit['region'];
+  /** unicode char -> char code, for the letters the font has */
+  charMap: Record<string, number>;
+  /** CSS font-family list that shows it on screen */
+  css: string;
+  /** baseline below the top of a line (× font size, line height 1.2) */
+  base: number;
+  /** every letter it (and other pieces of the same font on that page) can write */
+  chars: string;
+  /** the shipped font that writes the letters it lacks */
+  match: import('./matchFonts').MatchFont;
+  /** size of the shipped font that gives the same letter height (× font size) */
+  matchScale?: number;
+}
+
 interface Base {
   id: string;
   page: number; // original page index
@@ -57,7 +81,8 @@ interface Base {
 }
 
 export type EditorObject =
-  | (Base & { type: 'text'; text: string; family: FontFamily; size: number; color: string; bold: boolean; italic: boolean })
+  /** typed text: a standard font (family), or a font of the document (font) with the family as stand-in for letters it lacks */
+  | (Base & { type: 'text'; text: string; family: FontFamily; size: number; color: string; bold: boolean; italic: boolean; font?: DocFont })
   | (Base & { type: 'image' | 'signature'; src: string })
   | (Base & { type: 'rect' | 'ellipse'; stroke: string; fill: string | null; strokeWidth: number })
   | (Base & { type: 'whiteout'; fill: string })
@@ -95,6 +120,8 @@ export interface ExportInput {
   dropText?: Record<number, TextEdit['region'][]>;
   /** text edits on scans / picture pages drawn with the page's own letters (null: not possible) */
   scanImage?: (e: TextEdit) => Promise<ClonedText | null>;
+  /** bytes of a shipped font (public/fonts/match/<file>) for letters a document font lacks */
+  matchFont?: (file: string) => Promise<Uint8Array>;
   /** table borders and other rules of a page (viewport units): covers over edited lines keep them */
   rules?: (page: number) => Promise<{ x: number; y: number; w: number; h: number; color: string }[]>;
 }

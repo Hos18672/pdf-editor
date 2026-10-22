@@ -5,7 +5,8 @@ import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
 import { uid } from './store';
-import { registerEditFont, baselineInLine } from './textFonts';
+import { BASELINE, textSize } from '../engine/matchFonts';
+import { registerEditFont, baselineInLine, docFontOf, objectFontCss } from './textFonts';
 import { gesture } from './gesture';
 import { Icon } from './icons';
 import { isRefocusing, editingHeld } from './hooks';
@@ -22,11 +23,6 @@ export interface PageData { runs: TextRun[]; colors: Record<string, { bg: string
 export const MARK_UNDER = 0.83, MARK_STRIKE = 0.5;
 export const markWidth = (h: number) => Math.max(0.6, Math.min(3, h * 0.075));
 
-const FAMILY_CSS: Record<string, string> = {
-  Helvetica: 'Arial, Helvetica, sans-serif',
-  Times: '"Times New Roman", Times, serif',
-  Courier: '"Courier New", Courier, monospace',
-};
 
 interface Props {
   /** search / privacy-check matches on this page (viewport units) */
@@ -156,13 +152,14 @@ export function PageView(p: Props) {
         const tc = await page.getTextContent();
         const runs = buildRuns(tc.items, p.src);
         const fonts: Record<string, FontInfo> = {};
-        for (const r of runs) {
-          if (fonts[r.fontName] || p.fonts[r.fontName]) continue;
+        // every font of the page, also those of a few words inside a line (a bold amount)
+        for (const fn of [...new Set(runs.flatMap((r) => [r.fontName, ...Object.keys(r.fontChars ?? {})]))]) {
+          if (fonts[fn] || p.fonts[fn]) continue;
           try {
-            const f = page.commonObjs.has(r.fontName) ? page.commonObjs.get(r.fontName) : null;
+            const f = page.commonObjs.has(fn) ? page.commonObjs.get(fn) : null;
             if (f) {
-              const info = analyseFont(f, r.fontName);
-              fonts[r.fontName] = info;
+              const info = analyseFont(f, fn);
+              fonts[fn] = info;
               info.editFamily = await Promise.race([
                 registerEditFont(info, f),
                 new Promise<undefined>((res) => setTimeout(() => res(undefined), 2500)),
@@ -225,9 +222,11 @@ export function PageView(p: Props) {
     const id = uid();
     if (p.tool === 'fill' && p.fillMark) {
       if (p.fillMark === 'text' || p.fillMark === 'date') {
-        const size = 11;
         const text = p.fillMark === 'date' ? new Date().toLocaleDateString() : '';
-        p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - size * 0.6, w: 20, h: size * 1.2, text, family: 'Helvetica', size, color: '#000000', bold: false, italic: false });
+        const look = p.style.match ? lookAt(pt) : null;
+        const size = look?.size ?? 11;
+        p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: look?.y ?? pt.y - size * 0.6, w: 20, h: size * 1.2, text, family: 'Helvetica', size, color: '#000000', bold: false, italic: false,
+          ...(look ? { family: look.family, bold: look.bold, italic: look.italic, font: look.font ?? undefined, color: look.color } : {}) });
         p.onSelect(id);
         if (!text) p.onEditing(id);
       } else {
@@ -242,11 +241,49 @@ export function PageView(p: Props) {
     if (p.onPictureTap && p.tool === 'edit') { if (!hadSelection.current) p.onPictureTap(pt.x, pt.y); return; }
     // new text boxes are placed on click (tap), so scrolling or a two-finger gesture never adds one
     if (p.tool !== 'text') return;
-    p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - p.style.fontSize * 0.6, w: 20, h: p.style.fontSize * 1.2,
-      text: '', family: p.style.family, size: p.style.fontSize, color: p.style.color, bold: false, italic: false });
+    // new text looks like the page's own text next to it (font, size, colour; on a line: its baseline)
+    const look = p.style.match ? lookAt(pt) : null;
+    if (look) {
+      p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: look.y ?? pt.y - look.size * 0.6, w: 20, h: look.size * 1.2,
+        text: '', family: look.family, size: look.size, color: look.color, bold: look.bold, italic: look.italic, ...(look.font ? { font: look.font } : {}) });
+    } else {
+      p.onAdd({ id, page: p.src, type: 'text', x: pt.x, y: pt.y - p.style.fontSize * 0.6, w: 20, h: p.style.fontSize * 1.2,
+        text: '', family: p.style.family, size: p.style.fontSize, color: p.style.color, bold: false, italic: false });
+    }
     p.onSelect(id);
     p.onEditing(id);
     p.onTextPlaced();
+  };
+  /** the look of the document's text nearest to a point (null: the page has no usable text) */
+  const lookAt = (pt: { x: number; y: number }) => {
+    let best: { r: TextRun; b: ReturnType<typeof runBox>; d: number; on: boolean } | null = null;
+    for (const r of p.data?.runs ?? []) {
+      if (!r.str.trim()) continue;
+      const b = runBox(r, info.vm);
+      if (Math.abs(b.angle) > 0.02 || b.h < 2) continue;
+      const top = b.y - b.asc, bot = b.y + b.h * 0.3;
+      const dx = Math.max(0, b.x - pt.x, pt.x - (b.x + b.w));
+      const dy = Math.max(0, top - pt.y, pt.y - bot);
+      // the line above / below counts more than a far one in the same row
+      const d = dx * 0.6 + dy * 2;
+      if (!best || d < best.d) best = { r, b, d, on: dy === 0 && dx < b.h * 8 };
+    }
+    if (!best || best.d > 400) return null;
+    const { r, b } = best;
+    const info2 = p.fonts[r.fontName];
+    const font = docFontOf(r, p.fonts, p.data!.runs);
+    const size = Math.round(b.h * 10) / 10;
+    let color = p.data!.colors[r.key]?.fg ?? '#000000';
+    // anti-aliased black reads as a dark grey: keep it black
+    const [cr, cg, cb] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+    if (Math.max(cr, cg, cb) < 40 && Math.max(cr, cg, cb) - Math.min(cr, cg, cb) < 12) color = '#000000';
+    const fb = info2?.fallback ?? { family: 'Helvetica' as const, bold: false, italic: false };
+    const base = font ? font.base : BASELINE[fb.family];
+    return {
+      size, color, font, family: fb.family, bold: fb.bold, italic: fb.italic,
+      /** top of the new text so that it sits on the line's baseline */
+      y: best.on ? b.y - size * base : undefined,
+    };
   };
   const hadSelection = useRef(false);
   const downAt = useRef<{ x: number; y: number } | null>(null);
@@ -926,8 +963,10 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   switch (o.type) {
     case 'text': {
       const ts: React.CSSProperties = {
-        fontSize: o.size * zoom, color: o.color, fontFamily: FAMILY_CSS[o.family],
+        fontSize: textSize(o) * zoom, color: o.color, fontFamily: objectFontCss(o),
         fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
+        // a document font is drawn as it is (it is already bold / italic when it should be)
+        ...(o.font ? { fontSynthesis: 'none' } as any : {}),
       };
       inner = (
         <>

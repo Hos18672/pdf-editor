@@ -7,6 +7,8 @@ import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
 import { addTextLayer } from './textLayer';
+import { BASELINE, MATCH_BASE, matchFile, wholeMatch, textSize, MatchFont } from './matchFonts';
+import * as fontkitNs from '@pdf-lib/fontkit';
 import type { ExportInput, EditorObject, FontFamily, TextEdit } from './types';
 import { decodeImage, writeJpeg } from './images';
 
@@ -93,7 +95,7 @@ const STD: Record<FontFamily, [StandardFonts, StandardFonts, StandardFonts, Stan
   Courier: [StandardFonts.Courier, StandardFonts.CourierBold, StandardFonts.CourierOblique, StandardFonts.CourierBoldOblique],
 };
 /** baseline offset from the top of a line box (line-height 1.2), as fraction of font size — matches the editor's CSS */
-export const BASELINE: Record<FontFamily, number> = { Helvetica: 0.947, Times: 0.938, Courier: 0.867 };
+export { BASELINE };
 
 const latin1 = (s: string) => {
   const out = new Uint8Array(s.length);
@@ -156,6 +158,90 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
   };
   const safe = (font: PDFFont, s: string) =>
     [...s].map((ch) => { try { font.encodeText(ch); return ch; } catch { return '?'; } }).join('');
+
+  // shipped fonts for the letters a document font lacks (embedded as subsets)
+  const matchFonts = new Map<string, Promise<PDFFont | null>>();
+  let fontkitOn = false;
+  const matchPdf = (m: MatchFont): Promise<PDFFont | null> => {
+    const file = matchFile(m);
+    if (!matchFonts.has(file)) {
+      matchFonts.set(file, (async () => {
+        if (!input.matchFont) return null;
+        try {
+          if (!fontkitOn) { doc.registerFontkit(((fontkitNs as any).default ?? fontkitNs) as any); fontkitOn = true; }
+          return await doc.embedFont(await input.matchFont(file), { subset: true });
+        } catch (err) { console.warn('match font', err); return null; }
+      })());
+    }
+    return matchFonts.get(file)!;
+  };
+  // fonts of the document used again for new text: the glyphs of the page the font was picked on
+  const fontPages = new Map<number, { glyphs: Glyph[]; fontDict?: PDFDict; toUni: (res: string) => Record<string, number> } | null>();
+  const fontPage = (pi: number) => {
+    if (fontPages.has(pi)) return fontPages.get(pi)!;
+    let out: { glyphs: Glyph[]; fontDict?: PDFDict; toUni: (res: string) => Record<string, number> } | null = null;
+    try {
+      const leaf = pages[pi]?.node;
+      if (leaf) {
+        const fd = leaf.Resources()?.lookupMaybe(PDFName.of('Font'), PDFDict);
+        const met = new Map<string, FontMetrics | undefined>();
+        const fonts = (res: string) => {
+          if (!met.has(res)) { const d = fd?.lookupMaybe(PDFName.of(res), PDFDict); met.set(res, d ? readFontMetrics(doc.context, d) : undefined); }
+          return met.get(res);
+        };
+        const uni = new Map<string, Record<string, number>>();
+        const toUni = (res: string) => {
+          if (!uni.has(res)) {
+            let map: Record<string, number> = {};
+            try {
+              const tu = fd?.lookupMaybe(PDFName.of(res), PDFDict)?.lookup(PDFName.of('ToUnicode'));
+              if (tu instanceof PDFRawStream) map = parseToUnicode(decodePDFRawStream(tu).decode());
+            } catch { map = {}; }
+            uni.set(res, map);
+          }
+          return uni.get(res)!;
+        };
+        out = { glyphs: interpret(tokenize(readContents(doc, leaf)), fonts).glyphs, fontDict: fd, toUni, fonts } as any;
+      }
+    } catch (err) { console.warn('font page', err); }
+    fontPages.set(pi, out);
+    return out;
+  };
+  /** the pieces of a document font, added to the page being written (null: use the stand-in font) */
+  const docSources = (o: Extract<EditorObject, { type: 'text' }>, leaf: any): Source[] | null => {
+    const F = o.font;
+    if (!F) return null;
+    const sp = fontPage(F.page) as any;
+    if (!sp?.fontDict) return null;
+    const hits: Glyph[] = glyphsInRegion(sp.glyphs, { region: F.region } as TextEdit);
+    if (!hits.length) return null;
+    const count = new Map<string, number>();
+    hits.forEach((g) => count.set(g.style.fontRes, (count.get(g.style.fontRes) ?? 0) + 1));
+    const plain = (res: string) => baseFontOf(sp.fontDict, res).replace(/^\/?([A-Z]{6}\+)?/, '');
+    const squash = (n: string) => n.toLowerCase().replace(/[^a-z0-9]/g, '');
+    // the font picked (a line can mix fonts: a bold word), else the line's main font
+    const want = F.name ? squash(F.name.replace(/^[A-Z]{6}\+/, '')) : '';
+    const main = [...count.entries()].sort((a, b) => b[1] - a[1]).map(([r]) => r).find((r) => want && squash(plain(r)) === want)
+      ?? [...count.entries()].sort((a, b) => b[1] - a[1])[0][0];
+    const mainG = hits.find((g) => g.style.fontRes === main)!;
+    // Type3 fonts can have their own scale: size by how tall the line is drawn
+    let k = mainG.height ? F.region.height / mainG.height : 1;
+    if (!(k > 0.05 && k < 20) || Math.abs(k - 1) < 0.15) k = 1;
+    const name = plain(main);
+    // other subsets of the same font on that page supply letters the main one lacks
+    const order = [main, ...sp.fontDict.keys().map((n: PDFName) => n.asString().slice(1)).filter((r: string) => r !== main && name && plain(r) === name)];
+    const out: Source[] = [];
+    for (const res of order) {
+      const raw = sp.fontDict.get(PDFName.of(res));
+      if (!raw) continue;
+      const ref = raw instanceof PDFRef ? raw : doc.context.register(raw);
+      const key = leaf.newFontDictionary('DocT', ref).asString();
+      const map = res === main && Object.keys(F.charMap).length ? F.charMap : sp.toUni(res);
+      if (!Object.keys(map).length) continue;
+      out.push({ key, bpc: sp.fonts(res)?.bytesPerCode ?? 1, map, fs: o.size / k });
+    }
+    return out.length ? out : null;
+  };
 
   const touched = new Set<number>([...input.objects.map((o) => o.page), ...input.edits.map((e) => e.page),
     ...Object.keys(input.dropText ?? {}).map(Number)]);
@@ -316,7 +402,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link');
     if (objs.length) {
       add += 'q ' + invert(vm).map(f).join(' ') + ' cm\n';
-      for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe);
+      for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe, { docSources, matchPdf });
       add += 'Q\n';
     }
     // links: clickable areas (annotations), nothing drawn
@@ -518,6 +604,8 @@ interface Source { key: string; bpc: number; map: Record<string, number>; fs: nu
 
 function encodeMixed(
   line: string, sources: Source[], fbKey: string, fbSize: number, fb: PDFFont, safe: (f: PDFFont, s: string) => string,
+  /** a space the fonts lack: a gap in the current font (false: the stand-in font's space) */
+  gapSpace = true,
 ): string {
   // split into runs per font: the line's own fonts first, a standard font for anything else
   let out = '';
@@ -548,7 +636,7 @@ function encodeMixed(
   };
   for (const ch of line) {
     let idx = sources.findIndex((s) => s.map[ch] !== undefined);
-    if (idx < 0 && ch === ' ') idx = cur >= 0 ? cur : 0; // keep spaces in the current font (as a gap)
+    if (idx < 0 && ch === ' ' && gapSpace) idx = cur >= 0 ? cur : 0; // keep spaces in the current font (as a gap)
     if (idx !== cur) { flush(); cur = idx; }
     if (idx >= 0) buf.push(sources[idx].map[ch] ?? -1);
     else fbBuf += ch;
@@ -581,6 +669,10 @@ async function drawObject(
   doc: PDFDocument, leaf: any, o: EditorObject,
   stdFont: (fam: FontFamily, b: boolean, i: boolean) => Promise<PDFFont>,
   safe: (f: PDFFont, s: string) => string,
+  fontsOf: {
+    docSources: (o: Extract<EditorObject, { type: 'text' }>, leaf: any) => Source[] | null;
+    matchPdf: (m: MatchFont) => Promise<PDFFont | null>;
+  },
 ): Promise<string> {
   let s = 'q ';
   const marker = o.type === 'highlight' && !o.style;
@@ -645,10 +737,23 @@ async function drawObject(
     case 'text': {
       const font = await stdFont(o.family, o.bold, o.italic);
       const key = leaf.newFontDictionary('FbT', font.ref).asString();
-      s += `BT ${rgb(o.color, 'rg')} ${key} ${f(o.size)} Tf `;
+      // a font of the document: the same letters as the page's own text; letters it lacks come from the
+      // shipped font of the same design (or, for another design, the whole text when letters are missing)
+      const F = o.font;
+      const mf = F ? await fontsOf.matchPdf(F.match) : null;
+      const mKey = mf ? leaf.newFontDictionary('MatT', mf.ref).asString() : key;
+      const sources = F && !wholeMatch(o) ? fontsOf.docSources(o, leaf) : null;
+      const whole = !!F && !!mf && !sources;
+      const fb = mf ?? font;
+      const base = whole ? MATCH_BASE[F!.match.family] : sources ? F!.base : BASELINE[o.family];
+      const size = whole ? textSize(o) : o.size;
+      s += `BT ${rgb(o.color, 'rg')} 0 Tc 0 Tw 100 Tz 0 Ts 0 Tr ${whole ? mKey : key} ${f(size)} Tf `;
       o.text.split('\n').forEach((line, i) => {
-        const by = o.y + o.size * 1.2 * i + o.size * BASELINE[o.family];
-        s += `1 0 0 -1 ${f(o.x)} ${f(by)} Tm ${font.encodeText(safe(font, line)).toString()} Tj `;
+        const by = o.y + size * 1.2 * i + size * base;
+        s += `1 0 0 -1 ${f(o.x)} ${f(by)} Tm `;
+        if (sources) s += encodeMixed(line.normalize('NFC'), sources, mKey, o.size, fb, safe, false);
+        else if (whole) s += `${mf!.encodeText(line.normalize('NFC')).toString()} Tj `;
+        else s += `${font.encodeText(safe(font, line)).toString()} Tj `;
       });
       s += 'ET ';
       break;

@@ -1,5 +1,8 @@
 import { withCmap } from '../engine/sfnt';
-import type { FontInfo } from '../engine/pdfText';
+import type { FontInfo, TextRun } from '../engine/pdfText';
+import type { DocFont, FontFamily } from '../engine/types';
+import { matchFor, matchFile, wholeMatch, MatchFont, MATCH_X } from '../engine/matchFonts';
+import { appBase } from './assets';
 
 const registered = new Map<string, Promise<string | undefined>>();
 
@@ -59,3 +62,88 @@ export function baselineInLine(fontCss: string, size: number, lineHeight: number
   const { a, d } = fontMetrics(fontCss);
   return (lineHeight - (a + d) * size) / 2 + a * size;
 }
+
+/** "ABCDEF+Calibri-Bold" → "Calibri Bold" */
+export const plainFontName = (name?: string) =>
+  (name || '').replace(/^[A-Z]{6}\+/, '').replace(/[-,](Regular|Roman)$/i, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_,]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/**
+ * A font of the document for new text, picked from a line written in it (null: it can't be used:
+ * not loaded on screen, a scan's invisible text, or too few letters).
+ * Other subsets of the same font on that page fill in letters the main one lacks.
+ */
+export function docFontOf(run: TextRun, fonts: Record<string, FontInfo>, pageRuns: TextRun[], fontName = run.fontName): DocFont | null {
+  const info = fonts[fontName];
+  if (!info?.editFamily || fontName === 'ocr' || /GlyphLess/i.test(info.name)) return null;
+  if (Object.keys(info.charMap).length < 3) return null;
+  const name = plainFontName(info.name);
+  const siblings = new Set<string>();
+  for (const r of pageRuns) {
+    for (const n of [r.fontName, ...Object.keys(r.fontChars ?? {})]) {
+      const f = fonts[n];
+      if (n !== fontName && f?.editFamily && name && plainFontName(f.name) === name) siblings.add(f.editFamily);
+    }
+  }
+  const match = matchFor(info.name, info.fallback);
+  matchFace(match);
+  const css = [info.editFamily, ...siblings].map((f) => `"${f}"`).join(', ') + ', ' + matchCss(match) + ', ' + info.cssFallback;
+  const { a, d } = fontMetrics(css);
+  const chars = new Set(Object.keys(info.charMap));
+  for (const f of Object.values(fonts)) if (f.editFamily && siblings.has(f.editFamily)) Object.keys(f.charMap).forEach((c) => chars.add(c));
+  // letter height of the document font, so a shipped font of another design is drawn as large
+  let matchScale = 1;
+  if (!match.same) {
+    measureCtx ??= document.createElement('canvas').getContext('2d');
+    const probe = chars.has('x') ? 0 : chars.has('H') ? 1 : -1;
+    if (measureCtx && probe >= 0) {
+      measureCtx.font = `100px "${info.editFamily}"`;
+      const h = (measureCtx.measureText(probe ? 'H' : 'x') as any).actualBoundingBoxAscent / 100;
+      if (h > 0.2 && h < 1) matchScale = Math.max(0.8, Math.min(1.3, h / MATCH_X[match.family][probe ? 1 : 0]));
+    }
+  }
+  return {
+    key: fontName, label: name || 'Document font', name: info.name, page: run.page, region: run.region,
+    charMap: info.charMap, css, base: (1.2 - (a + d)) / 2 + a, chars: [...chars].join(''), match, matchScale,
+  };
+}
+
+const faces = new Map<string, Promise<void>>();
+const matchFamilyName = (m: MatchFont) => `pe-match-${m.family}-${m.cut}`;
+const matchCss = (m: MatchFont) => `"${matchFamilyName(m)}"`;
+/** load a shipped font for the screen (once) */
+export function matchFace(m: MatchFont): Promise<void> {
+  const file = matchFile(m);
+  if (!faces.has(file)) {
+    faces.set(file, (async () => {
+      if (typeof FontFace === 'undefined') return;
+      try {
+        const face = new FontFace(matchFamilyName(m), `url("${appBase()}fonts/match/${file}")`);
+        await face.load();
+        (document as any).fonts.add(face);
+      } catch { /* not available: the stand-in shows */ }
+    })());
+  }
+  return faces.get(file)!;
+}
+
+/** bytes of a shipped font, for the saved file (XHR: fetch() can't read the Android app's file:// pages) */
+export function matchFontBytes(file: string): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('GET', `${appBase()}fonts/match/${file}`);
+    x.responseType = 'arraybuffer';
+    x.onload = () => (x.status === 200 || (x.status === 0 && x.response) ? resolve(new Uint8Array(x.response)) : reject(new Error('font ' + file)));
+    x.onerror = () => reject(new Error('font ' + file));
+    x.send();
+  });
+}
+
+/** CSS font-family of a text object */
+export const objectFontCss = (o: { text: string; family: FontFamily; font?: DocFont }) =>
+  !o.font ? FAMILY_CSS[o.family] : wholeMatch(o) ? `${matchCss(o.font.match)}, ${FAMILY_CSS[o.family]}` : o.font.css;
+
+export const FAMILY_CSS: Record<FontFamily, string> = {
+  Helvetica: 'Arial, Helvetica, sans-serif',
+  Times: '"Times New Roman", Times, serif',
+  Courier: '"Courier New", Courier, monospace',
+};

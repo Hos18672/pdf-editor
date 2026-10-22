@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import type { EditorObject, FontFamily } from '../engine/types';
+import type { DocFont, EditorObject, FontFamily } from '../engine/types';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { RunEdit, Tool, ToolStyle } from './store';
 import { Icon } from './icons';
@@ -143,10 +143,45 @@ export const objTitle = (o: EditorObject) => o.type === 'highlight' && o.style ?
   : o.type === 'line' && o.arrow ? 'Arrow' : OBJ_TITLE[o.type];
 export const MARK_INKS = ['#D93025', '#1E2559', '#2F5BD3', '#14161F', '#1E7A4C'];
 
-export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact, order }: {
+/** Fonts for typed text: the document's own (as they look) and the standard ones */
+function FontPick({ o, docFonts, onChange }: { o: Extract<EditorObject, { type: 'text' }>; docFonts: DocFont[]; onChange: (p: any) => void }) {
+  const list = o.font && !docFonts.some((f) => f.key === o.font!.key) ? [o.font, ...docFonts] : docFonts;
+  return (
+    <div className="fontpick" role="radiogroup" aria-label="Font">
+      {list.map((f) => (
+        <button key={f.key} role="radio" aria-checked={o.font?.key === f.key} className={o.font?.key === f.key ? 'on' : ''}
+          onClick={() => onChange({ font: f, ...styleOf(f) })} style={{ fontFamily: f.css, fontSynthesis: 'none' } as any} title="A font of this document">
+          {f.label}
+        </button>
+      ))}
+      {FAMILIES.map(([fam, label, css]) => (
+        <button key={fam} role="radio" aria-checked={!o.font && o.family === fam} className={!o.font && o.family === fam ? 'on std' : 'std'}
+          onClick={() => onChange({ font: undefined, family: fam })} style={{ fontFamily: css }}>{label}</button>
+      ))}
+    </div>
+  );
+}
+/** stand-in family and weight for letters a document font lacks */
+const styleOf = (f: DocFont) => {
+  const n = f.label.toLowerCase();
+  return {
+    bold: /bold|black|heavy|semibold|demi/.test(n), italic: /italic|oblique/.test(n),
+    family: (/courier|mono|consol/.test(n) ? 'Courier' : /times|serif|georgia|garamond|cambria|roman|minion|palatino|book/.test(n) && !/sans/.test(n) ? 'Times' : 'Helvetica') as FontFamily,
+  };
+};
+/** the same document font, bold / italic switched (null: the document has no such cut) */
+const cutOf = (f: DocFont, docFonts: DocFont[], bold: boolean, italic: boolean) => {
+  const root = (l: string) => l.toLowerCase().replace(/\b(bold|black|heavy|semibold|demi|italic|oblique|regular|roman|mt|ps)\b/g, '').replace(/\s+/g, ' ').trim();
+  const r = root(f.label);
+  return docFonts.find((d) => root(d.label) === r && styleOf(d).bold === bold && styleOf(d).italic === italic) ?? null;
+};
+
+export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact, order, docFonts = [] }: {
   o: EditorObject; onChange: (p: Partial<EditorObject>) => void; onDelete: () => void; onDuplicate: () => void; onClose?: () => void; compact?: boolean;
   /** the document's pages in order (original indices), for links to a page */
   order?: number[];
+  /** fonts of the document that typed text can use */
+  docFonts?: DocFont[];
 }) {
   const set = (p: any) => onChange(p);
   return (
@@ -155,13 +190,26 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact,
       {o.type === 'link' && <LinkProps o={o} order={order ?? []} onChange={set} />}
       {o.type === 'text' && (
         <>
-          <div className="field"><div className="label">Font</div><Family value={o.family} onChange={(family) => set({ family })} /></div>
+          <div className="field"><div className="label">Font</div>
+            {docFonts.length || o.font ? <FontPick o={o} docFonts={docFonts} onChange={set} /> : <Family value={o.family} onChange={(family) => set({ family })} />}
+          </div>
           <div className="grid2">
-            <div className="field"><div className="label">Size</div><Stepper value={o.size} min={4} max={200} onChange={(size) => set({ size })} label="size" /></div>
+            <div className="field"><div className="label">Size</div><Stepper value={o.size} min={4} max={200} step={0.5} onChange={(size) => set({ size })} label="size" /></div>
             <div className="field"><div className="label">Style</div>
               <div className="bstyle">
-                <button className={o.bold ? 'on' : ''} onClick={() => set({ bold: !o.bold })} style={{ fontWeight: 700 }} aria-label="Bold" aria-pressed={o.bold}>B</button>
-                <button className={o.italic ? 'on' : ''} onClick={() => set({ italic: !o.italic })} style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }} aria-label="Italic" aria-pressed={o.italic}>I</button>
+                {(() => {
+                  // a document font switches to its bold / italic cut, when the document has one
+                  const f = o.font;
+                  const b = f ? cutOf(f, docFonts, !o.bold, o.italic) : null, i = f ? cutOf(f, docFonts, o.bold, !o.italic) : null;
+                  return (
+                    <>
+                      <button className={o.bold ? 'on' : ''} disabled={!!f && !b} onClick={() => set(f ? { font: b, ...styleOf(b!) } : { bold: !o.bold })} style={{ fontWeight: 700 }} aria-label="Bold" aria-pressed={o.bold}
+                        title={f && !b ? 'This document has no bold cut of this font' : undefined}>B</button>
+                      <button className={o.italic ? 'on' : ''} disabled={!!f && !i} onClick={() => set(f ? { font: i, ...styleOf(i!) } : { italic: !o.italic })} style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }} aria-label="Italic" aria-pressed={o.italic}
+                        title={f && !i ? 'This document has no italic cut of this font' : undefined}>I</button>
+                    </>
+                  );
+                })()}
               </div>
             </div>
           </div>
@@ -266,9 +314,14 @@ export function ToolProps({ tool, style, onChange, compact }: { tool: Tool; styl
         <div className="hint" style={{ marginTop: 2 }}>{TOOL_HINTS[tool]}</div></div></div>}
       {tool === 'text' && (
         <>
-          <div className="field"><div className="label">Font</div><Family value={style.family} onChange={(family) => onChange({ family })} /></div>
-          <div className="field"><div className="label">Size</div><Stepper value={style.fontSize} min={4} max={200} onChange={(fontSize) => onChange({ fontSize })} label="size" unit="pt" /></div>
-          <div className="field"><div className="label">Colour</div><Swatches value={style.color} onPick={(color) => onChange({ color: color ?? '#000000' })} /></div>
+          <Toggle label="Match the page’s text" hint="Font, size and colour of the nearest line" checked={style.match} onChange={(match) => onChange({ match })} />
+          {!style.match && (
+            <>
+              <div className="field"><div className="label">Font</div><Family value={style.family} onChange={(family) => onChange({ family })} /></div>
+              <div className="field"><div className="label">Size</div><Stepper value={style.fontSize} min={4} max={200} onChange={(fontSize) => onChange({ fontSize })} label="size" unit="pt" /></div>
+              <div className="field"><div className="label">Colour</div><Swatches value={style.color} onPick={(color) => onChange({ color: color ?? '#000000' })} /></div>
+            </>
+          )}
         </>
       )}
       {(tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'arrow' || tool === 'draw') && (
