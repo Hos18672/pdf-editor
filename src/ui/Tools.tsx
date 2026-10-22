@@ -107,7 +107,7 @@ export function Tools(p: Props) {
           <div className="hub">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <h1>What do you want to do?</h1>
-              <div className="sub">Every tool runs in your browser. Files never leave this device.</div>
+              <div className="sub">{p.host.isNative ? 'Every tool runs on your phone.' : 'Every tool runs in your browser.'} Files never leave this device.</div>
             </div>
             {groups.map((g) => (
               <section key={g.name} className="grp">
