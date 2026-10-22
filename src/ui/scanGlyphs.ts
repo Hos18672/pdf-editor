@@ -25,6 +25,8 @@ interface Line {
   /** all of the line's ink, as one word (used when words can't be matched) */
   all: Word;
   layerX: number; layerY: number; base: number; capH: number; inkX0: number; inkX1: number;
+  /** top and bottom of the line's printed ink (accents, descenders) */
+  inkY0: number; inkY1: number;
   ink: [number, number, number]; wordGap: number | null; sw: number;
   /** how dark the letters' cores get (0–1): soft scans never reach full ink */
   peak: number;
@@ -390,7 +392,7 @@ async function harvest({ pdf, src, info, runs, colors }: PageCtx): Promise<PageG
     units?.forEach((u, ui) => { for (let q = 0; q < u.tn; q++) tokUnit[u.t0 + q] = ui; });
     const line: Line = {
       key: run.key, tokens, words, tokUnit, unitTok: units?.map((u) => [u.t0, u.tn] as [number, number]) ?? [], all, layerX, layerY, base: by0 + base, capH,
-      inkX0: all.x0, inkX1: all.x1, ink, wordGap: null, sw: all.sw / capH, peak: peakOf(all.bmp), edge: soft,
+      inkX0: all.x0, inkX1: all.x1, inkY0: by0 + Math.min(...cl.map((c) => c.y0)), inkY1: by0 + Math.max(...cl.map((c) => c.y1)) + 1, ink, wordGap: null, sw: all.sw / capH, peak: peakOf(all.bmp), edge: soft,
       ref: { cap: NaN, x: NaN, asc: NaN }, slope: 0, fitX: all.x0, fitY: by0 + base, contrast: bgL - fgL,
     };
     pg.lines.set(run.key, line);
@@ -921,5 +923,7 @@ export async function cloneLineText(ctx: PageCtx, key: string, text: string, opt
     inkX0: (line.inkX0 - line.layerX) / k / lh,
     inkX1: (line.inkX1 - line.layerX) / k / lh,
     dy: (line.base - line.layerY) / k / lh,
+    inkUp: (line.base - line.inkY0) / k / lh,
+    inkDown: (line.inkY1 - line.base) / k / lh,
   };
 }

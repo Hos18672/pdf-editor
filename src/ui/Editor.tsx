@@ -1,4 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { pageRules } from './rules';
 import { gesture } from './gesture';
 import { Icon } from './icons';
 import { openPdf } from './pdfjs';
@@ -6,6 +7,7 @@ import { useHistory, uid, Tool, ToolStyle, RunEdit } from './store';
 import { PageView, PageInfo, PageData, FillMark, lineRooms } from './PageView';
 import { SignatureModal, Stamp } from './SignatureModal';
 import { Organizer } from './Organizer';
+import { AddPagesSheet, type AddWhat } from './AddPages';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, OBJ_TITLE, Stepper, toolHasProps, fontLabel, Toggle } from './Panel';
@@ -111,7 +113,9 @@ const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', '
 /** What the editor opens with when started from the tools page. */
 export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages';
 
-export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onSaved }: {
+export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onSaved, onAddPages }: {
+  /** add pages to the document after this many pages; resolves to the first new page's source index */
+  onAddPages?: (after: number, what: AddWhat) => Promise<number | null>;
   host: HostProps; file: { name: string; bytes: Uint8Array }; pdf: any; infos: PageInfo[];
   hist: ReturnType<typeof useHistory>; onClose: () => void; onTools: () => void;
   theme: Theme; onTheme: () => void; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
@@ -130,6 +134,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [selected, setSelected] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   // the list of pages on the right: open by default on big screens (and remembered there)
+  const [addAfter, setAddAfter] = useState<number | null>(null); // the Add pages sheet: new pages after this many
   const [strip, setStripRaw] = useState<boolean>(() => {
     if (bp !== 'desktop' && bp !== 'large') return false;
     try { return localStorage.getItem('pe-strip') !== '0'; } catch { return true; }
@@ -525,6 +530,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     });
   };
 
+  // table borders etc. that covers over edited lines keep
+  const rulesOf = (src: number) => pageRules(pdf, src, infos[src], pageData[src]?.runs ?? []);
+
   // ----- edits on scans: shown straight away as the new letters over the page (no re-written PDF) -----
   // pages whose text is an invisible layer over a picture (an OCR'd scan)
   const [hiddenPages, setHiddenPages] = useState<Set<number>>(() => new Set());
@@ -609,7 +617,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const t = setTimeout(async () => {
       try {
         const bytes = await exportPdf({
-          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage,
+          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage, rules: rulesOf,
           viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
         });
         if (seq !== previewSeq.current) return;
@@ -650,7 +658,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     try {
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
-        viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage,
+        viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage, rules: rulesOf,
         ocrLayer: ocrLayer(),
       });
       const name = file.name.replace(/\.pdf$/i, '') + '-edited.pdf';
@@ -1104,7 +1112,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             </div>
           </div>
           {view === 'pages' && (
-            <Organizer pdf={pdf} pages={snap.pages} mobile={mobile} onDone={() => setView('doc')}
+            <Organizer pdf={pdf} pages={snap.pages} mobile={mobile} onDone={() => setView('doc')} onAdd={(n) => setAddAfter(n)}
               onChange={(pages) => commit((s) => ({ ...s, pages }))} />
           )}
           {pictureOnly.length > 0 && !ocrHidden && view === 'doc' && (
@@ -1143,7 +1151,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           <PageStrip pages={snap.pages} cur={curPage} overlay={!desk}
             pdfFor={(src) => (preview && preview.keys[src] !== undefined ? preview.pdf : pdf)}
             onGo={(src) => { goToPage(src); if (mobile) setStrip(false); }} onClose={() => setStrip(false)}
-            onOrganize={() => { setStrip(false); railClick(RAIL.find((r) => r.t === 'pages')!); }} />
+            onOrganize={() => { setStrip(false); railClick(RAIL.find((r) => r.t === 'pages')!); }}
+            onAdd={onAddPages ? () => setAddAfter(Math.max(0, snap.pages.findIndex((p) => p.src === curPage)) + 1) : undefined} />
         )}
         {!desk && !strip && view === 'doc' && !mobileEditing && !fieldNav && (
           <button className="pgtab" onClick={() => setStrip(true)} aria-label="Show all pages">
@@ -1254,6 +1263,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       )}
 
       <input ref={imgInput} type="file" accept="image/*" hidden onChange={(e) => { onImage(e.target.files?.[0]); e.target.value = ''; }} />
+      {addAfter !== null && onAddPages && (
+        <AddPagesSheet after={addAfter} total={snap.pages.length} mobile={mobile} onClose={() => setAddAfter(null)}
+          onAdd={(w) => { const at = addAfter; setAddAfter(null); onAddPages(at, w).then((first) => { if (first !== null && view === 'doc') setTimeout(() => goToPage(first), 400); }); }} />
+      )}
       {showSig && <SignatureModal sheet={mobile} onClose={() => setShowSig(null)} onPick={(s) => { const f = showSig.field; setShowSig(null); placeStamp(s, 'signature', f); }} />}
       {dragInfo && (() => {
         const obj = snap.objects.find((o) => o.id === dragInfo.id);
@@ -1267,9 +1280,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 }
 
 // ---------------- the list of pages on the right ----------------
-function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize }: {
+function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize, onAdd }: {
   pages: { src: number; rotation: number }[]; cur: number; overlay: boolean; pdfFor: (src: number) => any;
-  onGo: (src: number) => void; onClose: () => void; onOrganize: () => void;
+  onGo: (src: number) => void; onClose: () => void; onOrganize: () => void; onAdd?: () => void;
 }) {
   const list = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -1295,6 +1308,7 @@ function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize }: {
             </button>
           ))}
         </div>
+        {onAdd && <button className="ps-add" onClick={onAdd} title="Add pages after the current page"><Icon name="plus:bold" size={16} />Add page</button>}
       </aside>
     </>
   );

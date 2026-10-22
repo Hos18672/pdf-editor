@@ -5,8 +5,10 @@ import { Thumb } from './Thumb';
 import { SortableArea, useSortableItem } from './sortable';
 
 /** Pages organizer: drag to reorder, rotate, delete, select several. Replaces the desk while open. */
-export function Organizer({ pdf, pages, onChange, onDone, mobile }: {
+export function Organizer({ pdf, pages, onChange, onDone, onAdd, mobile }: {
   pdf: any; pages: PageState[]; onChange: (p: PageState[]) => void; onDone: () => void; mobile: boolean;
+  /** add pages after this many pages */
+  onAdd: (after: number) => void;
 }) {
   const [sel, setSel] = useState<Set<number>>(new Set());
 
@@ -31,6 +33,11 @@ export function Organizer({ pdf, pages, onChange, onDone, mobile }: {
             <button className="ibtn muted" onClick={() => setSel(new Set())} aria-label="Clear selection"><Icon name="close" size={17} /></button>
           </div>
         )}
+        <button className="btn outline lg" onClick={() => {
+          // after the last selected page, or at the end
+          const last = Math.max(-1, ...pages.map((p, i) => (sel.has(p.src) ? i : -1)));
+          onAdd(last >= 0 ? last + 1 : pages.length);
+        }}><Icon name="plus:bold" size={17} />Add pages</button>
         <button className="btn primary lg" onClick={onDone}>Done</button>
       </div>
       <SortableArea items={pages} idOf={(p) => String(p.src)} onReorder={onChange} layout="grid"
@@ -40,6 +47,12 @@ export function Organizer({ pdf, pages, onChange, onDone, mobile }: {
             <PageCard key={p.src} pdf={pdf} p={p} i={i} mobile={mobile} on={sel.has(p.src)} only={pages.length === 1}
               onToggle={() => toggle(p.src)} onRotate={() => rotate([p.src])} onRemove={() => remove([p.src])} />
           ))}
+          <div className="oslot">
+            <button className="oadd" onClick={() => onAdd(pages.length)}>
+              <span className="pl"><Icon name="plus:bold" size={22} /></span>
+              <b>Add pages</b><span>Blank, PDF or images</span>
+            </button>
+          </div>
         </div>
       </SortableArea>
     </div>

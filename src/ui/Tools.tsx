@@ -125,7 +125,7 @@ function useSource(current: Current | null) {
       setErr(e?.name === 'PasswordException' ? 'This PDF is password-protected. Open it in the editor first to unlock it.' : 'That file couldn’t be opened as a PDF.');
     }
   };
-  return { src, load, err };
+  return { src, load, err, setSrc };
 }
 
 function PickPdf({ onFile, err, title }: { onFile: (f: File) => void; err: string | null; title: string }) {
@@ -400,8 +400,10 @@ function PagePick(p: Props & { desk: boolean; mobile: boolean; mode: 'extract' |
 type InsertKind = 'blank' | 'pdf' | 'image' | 'camera';
 
 function Insert(p: Props & { desk: boolean; mobile: boolean }) {
-  const { src, load, err } = useSource(p.current);
+  const { src, load, err, setSrc } = useSource(p.current);
   const [after, setAfter] = useState<number | null>(null); // insert after this position
+  // pages inserted so far (positions in the current document); several inserts build up before opening
+  const [fresh, setFresh] = useState<number[]>([]);
   const [kind, setKind] = useState<InsertKind>('blank');
   const [size, setSize] = useState<'match' | 'a4' | 'letter'>('match');
   const [count, setCount] = useState(1);
@@ -418,9 +420,12 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
       const doc = await pickPages(src.bytes, src.pages);
       const added = await fill(doc, at + 1);
       const bytes = await save(doc);
+      const pdf = await openPdf(bytes);
+      setSrc({ name: src.name, bytes, pdf, pages: Array.from({ length: pdf.numPages }, (_, i) => ({ src: i, rotation: 0 })), fromEditor: false });
+      setFresh((f) => [...f.map((i) => (i > at ? i + added : i)), ...Array.from({ length: added }, (_, k) => at + 1 + k)]);
+      setAfter(at + added); // the next pages go after these
       p.setBusy(null);
-      p.toast({ msg: `Inserted ${added} ${added === 1 ? 'page' : 'pages'} after page ${at + 1}` });
-      p.onOpenInEditor(src.name, bytes);
+      p.toast({ msg: `Added ${added} ${added === 1 ? 'page' : 'pages'} after page ${at + 1}` });
     } catch (e: any) {
       p.setBusy(null);
       p.toast({ msg: 'Couldn’t insert: ' + (e?.message ?? 'unknown error'), kind: 'err' });
@@ -479,17 +484,26 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
     </div>
   );
   const ctaText = kind === 'blank' ? `Insert ${count > 1 ? count + ' blank pages' : 'blank page'}` : kind === 'pdf' ? 'Choose a PDF' : kind === 'image' ? 'Choose images' : 'Open camera';
-  const cta = <button className="btn primary lg block" onClick={() => (p.desk ? run() : setSheet(true))}><Icon name="plus:bold" size={18} />{p.desk ? ctaText : 'Insert'}</button>;
+  const finish = () => p.onOpenInEditor(src.name, src.bytes);
+  const done = fresh.length > 0 && <button className={`btn ${p.desk ? 'outline lg block' : 'primary lg'}`} onClick={finish}><Icon name="check:bold" size={18} />{p.desk ? `Done · open in editor` : 'Done'}</button>;
+  const cta = (
+    <>
+      <button className={`btn ${fresh.length && !p.desk ? 'outline' : 'primary'} lg${p.desk ? ' block' : ''}`} onClick={() => (p.desk ? run() : setSheet(true))}><Icon name="plus:bold" size={18} />{p.desk ? ctaText : fresh.length ? 'Add' : 'Insert'}</button>
+      {done}
+    </>
+  );
   return (
     <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column', position: 'relative' }}>
       <div className="tmain">
         <div className="pgrid">
           <div className="bar"><div className="label" style={{ fontWeight: 400, color: 'var(--muted-2)' }}>Tap a <b style={{ display: 'inline-flex', width: 20, height: 20, borderRadius: '50%', background: '#1E2559', color: '#fff', alignItems: 'center', justifyContent: 'center', verticalAlign: -4 }}><Icon name="plus:bold" size={11} /></b> between pages to choose where new pages go.</div></div>
+          {fresh.length > 0 && <div className="note"><Icon name="info" size={16} /><span>{fresh.length} new {fresh.length === 1 ? 'page' : 'pages'}. Tap another <b>+</b> to add more, then <b>Done</b> to open the result.</span></div>}
           {src.fromEditor && p.current?.changed && <div className="note"><Icon name="info" size={16} /><span>The result opens in the editor. Download your current edits first if you want to keep them.</span></div>}
           <div className="cells">
             {src.pages.map((pg, i) => (
               <React.Fragment key={pg.src + ':' + i}>
-                <div className="pcell">
+                <div className={`pcell${fresh.includes(i) ? ' fresh' : ''}`}>
+                  {fresh.includes(i) && <span className="newtag">New</span>}
                   <div className="pc"><Thumb pdf={src.pdf} src={pg.src} rotation={pg.rotation} size={200} /></div>
                   <div className="lb">{i + 1}</div>
                   {at !== i && <button className="gap" onClick={() => setAfter(i)} aria-label={`Insert after page ${i + 1}`}><Icon name="plus:bold" size={13} /></button>}
@@ -505,7 +519,7 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
         {optionList()}
         {(kind === 'blank' || kind === 'image') && blankOpts}
       </Side>
-      <Bar desk={p.desk} cta={cta} bar={{ title: `After page ${at + 1}`, sub: `${src.pages.length} pages now` }} />
+      <Bar desk={p.desk} cta={cta} bar={{ title: `After page ${at + 1}`, sub: fresh.length ? `${src.pages.length} pages · ${fresh.length} new` : `${src.pages.length} pages now` }} />
       {sheet && !p.desk && (
         <>
           <div className="sheet-scrim" onClick={() => setSheet(false)} />

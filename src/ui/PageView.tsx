@@ -11,6 +11,7 @@ import { Icon } from './icons';
 import { isRefocusing, editingHeld } from './hooks';
 import { FormLayer, FormField } from './Fields';
 import { matchScanStyle, scanStyles } from './scanStyle';
+import { coverPixels } from './rules';
 
 export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
 
@@ -86,6 +87,7 @@ export function PageView(p: Props) {
   const renderTask = useRef<any>(null);
   const renderedKey = useRef<string | null>(null);
   const [shownKey, setShownKey] = useState('');
+  const [paints, setPaints] = useState(0); // canvas repaints (covers copy its table lines)
   const source = p.preview?.pdf ?? p.pdf;
   const sourceKey = p.preview?.key ?? '';
   const [draft, setDraft] = useState<null | { x0: number; y0: number; x1: number; y1: number; pts?: number[] }>(null);
@@ -138,6 +140,7 @@ export function PageView(p: Props) {
       target.height = canvas.height;
       target.getContext('2d')!.drawImage(canvas, 0, 0);
       setRendered(zoom);
+      setPaints((n) => n + 1);
       renderedKey.current = sourceKey;
       setShownKey(sourceKey);
 
@@ -176,7 +179,13 @@ export function PageView(p: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, zoom, p.pdf, p.src, source, sourceKey]);
   // the canvas already shows the edited text with the document's real glyphs
-  const live = p.editKey !== '' && shownKey === p.editKey;
+  // (per line: a newer edit elsewhere on the page leaves the lines already in the preview as they are)
+  const shownEdits = useMemo(() => {
+    const m = new Map<string, string>();
+    try { for (const [k, e] of JSON.parse(shownKey || '[]') as [string, unknown][]) m.set(k, JSON.stringify(e)); } catch { /* none */ }
+    return m;
+  }, [shownKey]);
+  const liveRun = (key: string) => !!p.edits[key] && shownEdits.get(key) === JSON.stringify(p.edits[key]);
 
   // Opening a line for editing: note the look of its letters on the page (font, weight, width,
   // softness), so the edit can be drawn to match when the text is part of a scan / picture.
@@ -322,7 +331,8 @@ export function PageView(p: Props) {
         <div className={`layer${passive ? ' passive' : ''}`}>
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
-              edit={p.edits[r.key]} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={live}
+              edit={p.edits[r.key]} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={liveRun(r.key)}
+              page={{ canvas: canvasRef, w: info.w, paints }}
               clone={p.edits[r.key] ? p.cloneFor?.(r.key) : undefined}
               local={local} onNext={() => p.onNextRun(r.key)}
               onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
@@ -411,8 +421,42 @@ export function lineRooms(runs: TextRun[]): Record<string, { up: number; down: n
   return out;
 }
 
-function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, live, clone, local, onStart, onCommit, onNext }: {
-  live?: boolean; selected: boolean; onNext: () => void; clone?: { url: string; img: ClonedText };
+type PageRef = { canvas: React.RefObject<HTMLCanvasElement | null>; w: number; paints: number };
+
+/**
+ * Paper-coloured cover over the original letters of an edited line, placed in the line's own frame
+ * (x, y from the start of the line's box, page units). Table borders and other rules that cross it
+ * are copied from the page, so they stay visible.
+ */
+function Cover({ page, b, bg, zoom, x, y, w, h }: { page: PageRef; b: ReturnType<typeof runBox>; bg: string; zoom: number; x: number; y: number; w: number; h: number }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useLayoutEffect(() => {
+    const c = ref.current, pc = page.canvas.current;
+    if (!c || !pc || !pc.width || Math.abs(b.angle) > 0.02) { if (c) c.width = c.height = 0; return; }
+    const k = pc.width / page.w;
+    const m = Math.max(2, Math.round(k * 1.5));
+    const x0 = Math.round((b.x + x) * k) - m, y0 = Math.round((b.top + y) * k) - m;
+    const W = Math.round(w * k) + 2 * m, H = Math.round(h * k) + 2 * m;
+    if (W <= 2 * m || H <= 2 * m || W * H > 4e6) { c.width = c.height = 0; return; }
+    try {
+      const sx = Math.max(0, x0), sy = Math.max(0, y0);
+      const src = document.createElement('canvas');
+      src.width = W; src.height = H;
+      const sc = src.getContext('2d', { willReadFrequently: true })!;
+      sc.fillStyle = bg; sc.fillRect(0, 0, W, H);
+      sc.drawImage(pc, sx, sy, Math.min(pc.width, x0 + W) - sx, Math.min(pc.height, y0 + H) - sy, sx - x0, sy - y0, Math.min(pc.width, x0 + W) - sx, Math.min(pc.height, y0 + H) - sy);
+      const img = coverPixels(sc.getImageData(0, 0, W, H).data, W, H, m, bg, b.h * k);
+      c.width = img.width; c.height = img.height;
+      c.getContext('2d')!.putImageData(img, 0, 0);
+    } catch { c.width = c.height = 0; }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page.paints, bg, x, y, w, h, b.x, b.top, b.h, b.angle]);
+  // until drawn (or for a turned line) the canvas is see-through and its background covers
+  return <canvas ref={ref} className="cover" style={{ background: bg, left: x * zoom, top: y * zoom, width: w * zoom, height: h * zoom, right: 'auto', bottom: 'auto' }} />;
+}
+
+function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, live, clone, page, local, onStart, onCommit, onNext }: {
+  page: PageRef; live?: boolean; selected: boolean; onNext: () => void; clone?: { url: string; img: ClonedText };
   run: TextRun; vm: M; zoom: number; font?: FontInfo; color?: { bg: string; fg: string }; edit?: RunEdit;
   room?: { up: number; down: number };
   editing: boolean; onStart: () => void; onCommit: (text: string) => void;
@@ -498,14 +542,15 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
   if (clone && edit && !editing) {
     const c = clone.img, h = b.h;
     const pad = h * 0.15;
-    const down = Math.min(h * 0.42, room?.down ?? h * 0.42), up = Math.min(h * 1.05, room?.up ?? h * 1.05);
+    const down = Math.max(Math.min(h * 0.42, room?.down ?? h * 0.42), c.inkDown !== undefined ? Math.min(h * 0.75, (c.inkDown + 0.06) * h) : 0);
+    const up = Math.max(Math.min(h * 1.05, room?.up ?? h * 1.05), c.inkUp !== undefined ? Math.min(h * 1.4, (c.inkUp + 0.06) * h) : 0);
     const l = Math.min(0, c.inkX0 * h) - pad, r = Math.max(b.w, c.inkX1 * h) + pad, dy = c.dy * h;
     const z = zoom, oy = b.asc; // children are placed from the baseline start
     return (
       <div className={`run changed cloned${selected ? ' selected' : ''}`} data-key={run.key}
         style={{ ...style, width: Math.max(b.w, c.w - c.left) * z }}
         title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
-        <div className="cover" style={{ background: bg, left: l * z, width: (r - l) * z, top: (oy + dy - up) * z, height: (up + down) * z, right: 'auto', bottom: 'auto' }} />
+        <Cover page={page} b={b} bg={bg} zoom={z} x={l} y={oy + dy - up} w={r - l} h={up + down} />
         <img className="clone" src={clone.url} alt="" draggable={false}
           style={{ left: -c.left * z, top: (oy + c.below - c.h) * z, width: c.w * z, height: c.h * z }} />
       </div>
@@ -523,14 +568,11 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
   };
   return (
     <div className={`run edited${editing ? ' editing' : ''}${selected ? ' selected' : ''}`} data-key={run.key} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
-      <div className="cover" style={{
-        background: bg,
-        // hide the original glyphs completely (accents, descenders) but stay clear of the lines around it
-        top: (b.asc - (room?.up ?? b.h * 0.94)) * zoom - 1,
-        height: ((room?.up ?? b.h * 0.94) + (room?.down ?? b.h * 0.3)) * zoom + 2,
-        bottom: 'auto',
-        left: -Math.max(2, b.h * 0.06 * zoom), right: -Math.max(2, b.h * 0.06 * zoom),
-      }} />
+      {/* hide the original glyphs completely (accents, descenders) but stay clear of the lines around it;
+          only where the original text was: longer text runs on over the page, as it will be saved */}
+      <Cover page={page} b={b} bg={bg} zoom={zoom}
+        x={-Math.max(2 / zoom, b.h * 0.06)} w={b.w + 2 * Math.max(2 / zoom, b.h * 0.06)}
+        y={b.asc - (room?.up ?? b.h * 0.94) - 1 / zoom} h={(room?.up ?? b.h * 0.94) + (room?.down ?? b.h * 0.3) + 2 / zoom} />
       {editing ? (
         <textarea
           ref={taRef}
@@ -547,7 +589,7 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
             else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
             else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); ta.blur(); setTimeout(onNext, 0); }
           }}
-          style={{ ...textStyle, background: bg, caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
+          style={{ ...textStyle, background: 'transparent', caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
         />
       ) : (
         <div className="txt" style={textStyle}>

@@ -40,6 +40,8 @@ export interface ScanStyle {
   dx?: number; dy?: number;
   /** horizontal extent of the printed letters relative to the layer start (× font size) */
   inkX0?: number; inkX1?: number;
+  /** reach of the printed letters above / below their baseline (× the layer height) */
+  inkUp?: number; inkDown?: number;
 }
 
 interface Base {
@@ -86,6 +88,8 @@ export interface ExportInput {
   ocrLayer?: Record<number, import('./textLayer').LayerLine[]>;
   /** text edits on scans / picture pages drawn with the page's own letters (null: not possible) */
   scanImage?: (e: TextEdit) => Promise<ClonedText | null>;
+  /** table borders and other rules of a page (viewport units): covers over edited lines keep them */
+  rules?: (page: number) => Promise<{ x: number; y: number; w: number; h: number; color: string }[]>;
 }
 
 /** Replacement text for a line of a scan, as a picture made of the page's own letters. */
@@ -95,4 +99,6 @@ export interface ClonedText {
   w: number; h: number; left: number; below: number;
   /** printed letters of the original line, for the cover (× the line's layer height; dy > 0 = lower) */
   inkX0: number; inkX1: number; dy: number;
+  /** how far the printed letters reach above / below their baseline (× the layer height) */
+  inkUp?: number; inkDown?: number;
 }

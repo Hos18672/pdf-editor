@@ -424,6 +424,7 @@ button { cursor: pointer; }
 .run { position: absolute; white-space: pre; transform-origin: 0 0; border-radius: 2px; cursor: text; }
 .tool-edit .run:hover, .tool-text .run:hover { outline: 1px dashed rgba(30,37,89,.6); outline-offset: 1px; }
 .run .cover { position: absolute; inset: -2px -3px; border-radius: 1px; }
+.run canvas.cover { border-radius: 0; pointer-events: none; }
 .run .txt { position: absolute; left: 0; white-space: pre; }
 .run img.clone { position: absolute; max-width: none; pointer-events: none; user-select: none; }
 .run textarea { position: absolute; left: 0; margin: 0; padding: 0; border: 0; border-radius: 3px; resize: none; overflow: hidden; white-space: pre; outline: none; box-shadow: 0 0 0 3px var(--paper), 0 0 0 5px #1E2559, 0 0 0 10px rgba(30,37,89,.10); font-kerning: normal; }
@@ -641,6 +642,22 @@ button { cursor: pointer; }
 .org .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px; max-width: 1240px; width: 100%; margin: 0 auto; }
 .org .grid { position: relative; }
 .oslot { position: relative; }
+.oadd { width: 100%; height: 100%; min-height: 220px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; border: 2px dashed var(--line); border-radius: 20px; background: transparent; color: var(--muted); font: inherit; cursor: pointer; transition: border-color .15s, background .15s, color .15s; }
+.oadd:hover, .oadd:focus-visible { border-color: var(--sel); background: var(--sel-tint); color: var(--text); }
+.oadd .pl { width: 48px; height: 48px; border-radius: 50%; display: grid; place-items: center; background: #1E2559; color: #fff; margin-bottom: 4px; }
+.oadd b { font-size: 14px; color: var(--text); }
+.oadd span:last-child { font-size: 12px; }
+.ps-add { margin: 0 12px 12px; height: 40px; border-radius: 14px; border: 1.5px dashed var(--line); background: transparent; color: var(--text); font: inherit; font-size: 13px; font-weight: 600; display: flex; align-items: center; justify-content: center; gap: 6px; flex: none; cursor: pointer; }
+.ps-add:hover { border-color: var(--sel); background: var(--sel-tint); }
+.bsheet.addpg { z-index: 31; }
+.bsheet.addpg.center { top: 0; bottom: 0; left: 0; right: 0; margin: auto; height: max-content; width: min(420px, calc(100% - 32px)); border-radius: 24px; box-shadow: var(--shadow-modal); }
+.addpg .props { gap: 12px; }
+.addpg .ap-h { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.addpg .ap-h h3 { margin: 0; font-size: 18px; font-weight: 700; }
+.addpg .ap-h .label { font-weight: 400; }
+.addpg .ap-blank { cursor: default; }
+.addpg .ap-or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+.addpg .ap-or::before, .addpg .ap-or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .oslot.hole::before { content: ""; position: absolute; inset: 2px; border-radius: 20px; border: 2px dashed var(--sel); background: var(--sel-tint); }
 .oslot.hole > .ocard { opacity: 0; }
 .ocard { display: flex; flex-direction: column; gap: 4px; padding: 10px 6px 2px; border-radius: 20px; transition: box-shadow .18s, background .18s; position: relative; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; touch-action: manipulation; }
@@ -711,6 +728,9 @@ button { cursor: pointer; }
 .pgrid .bar { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .pgrid .cells { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 28px 26px; }
 .pcell { display: flex; flex-direction: column; align-items: center; gap: 8px; position: relative; }
+.pcell.fresh .pc canvas { box-shadow: 0 0 0 3px var(--sel), 0 8px 20px rgba(20,23,46,.14); }
+.pcell .newtag { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); z-index: 2; background: var(--sel); color: #fff; font-size: 11px; font-weight: 700; padding: 2px 9px; border-radius: 999px; box-shadow: 0 2px 6px rgba(20,23,46,.2); }
+.tbar > .btn + .btn { margin-left: -4px; }
 .pcell .pc { position: relative; width: 100%; aspect-ratio: 1 / 1.414; display: grid; place-items: center; border-radius: 4px; cursor: pointer; border: 0; padding: 0; background: transparent; }
 .pcell .pc canvas { max-width: 100%; max-height: 100%; background: #fff; border-radius: 4px; box-shadow: 0 1px 2px rgba(20,23,46,.06), 0 6px 16px rgba(20,23,46,.08); display: block; }
 .pcell.on .pc canvas { box-shadow: 0 0 0 3px var(--ink), 0 8px 20px rgba(20,23,46,.14); }

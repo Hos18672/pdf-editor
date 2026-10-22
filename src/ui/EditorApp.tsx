@@ -9,6 +9,7 @@ import type { HostProps, ToastMsg, BusyMsg, EditorStart } from './Editor';
 import { Start, OpenState, type QuickAction } from './Start';
 import type { ToolId } from './Tools';
 import { recentBytes, saveRecent, type RecentKind } from './recent';
+import type { AddWhat } from './AddPages';
 
 // Only the start screen loads up front; the editor, tools and scanner arrive as separate chunks
 // (fetched in the background right after start-up, so opening a file doesn't wait for them).
@@ -122,6 +123,8 @@ export default function EditorApp(host: HostProps) {
 
   // the open document's entry in the recent list
   const recentId = useRef<string | null>(null);
+  // a new id per opened document (the editor starts afresh); adding pages keeps it
+  const [docId, setDocId] = useState(0);
   const open = useCallback(async (name: string, raw: Uint8Array, password?: string, kind: RecentKind = 'opened', id?: string) => {
     pending.current = { name, bytes: raw };
     setOpenState({ kind: 'loading', name, progress: 0.05, detail: 'Loading the PDF engine…' });
@@ -144,6 +147,7 @@ export default function EditorApp(host: HostProps) {
       setInfos(list);
       setPdf(doc);
       setFile({ name, bytes });
+      setDocId((n) => n + 1);
       hist.reset(list.map((_, i) => ({ src: i, rotation: 0 })));
       setOpenState({ kind: 'idle' });
       recentId.current = id ?? null;
@@ -159,6 +163,58 @@ export default function EditorApp(host: HostProps) {
       setOpenState({ kind: 'error', message: e?.message?.includes('PDF engine') ? e.message : 'It may be damaged, or not a PDF. Damaged files and other formats show this screen too.' });
     }
   }, [hist]);
+
+  // Pages added in the editor are appended to the file (so the pages already there, and the edits on
+  // them, keep their numbers) and placed in the page order where they were asked for.
+  const addPages = async (after: number, what: AddWhat): Promise<number | null> => {
+    if (!file || !pdf) return null;
+    setBusy({ title: 'Adding pages', detail: 'On this device. Your edits stay.' });
+    try {
+      // pdf-lib is loaded only when needed
+      const { loadDoc, addImagePage, imageBytes, save: saveDoc } = await import('./pdfops');
+      const doc = await loadDoc(file.bytes);
+      const before = doc.getPageCount();
+      if (what.kind === 'blank') {
+        const ref = hist.snap.pages[Math.max(0, Math.min(hist.snap.pages.length - 1, after - 1))];
+        const info = ref ? infos[ref.src] : undefined;
+        const turned = ref ? ref.rotation % 180 !== 0 : false;
+        const dims: [number, number] = info ? (turned ? [info.h, info.w] : [info.w, info.h]) : [595.28, 841.89];
+        for (let k = 0; k < what.count; k++) doc.addPage(dims);
+      } else if (what.kind === 'pdf') {
+        const other = await loadDoc(new Uint8Array(await what.file.arrayBuffer()));
+        const copied = await doc.copyPages(other, other.getPageIndices());
+        copied.forEach((pg) => doc.addPage(pg));
+      } else {
+        for (const f of what.files) await addImagePage(doc, await imageBytes(f), 'fit');
+      }
+      const added = doc.getPageCount() - before;
+      if (!added) { setBusy(null); return null; }
+      const bytes = await saveDoc(doc);
+      const next = await openPdf(bytes);
+      const more: PageInfo[] = [];
+      for (let i = before + 1; i <= next.numPages; i++) {
+        const vp = (await next.getPage(i)).getViewport({ scale: 1 });
+        more.push({ w: vp.width, h: vp.height, vm: vp.transform as M });
+      }
+      const old = pdf;
+      setInfos((l) => [...l.slice(0, before), ...more]);
+      setPdf(next);
+      setFile({ name: file.name, bytes });
+      hist.commit((s) => {
+        const at = Math.max(0, Math.min(s.pages.length, after));
+        const fresh = more.map((_, k) => ({ src: before + k, rotation: 0 }));
+        return { ...s, pages: [...s.pages.slice(0, at), ...fresh, ...s.pages.slice(at)] };
+      });
+      setTimeout(() => old.destroy?.(), 15000);
+      setBusy(null);
+      setToastMsg({ msg: `Added ${added} ${added === 1 ? 'page' : 'pages'}` });
+      return before;
+    } catch (e: any) {
+      setBusy(null);
+      setToastMsg({ msg: 'Couldn’t add pages: ' + (e?.message?.includes('encrypt') ? 'that PDF is password-protected' : e?.message ?? 'unknown error'), kind: 'err' });
+      return null;
+    }
+  };
 
   const readFile = (f?: File | null) => {
     if (!f) return;
@@ -185,7 +241,7 @@ export default function EditorApp(host: HostProps) {
       <style>{fontFaces() + css}</style>
       <Suspense fallback={<div className="lazy-wait" role="status" aria-label="Loading"><span className="spinner" /></div>}>
       {route.name === 'editor' && file && pdf ? (
-        <Editor key={file.name + file.bytes.length} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
+        <Editor key={docId} onAddPages={addPages} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
           onSaved={(bytes) => { saveRecent({ id: recentId.current ?? undefined, name: file.name, kind: 'edited', bytes }).then((i) => { if (i) recentId.current = i; }); }}
           toast={setToastMsg} setBusy={setBusy} />

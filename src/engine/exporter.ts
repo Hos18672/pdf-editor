@@ -128,6 +128,9 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     const remove = new Set<Glyph>();
     let add = '';
 
+    const vm = input.viewMatrices[pi];
+    const rules = edits.length && input.rules && vm ? await input.rules(pi).catch(() => []) : [];
+    const cover = (e: TextEdit, scan = false) => whiteoutRegion(e, scan) + rulesOver(coverPts(e, scan), rules, vm);
     for (const e of edits) {
       const hits = e.ocr ? [] : glyphsInRegion(glyphs, e).filter((g) => !remove.has(g));
       hits.forEach((g) => remove.add(g));
@@ -135,7 +138,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       // see are part of an image, so cover them with the paper colour and draw the new text visibly.
       const hidden = !!e.ocr || (hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length);
       if (!e.text.trim()) {
-        if (!hits.length || hidden) add += whiteoutRegion(e, hidden);
+        if (!hits.length || hidden) add += cover(e, hidden);
         continue;
       }
       const lines = e.text.split('\n');
@@ -144,12 +147,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       if (hidden && input.scanImage) {
         const img = await input.scanImage(e).catch((err) => { console.warn('scan text', err); return null; });
         if (img) {
-          add += whiteoutRegion({ ...e, scan: { ...(e.scan ?? { family: 'Arimo', bold: false, sizeRatio: 1, stretch: 1, blur: 0, score: 0 }), inkX0: img.inkX0, inkX1: img.inkX1, dy: img.dy } }, true);
+          add += cover({ ...e, scan: { ...(e.scan ?? { family: 'Arimo', bold: false, sizeRatio: 1, stretch: 1, blur: 0, score: 0 }), inkX0: img.inkX0, inkX1: img.inkX1, dy: img.dy, inkUp: img.inkUp, inkDown: img.inkDown } }, true);
           add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, 0, 0);
           continue;
         }
       }
-      if (hidden) add += whiteoutRegion(e, true);
+      if (hidden) add += cover(e, true);
       const inkOf = () => {
         // the sampled ink, unless it is barely different from the paper (nothing visible was there)
         if (!e.fgColor) return '#000000';
@@ -209,7 +212,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         add += s;
       } else {
         // Text lives somewhere we cannot rewrite (e.g. inside a form) — cover it.
-        if (!hidden) add += whiteoutRegion(e);
+        if (!hidden) add += cover(e);
         const fb = await stdFont(e.fallback.family, e.fallback.bold, e.fallback.italic);
         const key = leaf.newFontDictionary('FbE', fb.ref).asString();
         const h = e.region.height * e.sizeScale;
@@ -230,7 +233,6 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     // Objects drawn in viewport space
     const objs = input.objects.filter((o) => o.page === pi);
     if (objs.length) {
-      const vm = input.viewMatrices[pi];
       add += 'q ' + invert(vm).map(f).join(' ') + ' cm\n';
       for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe);
       add += 'Q\n';
@@ -329,6 +331,24 @@ function baseFontOf(fontDict: PDFDict | undefined, res: string): string {
 
 /** Paint over a line. `scan`: the letters are pixels of an image, which rarely sit exactly on the OCR box. */
 function whiteoutRegion(e: TextEdit, scan = false): string {
+  return `q ${rgb(e.bgColor, 'rg')} ${coverPts(e, scan).map(([x, y], i) => `${f(x)} ${f(y)} ${i ? 'l' : 'm'}`).join(' ')} h f Q\n`;
+}
+
+/** Rules (table borders…) that cross a cover, drawn again on top of it, clipped to it. */
+function rulesOver(pts: [number, number][], rules: { x: number; y: number; w: number; h: number; color: string }[], vm: M | undefined): string {
+  if (!rules.length || !vm) return '';
+  const v = pts.map(([x, y]) => [vm[0] * x + vm[2] * y + vm[4], vm[1] * x + vm[3] * y + vm[5]]);
+  const x0 = Math.min(...v.map((p) => p[0])), x1 = Math.max(...v.map((p) => p[0]));
+  const y0 = Math.min(...v.map((p) => p[1])), y1 = Math.max(...v.map((p) => p[1]));
+  const hit = rules.filter((r) => r.x < x1 && r.x + r.w > x0 && r.y < y1 && r.y + r.h > y0);
+  if (!hit.length) return '';
+  let s = `q ${pts.map(([x, y], i) => `${f(x)} ${f(y)} ${i ? 'l' : 'm'}`).join(' ')} h W n ${invert(vm).map(f).join(' ')} cm `;
+  for (const r of hit) s += `${rgb(r.color, 'rg')} ${f(r.x)} ${f(r.y)} ${f(r.w)} ${f(r.h)} re f `;
+  return s + 'Q\n';
+}
+
+/** the corners of the cover over a line (user space) */
+function coverPts(e: TextEdit, scan = false): [number, number][] {
   const [ox, oy] = e.region.o;
   const [ux, uy] = e.region.u;
   const h = e.region.height;
@@ -340,6 +360,9 @@ function whiteoutRegion(e: TextEdit, scan = false): string {
     // as far as the neighbouring lines allow
     desc = Math.min(h * 0.42, e.room?.down ?? h * 0.42);
     asc = Math.min(h * 1.05, e.room?.up ?? h * 1.05);
+    // all of the printed letters (long descenders, accents), whatever the text layer says
+    if (e.scan?.inkDown !== undefined) desc = Math.max(desc, Math.min(h * 0.75, e.scan.inkDown * h + h * 0.06));
+    if (e.scan?.inkUp !== undefined) asc = Math.max(asc, Math.min(h * 1.4, e.scan.inkUp * h + h * 0.06));
   }
   // on a scan, cover the printed letters themselves (the hidden layer can be shorter or offset)
   const l = Math.min(0, scan && e.scan?.inkX0 !== undefined ? e.scan.inkX0 * h : 0) - pad;
@@ -348,7 +371,7 @@ function whiteoutRegion(e: TextEdit, scan = false): string {
     [l, -desc], [r, -desc], [r, asc], [l, asc],
   ].map(([t, s]) => [t, s - (scan && e.scan?.dy ? e.scan.dy * h : 0)]) // follow the printed baseline
     .map(([t, s]) => [ox + t * ux - s * uy, oy + t * uy + s * ux]);
-  return `q ${rgb(e.bgColor, 'rg')} ${pts.map(([x, y], i) => `${f(x)} ${f(y)} ${i ? 'l' : 'm'}`).join(' ')} h f Q\n`;
+  return pts;
 }
 
 /**
