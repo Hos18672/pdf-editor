@@ -22,7 +22,7 @@ import { ConfirmClose } from './ConfirmClose';
 import { useBack } from './back';
 import { cloneLineText, pageGlyphs, PageCtx } from './scanGlyphs';
 import type { EditorObject, TextEdit, FontFamily, ClonedText } from '../engine/types';
-import type { FontInfo } from '../engine/pdfText';
+import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop } from './hooks';
 import { ThemeButton } from './Start';
@@ -567,15 +567,22 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       try {
         const OPS = (window as any).pdfjsLib?.OPS ?? {};
         const ol = await (await pdf.getPage(src + 1)).getOperatorList();
-        let hidden = 0, shown = 0, img = false;
+        // letters drawn while the rendering mode is invisible vs visible (q/Q keep their own mode)
+        let hidden = 0, shown = 0, img = false, mode = 0;
+        const stack: number[] = [];
+        const shows = new Set([OPS.showText, OPS.showSpacedText, OPS.nextLineShowText, OPS.nextLineSetSpacingShowText]);
         ol.fnArray.forEach((fn: number, i: number) => {
-          if (fn === OPS.setTextRenderingMode) { const m = ol.argsArray[i]?.[0]; if (m === 3 || m === 7) hidden++; else shown++; }
+          if (fn === OPS.setTextRenderingMode) mode = ol.argsArray[i]?.[0] ?? 0;
+          else if (fn === OPS.save) stack.push(mode);
+          else if (fn === OPS.restore) mode = stack.pop() ?? 0;
+          else if (shows.has(fn)) { if (mode === 3 || mode === 7) hidden++; else shown++; }
           else if (fn === OPS.paintImageXObject || fn === OPS.paintJpegXObject || fn === OPS.paintInlineImageXObject) img = true;
         });
         if (img && hidden > 0 && hidden >= shown) setHiddenPages((s) => new Set(s).add(src));
       } catch { /* not a scan */ }
     })();
   };
+  useEffect(() => { checkHidden(curPage); if (curPage + 1 < pdf.numPages) checkHidden(curPage + 1); }, [curPage]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (editing?.includes(':')) checkHidden(+editing.split(':')[0]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -683,6 +690,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     }
     return out;
   };
+  const droppedText = () => Object.fromEntries(Object.entries(dropped).map(([k, rs]) => [k, rs.map((r) => r.region)]));
   const download = async (): Promise<boolean> => {
     setEditing(null);
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -692,7 +700,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
         viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage, rules: rulesOf,
-        ocrLayer: ocrLayer(),
+        ocrLayer: ocrLayer(), dropText: droppedText(),
       });
       const name = file.name.replace(/\.pdf$/i, '') + '-edited.pdf';
       setBusy(null);
@@ -809,6 +817,30 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       setTapAt((t) => (t && t.src === src && t.x === x && t.y === y ? null : t));
     }
   };
+  // An invisible text layer (saved by an older version, or another app) can hold a whole table row
+  // as one line: a tap on such a line reads the cells from the picture and opens the one tapped.
+  // The old line is then left out of the page and removed from the saved file.
+  const [dropped, setDropped] = useState<Record<number, TextRun[]>>({});
+  const droppedRef = useRef(dropped);
+  droppedRef.current = dropped;
+  const relineTap = (run: TextRun, x: number, y: number) => {
+    const src = run.page;
+    if (!hiddenPages.has(src) || run.fontName === 'ocr' || snap.edits[run.key] || pictureSet.has(src)) return false;
+    setTapAt({ src, x, y });
+    (async () => {
+      let res: { keys: string[]; at: string | null } | null = null;
+      try { res = await (await getReader()).reline(src, run, x, y); } catch (e) { console.warn('reline failed', e); }
+      setTapAt((t) => (t && t.src === src && t.x === x && t.y === y ? null : t));
+      if (res) {
+        setDropped((d) => ({ ...d, [src]: [...(d[src] ?? []), run] }));
+        setPageData((m) => m[src] ? { ...m, [src]: { ...m[src], runs: m[src].runs.filter((r) => r.key !== run.key) } } : m);
+      }
+      const key = res?.at ?? (res ? res.keys[0] : run.key);
+      setTool('edit'); setSelected(key); setEditing(key);
+    })();
+    return true;
+  };
+
   const ocrDone = ocr?.done.filter((s) => pictureSet.has(s)).length ?? 0;
   useEffect(() => {
     if (ocrAll && pictureOnly.length && ocrDone >= pictureOnly.length) {
@@ -1158,7 +1190,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                     // keep lines already recognised on a picture page
                     setPageData((m) => {
                       const read = m[src]?.runs.filter((r) => r.fontName === 'ocr') ?? [];
-                      return { ...m, [src]: read.length ? { runs: [...d.runs, ...read], colors: { ...m[src].colors, ...d.colors } } : d };
+                      const gone = new Set((droppedRef.current[src] ?? []).map((r) => r.key));
+                      const own = gone.size ? d.runs.filter((r) => !gone.has(r.key)) : d.runs;
+                      return { ...m, [src]: read.length ? { runs: [...own, ...read], colors: { ...m[src].colors, ...d.colors } } : { ...d, runs: own } };
                     });
                     setFonts((m) => ({ ...m, ...f }));
                   }}
@@ -1169,7 +1203,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   onDelete={removeObject} onDuplicate={duplicateObject}
                   onTextPlaced={() => setTool('edit')}
                   onPictureTap={pictureSet.has(p.src) ? (x, y) => readTap(p.src, x, y) : undefined}
-                  reading={pictureSet.has(p.src) ? {
+                  onRunTap={hiddenPages.has(p.src) ? relineTap : undefined}
+                  reading={pictureSet.has(p.src) || hiddenPages.has(p.src) ? {
                     page: !!ocr?.reading.includes(p.src),
                     band: ocr?.tap?.src === p.src ? ocr.tap : null,
                     at: tapAt?.src === p.src ? tapAt : null,

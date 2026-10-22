@@ -75,6 +75,8 @@ interface Props {
   onMore: (id: string) => void;
   /** picture page: a tap on it reads the text there */
   onPictureTap?: (x: number, y: number) => void;
+  /** a tap on a line of the page's text (viewport point): true when it is handled there */
+  onRunTap?: (run: TextRun, x: number, y: number) => boolean;
   /** picture page: text being read (whole page in the background, a tapped line) */
   reading?: { page: boolean; band: { y0: number; y1: number } | null; at: { x: number; y: number } | null };
 }
@@ -243,6 +245,7 @@ export function PageView(p: Props) {
     p.onTextPlaced();
   };
   const hadSelection = useRef(false);
+  const downAt = useRef<{ x: number; y: number } | null>(null);
   const onLayerDown = (e: React.PointerEvent) => {
     hadSelection.current = p.selected !== null || p.editing !== null;
     if (e.button !== 0 || gesture.multi) return;
@@ -278,6 +281,8 @@ export function PageView(p: Props) {
       const pts = d.pts ?? [];
       if (pts.length < 4) return;
       const xs = pts.filter((_, i) => i % 2 === 0), ys = pts.filter((_, i) => i % 2 === 1);
+      // a tap (a finger always wobbles a little) is not a stroke: it left stray dots on the page
+      if (Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)) < Math.max(3, 6 / zoom)) return;
       const minX = Math.min(...xs), minY = Math.min(...ys);
       p.onAdd({ id, page: p.src, type: 'draw', x: minX, y: minY, w: Math.max(...xs) - minX, h: Math.max(...ys) - minY,
         stroke: st.stroke, strokeWidth: st.strokeWidth, points: pts.map((v, i) => v - (i % 2 ? minY : minX)) });
@@ -324,6 +329,7 @@ export function PageView(p: Props) {
         ref={pageRef}
         className={`page tool-${p.tool}`}
         style={{ width: W, height: H, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
+        onPointerDownCapture={(e) => { downAt.current = local(e); }}
         onPointerDown={onLayerDown}
         onClick={onLayerClick}
         onPointerMove={onLayerMove}
@@ -341,7 +347,11 @@ export function PageView(p: Props) {
               page={{ canvas: canvasRef, w: info.w, paints }}
               clone={p.edits[r.key] ? p.cloneFor?.(r.key) : undefined}
               local={local} onNext={() => p.onNextRun(r.key)}
-              onStart={() => { p.onSelect(r.key); p.onEditing(r.key); }}
+              onStart={() => {
+                const at = downAt.current;
+                if (at && p.onRunTap?.(r, at.x, at.y)) return;
+                p.onSelect(r.key); p.onEditing(r.key);
+              }}
               onCommit={(raw) => {
                 const text = raw.normalize('NFC');
                 const prev = p.edits[r.key];
@@ -887,14 +897,14 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       break;
     case 'line':
       inner = (
-        <svg width="100%" height="100%">
+        <svg width="100%" height="100%" overflow="visible">
           <line x1={(o.x - bx) * zoom} y1={(o.y - by) * zoom} x2={(o.x2 - bx) * zoom} y2={(o.y2 - by) * zoom} stroke={o.stroke} strokeWidth={o.strokeWidth * zoom} strokeLinecap="round" />
         </svg>
       );
       break;
     case 'draw':
       inner = (
-        <svg width="100%" height="100%">
+        <svg width="100%" height="100%" overflow="visible">
           <polyline points={o.points.map((v) => v * zoom).join(' ')} fill="none" stroke={o.stroke} strokeWidth={o.strokeWidth * zoom} strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       );

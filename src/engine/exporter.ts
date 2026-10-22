@@ -157,7 +157,8 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
   const safe = (font: PDFFont, s: string) =>
     [...s].map((ch) => { try { font.encodeText(ch); return ch; } catch { return '?'; } }).join('');
 
-  const touched = new Set<number>([...input.objects.map((o) => o.page), ...input.edits.map((e) => e.page)]);
+  const touched = new Set<number>([...input.objects.map((o) => o.page), ...input.edits.map((e) => e.page),
+    ...Object.keys(input.dropText ?? {}).map(Number)]);
 
   for (const pi of touched) {
     const page = pages[pi];
@@ -205,6 +206,10 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       const boxes = reds.map((o) => boxOf([[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]].map(([x, y]) => applyM(inv, x, y))));
       for (const g of glyphs) if (boxes.some((b) => coverShare(glyphBox(g), b) > 0.3)) remove.add(g);
       await redactPictures(doc, resources, draws, boxes).catch((err) => console.warn('redact pictures', err));
+    }
+    // invisible lines read again from the picture: their new text is written with the layer below
+    for (const region of input.dropText?.[pi] ?? []) {
+      for (const g of glyphsInRegion(glyphs, { region } as TextEdit)) if (g.style.Tr === 3 || g.style.Tr === 7) remove.add(g);
     }
     const rules = edits.length && input.rules && vm ? await input.rules(pi).catch(() => []) : [];
     const cover = (e: TextEdit, scan = false) => whiteoutRegion(e, scan) + rulesOver(coverPts(e, scan), rules, vm);

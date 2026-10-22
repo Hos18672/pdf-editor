@@ -160,6 +160,49 @@ export class PageReader {
     });
   }
 
+  /**
+   * A line of an existing (invisible) text layer that runs across table borders: reads its cells
+   * from the picture. Resolves with the new runs' keys and the one at viewport point (x, y), or
+   * null when no border crosses the line (it stays as it is).
+   */
+  reline(src: number, run: TextRun, x: number, y: number): Promise<{ keys: string[]; at: string | null } | null> {
+    this.warm();
+    if (this.failed) return Promise.reject(new Error('ocr unavailable'));
+    const st = this.page(src);
+    return new Promise((resolve, reject) => {
+      this.taps.push(async (w) => {
+        if (!w) { reject(new Error('ocr unavailable')); return; }
+        st.users++;
+        try {
+          const img = await this.image(src);
+          const b = boxOf(run, this.vmOf(src));
+          const s = img.s;
+          const X0 = b.x0 * s, X1 = b.x1 * s, Y0 = b.y0 * s, Y1 = b.y1 * s, h = Y1 - Y0;
+          if (!(h > 0) || !img.cut(X0 + h * 0.5, X1 - h * 0.5, Y0 + h * 0.15, Y1 - h * 0.15)) { resolve(null); return; }
+          this.tapBand = { src, y0: b.y0, y1: b.y1 };
+          this.emit();
+          const before = new Set(st.runs.map((r) => r.key));
+          const by0 = Math.max(0, Math.floor(Y0 - h * 0.35));
+          // only what lies on the old line replaces it
+          await this.readBand(w, src, img, by0, Y1 + h * 0.35, true, (l) => {
+            const cx = (l.box.x0 + l.box.x1) / 2, cy = (l.box.y0 + l.box.y1) / 2 + by0;
+            return cx >= X0 - h && cx <= X1 + h && cy >= Y0 && cy <= Y1;
+          });
+          const keys = st.runs.filter((r) => !before.has(r.key)).map((r) => r.key);
+          resolve(keys.length ? { keys, at: this.runAt(src, x, y) } : null);
+        } catch (e) {
+          reject(e);
+        } finally {
+          st.users--;
+          if (this.tapBand?.src === src) this.tapBand = null;
+          this.emit();
+          this.release();
+        }
+      });
+      this.kick();
+    });
+  }
+
   dispose() {
     this.disposed = true;
     this.wake.splice(0).forEach((f) => f());
@@ -287,7 +330,7 @@ export class PageReader {
     }
   }
 
-  private async readBand(w: OcrWorker, src: number, img: PageImg, y0: number, y1: number, tap: boolean) {
+  private async readBand(w: OcrWorker, src: number, img: PageImg, y0: number, y1: number, tap: boolean, keep?: (l: OcrLine) => boolean) {
     y0 = Math.max(0, Math.floor(y0));
     y1 = Math.min(img.h, Math.ceil(y1));
     if (y1 - y0 < 4) return;
@@ -305,7 +348,7 @@ export class PageReader {
       // a line cut by the band's edge reads as noise
       if (l.conf < 55 && (l.box.y0 <= 1 || l.box.y1 >= bandH - 2)) return false;
       // in the background only lines read with confidence; a tap shows what is there
-      return l.conf >= (tap ? 30 : 50);
+      return l.conf >= (tap ? 30 : 50) && (!keep || keep(l));
     });
     this.add(src, img, lines);
   }

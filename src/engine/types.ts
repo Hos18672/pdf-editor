@@ -88,6 +88,8 @@ export interface ExportInput {
   flatten?: boolean;
   /** recognised lines of picture pages: saved as an invisible (searchable) text layer */
   ocrLayer?: Record<number, import('./textLayer').LayerLine[]>;
+  /** lines of an invisible text layer that were read again (e.g. split into table cells): removed */
+  dropText?: Record<number, TextEdit['region'][]>;
   /** text edits on scans / picture pages drawn with the page's own letters (null: not possible) */
   scanImage?: (e: TextEdit) => Promise<ClonedText | null>;
   /** table borders and other rules of a page (viewport units): covers over edited lines keep them */
