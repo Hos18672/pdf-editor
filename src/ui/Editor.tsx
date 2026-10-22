@@ -549,7 +549,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (!c) return Promise.resolve(null);
     return cloneLineText(c, e.key, e.text, {
       sizeScale: e.sizeScale, color: e.color, family: e.scan?.family, stretch: e.scan?.stretch,
-      more: () => Promise.all([e.page - 1, e.page + 1, e.page - 2, e.page + 2].map(ctxOf).filter((x): x is PageCtx => !!x).map(pageGlyphs)),
+      more: () => Promise.all([e.page - 1, e.page + 1, e.page - 2, e.page + 2].map(ctxOf).filter((x): x is PageCtx => !!x).map((c) => pageGlyphs(c))),
     });
   };
 

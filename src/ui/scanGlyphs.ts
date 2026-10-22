@@ -87,13 +87,18 @@ function edgeOf(b: Bitmap) {
 }
 
 type Cluster = { x0: number; x1: number; y0: number; y1: number; ids: number[]; n: number };
-const cache = new WeakMap<object, Map<number, Promise<PageGlyphs | null>>>();
+type Entry = { keys: Set<string>; p: Promise<PageGlyphs | null> };
+const cache = new WeakMap<object, Map<number, Entry>>();
 
-export function pageGlyphs(ctx: PageCtx): Promise<PageGlyphs | null> {
+/** The page's letters, read once per page; read again when a line was added since (a cell read later). */
+export function pageGlyphs(ctx: PageCtx, need?: string): Promise<PageGlyphs | null> {
   let m = cache.get(ctx.pdf);
   if (!m) cache.set(ctx.pdf, (m = new Map()));
-  let p = m.get(ctx.src);
-  if (!p) { p = harvest(ctx).catch((e) => { console.warn('scan glyphs', e); return null; }); m.set(ctx.src, p); }
+  const e = m.get(ctx.src);
+  const stale = !!e && !!need && !e.keys.has(need) && ctx.runs.some((r) => r.key === need) && !!ctx.colors[need];
+  if (e && !stale) return e.p;
+  const p = harvest(ctx).catch((err) => { console.warn('scan glyphs', err); return null; });
+  m.set(ctx.src, { keys: new Set(ctx.runs.filter((r) => ctx.colors[r.key]).map((r) => r.key)), p });
   return p;
 }
 
@@ -752,7 +757,7 @@ function align(oldT: string[], newT: string[]) {
 
 export async function cloneLineText(ctx: PageCtx, key: string, text: string, opts: { sizeScale: number; color: string | null; family?: string; stretch?: number; more?: () => Promise<(PageGlyphs | null)[]> }): Promise<ClonedText | null> {
   const t0 = performance.now();
-  const pg = await pageGlyphs(ctx);
+  const pg = await pageGlyphs(ctx, key);
   const line = pg?.lines.get(key);
   if (!pg || !line) return null;
   const capH = line.capH;

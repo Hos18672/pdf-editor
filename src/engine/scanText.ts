@@ -19,7 +19,7 @@ export async function renderScanText(lines: string[], s: ScanStyle, fontPt: numb
   const meas = document.createElement('canvas').getContext('2d')!;
   meas.font = font;
   const widths = lines.map((l) => meas.measureText(l).width * s.stretch);
-  const blurPx = s.blur * px;
+  const blurPx = Math.min(s.blur, 0.012) * px; // a touch of softness, never enough to blur the letters
   const padX = Math.ceil(px * 0.12 + blurPx * 3), padY = Math.ceil(px * 0.1 + blurPx * 3);
   const asc = px * 1.0, desc = px * 0.32, lead = px * 1.2;
   const W = Math.ceil(Math.max(1, ...widths) + 2 * padX);
