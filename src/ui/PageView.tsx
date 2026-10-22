@@ -525,7 +525,8 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
 
   const scale = edit?.sizeScale ?? 1;
   const size = b.h * scale * zoom;
-  const lineH = size * 1.2;
+  // in tightly set text the box keeps to the line's own room, so it does not cover the lines around it
+  const lineH = Math.max(size * 1.02, Math.min(size * 1.2, room ? (room.up + room.down) * scale * zoom : size * 1.2));
   const fg = edit?.color ?? color?.fg ?? '#000';
   const bg = color?.bg ?? '#fff';
   // Best: the embedded font re-registered with a Unicode cmap (exact glyphs while typing).

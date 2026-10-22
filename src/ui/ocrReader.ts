@@ -129,7 +129,7 @@ export class PageReader {
    * Reads the line at viewport point (x, y) of page `src`. Resolves with the key of the run there
    * (null: no text at that spot).
    */
-  tap(src: number, x: number, y: number): Promise<string | null> {
+  tap(src: number, x: number, y: number, avoid: TextRun[] = []): Promise<string | null> {
     this.warm();
     if (this.failed) return Promise.reject(new Error('ocr unavailable'));
     const st = this.page(src);
@@ -145,7 +145,17 @@ export class PageReader {
           if (!band) { resolve(this.runAt(src, x, y)); return; }
           this.tapBand = { src, y0: band[0] / img.s, y1: band[1] / img.s };
           this.emit();
-          await this.readBand(w, src, img, band[0], band[1], true);
+          // on a page with a text layer, only what the layer is missing is added
+          const vm = this.vmOf(src);
+          const taken = avoid.map((r) => boxOf(r, vm));
+          const by0 = Math.max(0, Math.floor(band[0]));
+          await this.readBand(w, src, img, band[0], band[1], true, taken.length ? (l) => {
+            const b = { x0: l.box.x0 / img.s, x1: l.box.x1 / img.s, y0: (l.box.y0 + by0) / img.s, y1: (l.box.y1 + by0) / img.s };
+            // left out only when the layer already has text over most of it
+            const area = Math.max(1e-6, (b.x1 - b.x0) * (b.y1 - b.y0));
+            const covered = taken.reduce((a, t) => a + Math.max(0, Math.min(t.x1, b.x1) - Math.max(t.x0, b.x0)) * Math.max(0, Math.min(t.y1, b.y1) - Math.max(t.y0, b.y0)), 0);
+            return covered < area * 0.5;
+          } : undefined);
           resolve(this.runAt(src, x, y));
         } catch (e) {
           reject(e);
@@ -165,7 +175,7 @@ export class PageReader {
    * from the picture. Resolves with the new runs' keys and the one at viewport point (x, y), or
    * null when no border crosses the line (it stays as it is).
    */
-  reline(src: number, run: TextRun, x: number, y: number): Promise<{ keys: string[]; at: string | null } | null> {
+  reline(src: number, run: TextRun, x: number, y: number, force = false): Promise<{ keys: string[]; at: string | null } | null> {
     this.warm();
     if (this.failed) return Promise.reject(new Error('ocr unavailable'));
     const st = this.page(src);
@@ -178,15 +188,20 @@ export class PageReader {
           const b = boxOf(run, this.vmOf(src));
           const s = img.s;
           const X0 = b.x0 * s, X1 = b.x1 * s, Y0 = b.y0 * s, Y1 = b.y1 * s, h = Y1 - Y0;
-          if (!(h > 0) || !img.cut(X0 + h * 0.5, X1 - h * 0.5, Y0 + h * 0.15, Y1 - h * 0.15)) { resolve(null); return; }
+          if (!(h > 0) || (!force && !img.cut(X0 + h * 0.5, X1 - h * 0.5, Y0 + h * 0.15, Y1 - h * 0.15))) { resolve(null); return; }
           this.tapBand = { src, y0: b.y0, y1: b.y1 };
           this.emit();
           const before = new Set(st.runs.map((r) => r.key));
-          const by0 = Math.max(0, Math.floor(Y0 - h * 0.35));
-          // only what lies on the old line replaces it
-          await this.readBand(w, src, img, by0, Y1 + h * 0.35, true, (l) => {
+          // the old line, and the printed line under the finger (a layer line can sit a little off)
+          const tx = x * s, ty = y * s;
+          const lb = lineBand(img, tx, ty);
+          const by0 = Math.max(0, Math.floor(Math.min(Y0 - h * 0.35, lb?.[0] ?? Infinity)));
+          const by1 = Math.max(Y1 + h * 0.35, lb?.[1] ?? 0);
+          // only what lies on the old line (or right under the finger) replaces it
+          await this.readBand(w, src, img, by0, by1, true, (l) => {
             const cx = (l.box.x0 + l.box.x1) / 2, cy = (l.box.y0 + l.box.y1) / 2 + by0;
-            return cx >= X0 - h && cx <= X1 + h && cy >= Y0 && cy <= Y1;
+            const under = tx >= l.box.x0 - 4 && tx <= l.box.x1 + 4 && ty >= l.box.y0 + by0 - 4 && ty <= l.box.y1 + by0 + 4;
+            return under || (cx >= X0 - h && cx <= X1 + h && cy >= Y0 && cy <= Y1);
           });
           const keys = st.runs.filter((r) => !before.has(r.key)).map((r) => r.key);
           resolve(keys.length ? { keys, at: this.runAt(src, x, y) } : null);

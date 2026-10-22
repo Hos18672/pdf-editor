@@ -453,7 +453,7 @@ button { cursor: pointer; }
 .run canvas.cover { border-radius: 0; pointer-events: none; }
 .run .txt { position: absolute; left: 0; white-space: pre; }
 .run img.clone { position: absolute; max-width: none; pointer-events: none; user-select: none; }
-.run textarea { position: absolute; left: 0; margin: 0; padding: 0; border: 0; border-radius: 3px; resize: none; overflow: hidden; white-space: pre; outline: none; box-shadow: 0 0 0 3px var(--paper), 0 0 0 5px #1E2559, 0 0 0 10px rgba(30,37,89,.10); font-kerning: normal; }
+.run textarea { position: absolute; left: 0; margin: 0; padding: 0; border: 0; border-radius: 3px; resize: none; overflow: hidden; white-space: pre; outline: none; box-shadow: 0 0 0 1.5px #1E2559; font-kerning: normal; }
 .run.selected:not(.editing) { outline: 2px solid #1E2559; outline-offset: 3px; }
 .run.changed, .run.edited { z-index: 1; }
 .layer.passive .run { pointer-events: none; }

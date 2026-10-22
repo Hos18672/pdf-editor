@@ -803,7 +803,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setTapAt({ src, x, y });
     try {
       const r = await getReader();
-      const key = await r.tap(src, x, y);
+      const key = await r.tap(src, x, y, pictureSet.has(src) ? [] : (pageData[src]?.runs ?? []).filter((q) => q.fontName !== 'ocr'));
       if (key) {
         setTool('edit'); setSelected(key); setEditing(key);
         // on a phone the hint has done its job once a line opens: give the page the room
@@ -829,7 +829,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setTapAt({ src, x, y });
     (async () => {
       let res: { keys: string[]; at: string | null } | null = null;
-      try { res = await (await getReader()).reline(src, run, x, y); } catch (e) { console.warn('reline failed', e); }
+      // a line whose width does not fit its text (or with "|" for borders) is always read again
+      const n = run.str.replace(/\s/g, '').length, k = run.region.width / Math.max(1, n * run.region.height);
+      const force = /\s\|\s|^\|\s|\s\|$/.test(run.str) || (n > 0 && (k > 1.1 || k < 0.22));
+      try { res = await (await getReader()).reline(src, run, x, y, force); } catch (e) { console.warn('reline failed', e); }
       setTapAt((t) => (t && t.src === src && t.x === x && t.y === y ? null : t));
       if (res) {
         setDropped((d) => ({ ...d, [src]: [...(d[src] ?? []), run] }));
@@ -1202,7 +1205,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   onPlace={() => false}
                   onDelete={removeObject} onDuplicate={duplicateObject}
                   onTextPlaced={() => setTool('edit')}
-                  onPictureTap={pictureSet.has(p.src) ? (x, y) => readTap(p.src, x, y) : undefined}
+                  onPictureTap={pictureSet.has(p.src) || hiddenPages.has(p.src) ? (x, y) => readTap(p.src, x, y) : undefined}
                   onRunTap={hiddenPages.has(p.src) ? relineTap : undefined}
                   reading={pictureSet.has(p.src) || hiddenPages.has(p.src) ? {
                     page: !!ocr?.reading.includes(p.src),
