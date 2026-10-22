@@ -24,13 +24,26 @@ async function pickPdf() {
   return { name: asset.name ?? 'document.pdf', base64 };
 }
 
+// the file's real type: a save target (Files, Drive) refuses a .zip or picture sent as a PDF
+const TYPES: Record<string, [string, string]> = {
+  pdf: ['application/pdf', 'com.adobe.pdf'], zip: ['application/zip', 'public.zip-archive'],
+  jpg: ['image/jpeg', 'public.jpeg'], jpeg: ['image/jpeg', 'public.jpeg'], png: ['image/png', 'public.png'],
+  docx: ['application/vnd.openxmlformats-officedocument.wordprocessingml.document', 'org.openxmlformats.wordprocessingml.document'],
+  xlsx: ['application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'org.openxmlformats.spreadsheetml.sheet'],
+  pptx: ['application/vnd.openxmlformats-officedocument.presentationml.presentation', 'org.openxmlformats.presentationml.presentation'],
+  txt: ['text/plain', 'public.plain-text'], html: ['text/html', 'public.html'], csv: ['text/csv', 'public.comma-separated-values-text'],
+  ics: ['text/calendar', 'public.calendar-event'], json: ['application/json', 'public.json'],
+};
+
 async function savePdf(base64: string, name: string) {
+  const ext = name.split('.').pop()?.toLowerCase() ?? '';
+  const [mimeType, UTI] = TYPES[ext] ?? ['application/octet-stream', 'public.data'];
   const file = new File(Paths.cache, name);
   if (file.exists) file.delete();
   file.create();
   file.write(base64, { encoding: 'base64' });
   if (await Sharing.isAvailableAsync()) {
-    await Sharing.shareAsync(file.uri, { mimeType: 'application/pdf', dialogTitle: 'Save or share PDF', UTI: 'com.adobe.pdf' });
+    await Sharing.shareAsync(file.uri, { mimeType, dialogTitle: ext === 'pdf' ? 'Save or share PDF' : `Save or share ${name}`, UTI });
   }
   return file.uri;
 }
