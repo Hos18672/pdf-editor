@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/pe_widget_bg"
+  android:gravity="center"
+  android:orientation="horizontal"
+  android:padding="6dp">
+  <LinearLayout
+    android:id="@+id/pe_w_scan"
+    android:layout_width="0dp"
+    android:layout_height="match_parent"
+    android:layout_weight="1"
+    android:layout_marginStart="3dp"
+    android:layout_marginEnd="3dp"
+    android:background="@drawable/pe_widget_btn"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+    <ImageView
+      android:layout_width="22dp"
+      android:layout_height="22dp"
+      android:contentDescription="Scan"
+      android:src="@drawable/pe_ic_scan" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="2dp"
+      android:maxLines="1"
+      android:text="Scan"
+      android:textColor="#1E2559"
+      android:textSize="12sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+  <LinearLayout
+    android:id="@+id/pe_w_open"
+    android:layout_width="0dp"
+    android:layout_height="match_parent"
+    android:layout_weight="1"
+    android:layout_marginStart="3dp"
+    android:layout_marginEnd="3dp"
+    android:background="@drawable/pe_widget_btn"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+    <ImageView
+      android:layout_width="22dp"
+      android:layout_height="22dp"
+      android:contentDescription="Open"
+      android:src="@drawable/pe_ic_open" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="2dp"
+      android:maxLines="1"
+      android:text="Open"
+      android:textColor="#1E2559"
+      android:textSize="12sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+  <LinearLayout
+    android:id="@+id/pe_w_sign"
+    android:layout_width="0dp"
+    android:layout_height="match_parent"
+    android:layout_weight="1"
+    android:layout_marginStart="3dp"
+    android:layout_marginEnd="3dp"
+    android:background="@drawable/pe_widget_btn"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+    <ImageView
+      android:layout_width="22dp"
+      android:layout_height="22dp"
+      android:contentDescription="Sign"
+      android:src="@drawable/pe_ic_sign" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="2dp"
+      android:maxLines="1"
+      android:text="Sign"
+      android:textColor="#1E2559"
+      android:textSize="12sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+  <LinearLayout
+    android:id="@+id/pe_w_convert"
+    android:layout_width="0dp"
+    android:layout_height="match_parent"
+    android:layout_weight="1"
+    android:layout_marginStart="3dp"
+    android:layout_marginEnd="3dp"
+    android:background="@drawable/pe_widget_btn"
+    android:gravity="center"
+    android:orientation="vertical"
+    android:paddingTop="6dp"
+    android:paddingBottom="6dp">
+    <ImageView
+      android:layout_width="22dp"
+      android:layout_height="22dp"
+      android:contentDescription="To PDF"
+      android:src="@drawable/pe_ic_convert" />
+    <TextView
+      android:layout_width="wrap_content"
+      android:layout_height="wrap_content"
+      android:layout_marginTop="2dp"
+      android:maxLines="1"
+      android:text="To PDF"
+      android:textColor="#1E2559"
+      android:textSize="12sp"
+      android:textStyle="bold" />
+  </LinearLayout>
+</LinearLayout>

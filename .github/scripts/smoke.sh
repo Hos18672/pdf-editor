@@ -52,6 +52,7 @@ print('' if not m else f'{(int(m[1])+int(m[3]))//2} {(int(m[2])+int(m[4]))//2}')
     adb shell input keyevent BACK
   fi
 fi
+bash .github/scripts/intents.sh || true
 # dark mode last: on the emulator it restarts Play Services, which can take the app down with it
 adb shell am start -n com.rezahossaini.pdfeditor/.MainActivity
 adb shell "cmd uimode night yes" || true

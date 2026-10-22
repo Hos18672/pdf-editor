@@ -5,7 +5,7 @@ import { openPdf, loadPdfjs } from './pdfjs';
 import { useHistory } from './store';
 import type { PageInfo } from './PageView';
 import { appBase } from './assets';
-import type { HostProps, ToastMsg, BusyMsg, EditorStart } from './Editor';
+import type { HostProps, ToastMsg, BusyMsg, EditorStart, Incoming } from './Editor';
 import { Start, OpenState, type QuickAction } from './Start';
 import type { ToolId } from './Tools';
 import { recentBytes, saveRecent, type RecentKind } from './recent';
@@ -235,6 +235,53 @@ export default function EditorApp(host: HostProps) {
     else if (q === 'scan') setRoute({ name: 'scan', back: 'home' });
     else { startAfterOpen.current = undefined; setRoute({ name: 'tools', tool: q, back: 'home' }); }
   };
+  // ----- Android: opened with a PDF, files shared into the app, or a shortcut / widget button -----
+  const firstIntent = useRef(true);
+  const handleIntent = async () => {
+    if (!host.takeIntent) return;
+    const launch = firstIntent.current;
+    firstIntent.current = false;
+    let inc: Incoming | null = null;
+    try { inc = await host.takeIntent(); } catch { return; }
+    if (!inc) return;
+    const files = inc.files ?? [];
+    if (!files.length && !inc.text) {
+      // a shortcut or widget button
+      if (inc.mode === 'scan') setRoute({ name: 'scan', back: 'home' });
+      else if (inc.mode === 'open') pick();
+      else if (inc.mode === 'sign') quick('sign');
+      else if (inc.mode === 'convert') setRoute({ name: 'tools', tool: 'convert', back: 'home' });
+      return;
+    }
+    const convert = inc.mode === 'convert';
+    setBusy({ title: convert ? 'Making your PDF' : 'Opening', detail: `${files.length > 1 ? files.length + ' files' : files[0]?.name ?? 'Shared text'} · on this device, nothing is uploaded` });
+    try {
+      const read = await Promise.all(files.map(async (f) => ({ ...f, bytes: fromB64(await host.readShared!(f.uri)) })));
+      if (inc.mode === 'open' && read.length === 1) { setBusy(null); open(read[0].name, read[0].bytes); return; }
+      // several PDFs are put together; pictures, office files and text are turned into PDF pages
+      const { sharedToPdf, savePdfFile } = await import('./sharedPdf');
+      const out = await sharedToPdf(read, inc.text, inc.subject, (f) => setBusy((b) => (b ? { ...b, progress: f } : b)));
+      setBusy(null);
+      if (!convert) { open(out.name, out.bytes, undefined, 'opened'); return; }
+      saveRecent({ name: out.name, kind: 'opened', bytes: out.bytes }).catch(() => null);
+      await savePdfFile(host, out.bytes, out.name);
+      // opened only to convert: go back to the app the files came from
+      if (launch && !file && host.exitApp) setTimeout(() => host.exitApp!(), 400);
+      else setToastMsg({ msg: `${out.name} is ready`, action: { label: 'Edit', run: () => open(out.name, out.bytes) } });
+    } catch (e: any) {
+      setBusy(null);
+      setToastMsg({ msg: 'Couldn’t open what was shared: ' + (e?.message ?? 'unknown error'), kind: 'err' });
+    }
+  };
+  useEffect(() => {
+    if (!host.takeIntent) return;
+    handleIntent();
+    const on = () => { handleIntent(); };
+    window.addEventListener('pe-intent', on);
+    return () => window.removeEventListener('pe-intent', on);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
 
   return (
     <>

@@ -34,6 +34,18 @@ export interface HostProps {
   getInsets?: () => Promise<{ top: number; bottom: number; left: number; right: number }>;
   /** Android: leave the app (back button with nothing left to close) */
   exitApp?: () => void;
+  /** Android: what the app was opened with ("Open with", the share sheet, a shortcut or widget) */
+  takeIntent?: () => Promise<Incoming | null>;
+  /** Android: a shared file's contents (base64) */
+  readShared?: (uri: string) => Promise<string>;
+}
+export interface Incoming {
+  /** open: PDFs; import: other files / text to turn into a PDF and edit; convert: the "Convert to PDF" share entry
+   *  (or, without files, the shortcut); scan / open / sign: shortcut or widget buttons */
+  mode: string;
+  files: { uri: string; name: string; mime: string | null; size: number | null }[];
+  text: string | null;
+  subject: string | null;
 }
 export interface ToastMsg { msg: string; kind?: 'ok' | 'err'; action?: { label: string; run: () => void } }
 export interface BusyMsg { title: string; detail?: string; progress?: number }

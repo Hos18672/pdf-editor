@@ -7,6 +7,10 @@ import * as DocumentPicker from 'expo-document-picker';
 import { File, Paths } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import PdfEditorDom from '../components/PdfEditorDom';
+import { PeIntents } from '../../modules/pe-intents';
+
+const takeIntent = async () => PeIntents?.takeIntent() ?? null;
+const readShared = (uri: string) => (PeIntents ? PeIntents.readUri(uri) : Promise.reject(new Error('Not available')));
 
 async function pickPdf() {
   const res = await DocumentPicker.getDocumentAsync({ type: 'application/pdf', copyToCacheDirectory: true });
@@ -92,6 +96,13 @@ function NativeShell({ dark }: { dark: boolean }) {
     });
     return () => sub.remove();
   }, []);
+  // opened again with a file or a shortcut while running: tell the page
+  useEffect(() => {
+    const sub = PeIntents?.addListener('onIntent', () => {
+      dom.current?.injectJavaScript?.("window.dispatchEvent(new Event('pe-intent'));true;");
+    });
+    return () => sub?.remove();
+  }, []);
   const exitApp = useCallback(() => { BackHandler.exitApp(); }, []);
   const getInsets = useCallback(async () => {
     const i = latest.current;
@@ -110,6 +121,8 @@ function NativeShell({ dark }: { dark: boolean }) {
         savePdf={savePdf}
         onChrome={setChrome}
         getInsets={getInsets}
+        takeIntent={takeIntent}
+        readShared={readShared}
         dom={{
           style: { flex: 1, backgroundColor: desk },
           // react-native-webview supports <input type="file"> (signature photos, images) on Android

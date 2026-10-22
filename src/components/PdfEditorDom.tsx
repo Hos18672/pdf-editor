@@ -3,6 +3,7 @@
 import React from 'react';
 import EditorApp from '../ui/EditorApp';
 import type { ChromeColors } from '../ui/hooks';
+import type { Incoming } from '../ui/Editor';
 
 // Android: react-native-webview hands the page its start-up values (host OS, initial props) with an
 // async evaluateJavascript call, which can lose the race against the page's own start-up script.
@@ -15,7 +16,7 @@ if (bridge) {
     let injected: any = null;
     try { injected = JSON.parse(bridge.injectedObjectJson?.() ?? 'null'); } catch { /* not there yet */ }
     w.$$EXPO_DOM_HOST_OS ??= injected?.EXPO_DOM_HOST_OS ?? 'android';
-    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets', 'exitApp'], props: { isNative: true } };
+    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets', 'exitApp', 'takeIntent', 'readShared'], props: { isNative: true } };
   }
 }
 
@@ -45,6 +46,8 @@ const native = bridge ? {
   onChrome: (c: ChromeColors) => { callNative('onChrome', [c]).catch(() => null); },
   getInsets: () => callNative<{ top: number; bottom: number; left: number; right: number }>('getInsets', []),
   exitApp: () => { callNative('exitApp', []).catch(() => null); },
+  takeIntent: () => callNative<Incoming | null>('takeIntent', []),
+  readShared: (uri: string) => callNative<string>('readShared', [uri]),
 } : null;
 
 // The whole editor is a DOM component: on the web it renders directly, on
@@ -57,9 +60,14 @@ export default function PdfEditorDom(props: {
   onChrome?: (c: ChromeColors) => void;
   getInsets?: () => Promise<{ top: number; bottom: number; left: number; right: number }>;
   exitApp?: () => void;
+  /** Android: what the app was opened with (a PDF, shared files, a shortcut) */
+  takeIntent?: () => Promise<Incoming | null>;
+  readShared?: (uri: string) => Promise<string>;
   /** Android: the WebView handle (the shell sends the back button through it) */
   ref?: React.Ref<unknown>;
 }) {
   if (native) return <EditorApp {...native} />;
-  return <EditorApp isNative={props.isNative} pickPdf={props.pickPdf} savePdf={props.savePdf} onChrome={props.onChrome} />;
+  // browser tests can stand in for the Android side (files shared into the app)
+  const testHost = typeof window !== 'undefined' ? (window as any).__peTestHost : undefined;
+  return <EditorApp isNative={props.isNative} pickPdf={props.pickPdf} savePdf={props.savePdf} onChrome={props.onChrome} {...testHost} />;
 }
