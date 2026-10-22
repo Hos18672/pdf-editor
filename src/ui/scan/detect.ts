@@ -112,22 +112,24 @@ export function detectKernels(): Detector {
   /** separable running max (dilate) or min (erode), radius r */
   function morph(a: Float32Array, w: number, h: number, r: number, max: boolean): Float32Array {
     const t = new Float32Array(a.length), o = new Float32Array(a.length);
-    const sg = max ? 1 : -1;
     for (let y = 0; y < h; y++) {
       const row = y * w;
       for (let x = 0; x < w; x++) {
-        const lo = x - r < 0 ? 0 : x - r, hi = x + r >= w ? w - 1 : x + r;
-        let v = a[row + lo] * sg;
-        for (let k = lo + 1; k <= hi; k++) { const u = a[row + k] * sg; if (u > v) v = u; }
-        t[row + x] = v * sg;
+        const lo = row + (x - r < 0 ? 0 : x - r), hi = row + (x + r >= w ? w - 1 : x + r);
+        let v = a[lo];
+        if (max) { for (let k = lo + 1; k <= hi; k++) if (a[k] > v) v = a[k]; }
+        else { for (let k = lo + 1; k <= hi; k++) if (a[k] < v) v = a[k]; }
+        t[row + x] = v;
       }
     }
+    // vertical pass row by row (streams through memory instead of striding down columns)
     for (let y = 0; y < h; y++) {
-      const lo = y - r < 0 ? 0 : y - r, hi = y + r >= h ? h - 1 : y + r;
-      for (let x = 0; x < w; x++) {
-        let v = t[lo * w + x] * sg;
-        for (let k = lo + 1; k <= hi; k++) { const u = t[k * w + x] * sg; if (u > v) v = u; }
-        o[y * w + x] = v * sg;
+      const y0 = y - r < 0 ? 0 : y - r, y1 = y + r >= h ? h - 1 : y + r, row = y * w;
+      o.set(t.subarray(y0 * w, y0 * w + w), row);
+      for (let yy = y0 + 1; yy <= y1; yy++) {
+        const src = yy * w;
+        if (max) { for (let x = 0; x < w; x++) { const u = t[src + x]; if (u > o[row + x]) o[row + x] = u; } }
+        else { for (let x = 0; x < w; x++) { const u = t[src + x]; if (u < o[row + x]) o[row + x] = u; } }
       }
     }
     return o;
@@ -150,19 +152,18 @@ export function detectKernels(): Detector {
         t[row + x] = v;
       }
     }
+    // vertical pass row by row (streams through memory)
     for (let y = 0; y < h; y++) {
-      const inner = y >= r && y < h - r;
-      for (let x = 0; x < w; x++) {
-        let v = 0;
-        if (inner) { let b = (y - r) * w + x; for (let i = 0; i < K; i++, b += w) v += t[b] * k[i]; }
-        else for (let i = -r; i <= r; i++) { const yy = y + i < 0 ? 0 : y + i >= h ? h - 1 : y + i; v += t[yy * w + x] * k[i + r]; }
-        o[y * w + x] = v;
+      const row = y * w;
+      for (let i = -r; i <= r; i++) {
+        const yy = y + i < 0 ? 0 : y + i >= h ? h - 1 : y + i, src = yy * w, kk = k[i + r];
+        for (let x = 0; x < w; x++) o[row + x] += t[src + x] * kk;
       }
     }
     return o;
   }
 
-  interface EdgeMap { w: number; h: number; on: Uint8Array; ang: Float32Array; mag: Float32Array; L: Float32Array; list: Int32Array }
+  interface EdgeMap { w: number; h: number; on: Uint8Array; ang: Float32Array; mag: Float32Array; L: Float32Array; S: Float32Array; list: Int32Array }
 
   function edgeMap(img: Rgba): EdgeMap {
     const { w, h } = img, n = w * h;
@@ -171,21 +172,26 @@ export function detectKernels(): Detector {
     let L = morph(morph(luminance(img), w, h, r, true), w, h, r, false);
     L = blur(L, w, h, 1.1);
     const S = blur(chroma(img), w, h, 1.4);
-    const mag = new Float32Array(n), ang = new Float32Array(n);
+    const mag = new Float32Array(n), ang = new Float32Array(n), gx = new Float32Array(n), gy = new Float32Array(n);
+    const bins = new Uint32Array(256);
     for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
       const i = y * w + x;
-      const lx = (L[i - w + 1] + 2 * L[i + 1] + L[i + w + 1] - L[i - w - 1] - 2 * L[i - 1] - L[i + w - 1]) / 8;
-      const ly = (L[i + w - 1] + 2 * L[i + w] + L[i + w + 1] - L[i - w - 1] - 2 * L[i - w] - L[i - w + 1]) / 8;
-      const sx = (S[i - w + 1] + 2 * S[i + 1] + S[i + w + 1] - S[i - w - 1] - 2 * S[i - 1] - S[i + w - 1]) / 8 * 0.8;
-      const sy = (S[i + w - 1] + 2 * S[i + w] + S[i + w + 1] - S[i - w - 1] - 2 * S[i - w] - S[i - w + 1]) / 8 * 0.8;
+      const lx = (L[i - w + 1] + 2 * L[i + 1] + L[i + w + 1] - L[i - w - 1] - 2 * L[i - 1] - L[i + w - 1]) * 0.125;
+      const ly = (L[i + w - 1] + 2 * L[i + w] + L[i + w + 1] - L[i - w - 1] - 2 * L[i - w] - L[i - w + 1]) * 0.125;
+      const sx = (S[i - w + 1] + 2 * S[i + 1] + S[i + w + 1] - S[i - w - 1] - 2 * S[i - 1] - S[i + w - 1]) * 0.1;
+      const sy = (S[i + w - 1] + 2 * S[i + w] + S[i + w + 1] - S[i - w - 1] - 2 * S[i - w] - S[i - w + 1]) * 0.1;
       const ml = lx * lx + ly * ly, ms = sx * sx + sy * sy;
-      if (ml >= ms) { mag[i] = Math.sqrt(ml); ang[i] = Math.atan2(ly, lx); } else { mag[i] = Math.sqrt(ms); ang[i] = Math.atan2(sy, sx); }
+      let m: number;
+      if (ml >= ms) { m = Math.sqrt(ml); gx[i] = lx; gy[i] = ly; } else { m = Math.sqrt(ms); gx[i] = sx; gy[i] = sy; }
+      mag[i] = m;
+      bins[m >= 63.75 ? 255 : (m * 4) | 0]++;
     }
+    bins[0] += 2 * w + 2 * (h - 2); // the border pixels (0)
     // thresholds from the gradient distribution
-    const bins = new Uint32Array(256);
-    for (let i = 0; i < n; i++) bins[Math.min(255, (mag[i] * 4) | 0)]++;
     const pct = (q: number) => { let c = 0; for (let b = 0; b < 256; b++) { c += bins[b]; if (c >= q * n) return b / 4; } return 64; };
     const high = Math.max(2.5, Math.min(16, pct(0.9))), low = high * 0.45;
+    // directions only where an edge can be
+    for (let i = 0; i < n; i++) if (mag[i] >= low) ang[i] = Math.atan2(gy[i], gx[i]);
     // non-maximum suppression
     const nms = new Uint8Array(n);
     for (let y = 1; y < h - 1; y++) for (let x = 1; x < w - 1; x++) {
@@ -213,7 +219,7 @@ export function detectKernels(): Detector {
     for (let i = 0; i < n; i++) if (on[i]) cnt++;
     const list = new Int32Array(cnt);
     for (let i = 0, k = 0; i < n; i++) if (on[i]) list[k++] = i;
-    return { w, h, on, ang, mag, L, list };
+    return { w, h, on, ang, mag, L, S, list };
   }
 
   interface Line { a: number; b: number; c: number; border?: boolean; votes: number }
@@ -361,6 +367,28 @@ export function detectKernels(): Detector {
     return c ? s / c : 0;
   }
 
+  /**
+   * How much a side's brightness step flips back and forth along it (0 = always the same way, as at a
+   * sheet's edge; 0.5 = half each way, as along the lines of a checked cloth or a tiled floor).
+   */
+  function flips(E: EdgeMap, p: Pt, q: Pt): { flip: number; step: number } {
+    const { w, h, L } = E;
+    const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+    const nx = -(q.y - p.y) / len, ny = (q.x - p.x) / len;
+    const steps = Math.max(8, Math.floor(len / 2));
+    let pos = 0, neg = 0, all = 0;
+    for (let s = 0; s <= steps; s++) {
+      const t = 0.06 + (0.88 * s) / steps;
+      const x = p.x + (q.x - p.x) * t, y = p.y + (q.y - p.y) * t;
+      const xi = Math.round(x + nx * 3), yi = Math.round(y + ny * 3), xo = Math.round(x - nx * 3), yo = Math.round(y - ny * 3);
+      if (xi < 0 || yi < 0 || xi >= w || yi >= h || xo < 0 || yo < 0 || xo >= w || yo >= h) continue;
+      const d = L[yi * w + xi] - L[yo * w + xo];
+      all++;
+      if (d > 6) pos++; else if (d < -6) neg++;
+    }
+    return { flip: pos + neg >= 6 ? Math.min(pos, neg) / (pos + neg) : 0, step: all ? (pos + neg) / all : 1 };
+  }
+
   /** Largest bright region → hull → best quad (for sheets whose sides aren't clean straight lines). */
   function blobQuad(E: EdgeMap): Quad | null {
     const { w, h, L } = E, n = w * h;
@@ -489,6 +517,54 @@ export function detectKernels(): Detector {
    * nearly as white as the paper, and never a fold or a printed line inside the sheet, which lies
    * between seeds of the sheet itself. Returns the region and how clearly its outline is an edge.
    */
+  /**
+   * The sheet as the largest bright, colourless patch (no text needed: blurred frames, blank paper, a
+   * patterned desk around it). Only trusted when the patch is compact and its outline is a real edge.
+   */
+  function paperBlob(img: Rgba, E: EdgeMap): { mask: Uint8Array; size: number; conf: number } | null {
+    const { w, h, L, S } = E, n = w * h;
+    const P = new Float32Array(n);
+    const hist = new Float64Array(256);
+    for (let i = 0; i < n; i++) { const v = L[i] - 1.3 * S[i]; P[i] = v; hist[Math.max(0, Math.min(255, v | 0))]++; }
+    let sum = 0; for (let i = 0; i < 256; i++) sum += i * hist[i];
+    let wB = 0, sB = 0, best = 0, thr = 128;
+    for (let t = 0; t < 256; t++) {
+      wB += hist[t]; if (!wB) continue;
+      const wF = n - wB; if (!wF) break;
+      sB += t * hist[t];
+      const mB = sB / wB, mF = (sum - sB) / wF, v = wB * wF * (mB - mF) * (mB - mF);
+      if (v > best) { best = v; thr = t; }
+    }
+    // the two sides must really differ (not one flat surface split in two)
+    let a = 0, an = 0, b = 0, bn = 0;
+    for (let i = 0; i < n; i++) if (P[i] > thr) { a += P[i]; an++; } else { b += P[i]; bn++; }
+    if (!an || !bn || a / an - b / bn < 35) return null;
+    const m0 = new Float32Array(n);
+    for (let i = 0; i < n; i++) m0[i] = P[i] > thr ? 1 : 0;
+    // opening: thin bridges to bright bits of the desk break off
+    const r = Math.max(1, Math.round(Math.min(w, h) / 120));
+    const op = morph(morph(m0, w, h, r, false), w, h, r, true);
+    const m = new Uint8Array(n);
+    for (let i = 0; i < n; i++) m[i] = op[i] > 0.5 ? 1 : 0;
+    const big = largest(m, w, h);
+    if (!big || big.size < n * 0.03 || big.size > n * 0.95) return null;
+    const q = maskQuad(big.mask, w, h);
+    if (!q) return null;
+    const solid = big.size / Math.max(1, quadArea(q));
+    if (solid < 0.86 || solid > 1.12) return null;
+    let sup = 0, inPic = 0;
+    for (let s = 0; s < 4; s++) {
+      const p0 = q[s], p1 = q[(s + 1) % 4];
+      // sides along the picture's border say nothing
+      const mx = (p0.x + p1.x) / 2, my = (p0.y + p1.y) / 2;
+      if (mx < 3 || my < 3 || mx > w - 4 || my > h - 4) continue;
+      sup += support(E, p0, p1); inPic++;
+    }
+    if (inPic < 2) return null;
+    const conf = Math.min(1, (sup / inPic) * (solid > 1 ? 2 - solid : solid) * 1.15);
+    return { mask: big.mask, size: big.size, conf };
+  }
+
   function paperRegion(img: Rgba, E: EdgeMap): { mask: Uint8Array; size: number; conf: number } | null {
     const { w, h, L: Lc, mag } = E, n = w * h;
     const Y = luminance(img);
@@ -662,7 +738,13 @@ export function detectKernels(): Detector {
         const r = aspectOf(q, w, h);
         shape = opts.ratios.some((t) => Math.abs(Math.log(r / t)) < 0.09 || Math.abs(Math.log(r * t)) < 0.09) ? 0.07 : 0;
       }
-      const score = 0.5 * fit + 0.3 * minSup + 0.38 * Math.sqrt(area) - 0.3 * anglePen + pol - 0.05 * borderSides + shape - 0.6 * runOn;
+      // sides that run along a pattern on the desk (checked cloth, tiles): the step flips along them
+      let texture = 0;
+      for (let s = 0; s < 4; s++) if (sup[s] !== 0.42) {
+        const f = flips(E, q[s], q[(s + 1) % 4]);
+        texture += Math.max(0, f.flip - 0.12);
+      }
+      const score = 0.5 * fit + 0.3 * minSup + 0.38 * Math.sqrt(area) - 0.3 * anglePen + pol - 0.05 * borderSides + shape - 0.6 * runOn - 0.9 * texture;
       if ((globalThis as any).__detDebug) (globalThis as any).__detDebug.push({ score, fit, minSup, area, anglePen, pol, sup, con, q, runOn });
       const det = { quad: q, score, support: sup };
       cands.push(det);
@@ -699,7 +781,12 @@ export function detectKernels(): Detector {
     }
     // the sheet as a region: outlines that cut through it (a fold, a printed rule, the edge of a
     // shadow) or reach far past it (the desk, the picture's border) lose against ones that follow it
-    const reg = paperRegion(img, E);
+    // the sheet as a region: from its print (text marks), or as a clean bright patch; the patch wins
+    // when it is as sure (a pattern on the desk can pass for print)
+    let reg = paperRegion(img, E);
+    const regOk = !!reg && reg.conf > 0.45 && reg.size > w * h * 0.03 && reg.size < w * h * 0.97;
+    const blob = paperBlob(img, E);
+    if (blob && (!regOk || blob.conf >= reg!.conf - 0.05)) reg = blob;
     let regQ: Detection | null = null, overlap: ((q: Quad) => number) | null = null, regW = 0;
     if (reg && reg.size > w * h * 0.03 && reg.size < w * h * 0.97 && reg.conf > 0.45) {
       const rq = maskQuad(reg.mask, w, h);

@@ -54,14 +54,29 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
     (async () => {
       if (!navigator.mediaDevices?.getUserMedia) { setStatus('none'); return; }
       try {
-        const s = await navigator.mediaDevices.getUserMedia({
+        // The whole sensor (4:3), not a 16:9 video crop that looks zoomed in. A preview-sized stream keeps
+        // the camera fast; the photo itself is taken at full resolution (ImageCapture, or a short switch
+        // to the largest size when that isn't there).
+        const want = (dev?: string): MediaStreamConstraints => ({
           audio: false,
-          // a preview-sized stream keeps the camera fast; the photo itself is taken at full resolution
-          // (without ImageCapture the photo is a video frame: then ask for the largest stream)
-          video: (window as any).ImageCapture
-            ? { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1440 }, frameRate: { ideal: 30 }, advanced: [{ focusMode: 'continuous' } as any] }
-            : { facingMode: { ideal: 'environment' }, width: { ideal: 4096 }, height: { ideal: 3072 }, advanced: [{ focusMode: 'continuous' } as any] } as any,
+          video: {
+            ...(dev ? { deviceId: { exact: dev } } : { facingMode: { ideal: 'environment' } }),
+            width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4 / 3 }, frameRate: { ideal: 30 },
+            advanced: [{ focusMode: 'continuous' } as any],
+          } as any,
         });
+        let s = await navigator.mediaDevices.getUserMedia(want());
+        // phones with several back lenses: the main one (Android lists it as "camera2 0" / "camera 0"),
+        // not a tele or a cropped lens the browser happened to choose
+        try {
+          const cams = (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'videoinput' && /back|rear|environment|r\u00fcck/i.test(d.label));
+          const main = cams.find((d) => /\b(camera2? )?0\b/.test(d.label)) ?? null;
+          const curId = s.getVideoTracks()[0]?.getSettings?.().deviceId;
+          if (main && curId && main.deviceId !== curId) {
+            s.getTracks().forEach((t) => t.stop());
+            s = await navigator.mediaDevices.getUserMedia(want(main.deviceId)).catch(() => navigator.mediaDevices.getUserMedia(want()));
+          }
+        } catch { /* keep the camera we have */ }
         if (!alive) { s.getTracks().forEach((t) => t.stop()); return; }
         stream.current = s;
         const v = video.current!;
@@ -76,6 +91,11 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
           const cur = (track.getSettings?.() as any)?.zoom;
           if (z != null && cur != null && cur > z + 0.01) await track.applyConstraints({ advanced: [{ zoom: z } as any] });
         } catch { /* zoom not adjustable */ }
+        try {
+          const st: any = track.getSettings?.() ?? {};
+          const r = st.width && st.height ? Math.max(st.width, st.height) / Math.min(st.width, st.height) : 4 / 3;
+          if (Math.abs(r - 4 / 3) > 0.05) await track.applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { exact: 4 / 3 } } as any);
+        } catch { /* only this shape is offered */ }
         setStatus('live');
       } catch (e: any) {
         if (!alive) return;
@@ -111,6 +131,9 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
     if (status !== 'live') return;
     let stop = false, timer = 0, raf = 0;
     let last: Quad | null = null, stableSince = 0, lostSince = 0, armed = true, shotQuad: Quad | null = null;
+    // the outline last shown with confidence (frame pixels) and when: a weaker find close to it is the
+    // same sheet (a finger over a corner, a moment of blur), so the outline stays put instead of blinking
+    let kept: Quad | null = null, keptAt = 0;
     let target: Pt[] | null = null, shown: Pt[] | null = null;
     const frame = document.createElement('canvas');
     const fctx = frame.getContext('2d', { willReadFrequently: true })!;
@@ -149,11 +172,18 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
       const cw = b.clientWidth, ch = b.clientHeight, sc = Math.max(cw / vw, ch / vh);
       const ox = (cw - vw * sc) / 2, oy = (ch - vh * sc) / 2;
       // a clear outline, or an outline that matches the sheet as a whole (a receipt on a white desk)
-      const ok = !!det && (det.score > 0.62 || (det.agree ?? 0) > 0.5);
+      const diag = Math.hypot(vw, vh);
+      const strong = !!det && (det.score > 0.62 || (det.agree ?? 0) > 0.5);
+      const raw = det ? (det.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad) : null;
+      const near = (a: Quad, b: Quad, f: number) => Math.max(...a.map((p, i) => Math.hypot(p.x - b[i].x, p.y - b[i].y))) / diag < f;
+      const recent = !!kept && now - keptAt < 900;
+      const ok = strong || (!!det && recent && det.score > 0.4 && near(raw!, kept!, 0.05));
       setFound(ok);
       if (det && ok) {
-        const q = det.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad;
-        const diag = Math.hypot(vw, vh);
+        let q = raw!;
+        // small steps are noise: settle on the average, so the outline sits still on a still page
+        if (recent && near(q, kept!, 0.012)) q = q.map((p, i) => ({ x: (p.x + kept![i].x) / 2, y: (p.y + kept![i].y) / 2 })) as Quad;
+        kept = q; keptAt = now;
         const move = last ? Math.max(...q.map((p, i) => Math.hypot(p.x - last![i].x, p.y - last![i].y))) / diag : 1;
         if (move > 0.02 || !stableSince) stableSince = now;
         last = q; lostSince = 0;
@@ -162,20 +192,21 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
         // big enough: by area, or by length (a long receipt that fills the frame's height)
         const area = quadArea(q) / (vw * vh);
         const span = Math.max(...q.map((p, i) => Math.hypot(q[(i + 1) % 4].x - p.x, q[(i + 1) % 4].y - p.y))) / Math.max(vw, vh);
-        const near = area >= 0.12 || span >= 0.6;
+        const close = area >= 0.12 || span >= 0.6;
         const held = Math.min(1, (now - stableSince) / 900);
         if (mean < 45) say('Too dark: add light or turn on the torch');
-        else if (!near) say('Move closer');
+        else if (!close) say('Move closer');
         else if (!armed) say('Got it. Next page, or tap Done');
         else say(autoRef.current ? (held < 1 ? 'Hold still…' : 'Scanning…') : 'Tap the button to scan');
-        holdTo(autoRef.current && armed && near ? held : 0);
-        if (autoRef.current && armed && held >= 1 && near && (det.score > 0.78 || (det.agree ?? 0) > 0.75) && mean >= 45) {
+        holdTo(autoRef.current && armed && close ? held : 0);
+        if (autoRef.current && armed && held >= 1 && close && strong && (det.score > 0.78 || (det.agree ?? 0) > 0.75) && mean >= 45) {
           armed = false; shotQuad = q; stableSince = 0; holdTo(0);
           shotRef.current();
         }
       } else {
         if (!lostSince) lostSince = now;
-        if (now - lostSince > 250) { target = null; last = null; stableSince = 0; holdTo(0); }
+        // a frame or two without the sheet (blur, a hand passing): keep the outline a moment
+        if (now - lostSince > 500) { target = null; last = null; stableSince = 0; holdTo(0); }
         if (now - lostSince > 700) armed = true;
         say(mean < 45 ? 'Too dark: add light or turn on the torch' : 'Point the camera at a document');
       }
@@ -227,7 +258,27 @@ export function Camera({ mode, onMode, count, lastThumb, step, onShot, onImport,
           if (blob && blob.size < 20000) blob = null;
         } catch { blob = null; }
       }
-      if (!blob) blob = await grabBest(v);
+      if (!blob) {
+        // no full-resolution photo: switch the stream to the camera's largest size for the shot
+        const st: any = track.getSettings?.() ?? {};
+        const caps: any = track.getCapabilities?.() ?? {};
+        const bigW = caps.width?.max ?? 0, bigH = caps.height?.max ?? 0;
+        let raised = false;
+        if (bigW * bigH > (st.width ?? 0) * (st.height ?? 0) * 1.3) {
+          try {
+            await track.applyConstraints({ width: { ideal: Math.min(bigW, 4096) }, height: { ideal: Math.min(bigH, 4096) }, aspectRatio: { ideal: 4 / 3 } } as any);
+            raised = true;
+            // wait for frames of the new size (and focus)
+            const t0 = performance.now();
+            while (performance.now() - t0 < 1500 && v.videoWidth * v.videoHeight <= (st.width ?? 0) * (st.height ?? 0)) await new Promise((r) => setTimeout(r, 50));
+            await new Promise((r) => setTimeout(r, 250));
+          } catch { /* stays at the preview size */ }
+        }
+        try { blob = await grabBest(v); }
+        finally {
+          if (raised) track.applyConstraints({ width: { ideal: 1920 }, height: { ideal: 1440 }, aspectRatio: { ideal: 4 / 3 }, frameRate: { ideal: 30 } } as any).catch(() => null);
+        }
+      }
       if (v.paused) v.play().catch(() => null);
       onShot(blob);
     } catch (e) {
