@@ -6,7 +6,7 @@ import type { TextRun } from '../engine/pdfText';
 import type { M } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import { runBox, sampleColors } from './geometry';
-import { newOcrWorker, OcrWorker, grayOf, toPgm, linesOf, OcrLine } from './ocr';
+import { newOcrWorker, OcrWorker, grayOf, toPgm, linesOf, OcrLine, findRules, grayThreshold } from './ocr';
 
 export const OCR_FONT = 'ocr';
 export const isOcrRun = (r: TextRun) => r.fontName === OCR_FONT;
@@ -31,7 +31,11 @@ export interface ReaderState {
 }
 
 interface PageImg {
-  canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D; gray: Uint8Array;
+  canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D;
+  /** grey picture with table borders painted out (what is read) */
+  gray: Uint8Array;
+  /** a table border runs between two points of a line (image px) */
+  cut: (xa: number, xb: number, ya: number, yb: number) => boolean;
   w: number; h: number; s: number; thr: number;
   toPdf: (x: number, y: number) => [number, number];
 }
@@ -255,9 +259,11 @@ export class PageReader {
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
-        const gray = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+        const raw = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+        const thr = grayThreshold(raw);
+        const { clean, cut } = findRules(raw, canvas.width, canvas.height, thr, s);
         return {
-          canvas, ctx, gray, w: canvas.width, h: canvas.height, s, thr: otsu(gray),
+          canvas, ctx, gray: clean, cut, w: canvas.width, h: canvas.height, s, thr,
           toPdf: (x: number, y: number) => vp.convertToPdfPoint(x, y) as [number, number],
         };
       })();
@@ -287,13 +293,15 @@ export class PageReader {
     if (y1 - y0 < 4) return;
     const { data } = await w.recognize(toPgm(img.gray, img.w, img.h, y0, y1), {}, { blocks: true, text: false, hocr: false, tsv: false });
     const bandH = y1 - y0;
-    const all = linesOf(data, (x, y) => img.toPdf(x, y + y0), 1 / img.s);
+    const all = linesOf(data, (x, y) => img.toPdf(x, y + y0), 1 / img.s, (xa, xb, ya, yb) => img.cut(xa, xb, ya + y0, yb + y0));
     if ((globalThis as any).__ocrDebug) console.log('ocr band', src, y0, y1, all.map((l) => `${Math.round(l.conf)} ${l.text}`));
     const lines = all.filter((l: OcrLine) => {
       // specks, rules and table borders read as stray symbols
       const t = l.text.replace(/\s/g, '');
       const an = (t.match(/[\p{L}\p{N}]/gu) ?? []).length;
-      if (an < 2 || an < t.length * 0.5) return false;
+      if (an < 1 || an < t.length * 0.5) return false;
+      // a single letter or digit (a table cell like "5") only when read clearly
+      if (an < 2 && l.conf < 75) return false;
       // a line cut by the band's edge reads as noise
       if (l.conf < 55 && (l.box.y0 <= 1 || l.box.y1 >= bandH - 2)) return false;
       // in the background only lines read with confidence; a tap shows what is there
@@ -359,29 +367,6 @@ function overlaps(a: ReturnType<typeof boxOf>, b: ReturnType<typeof boxOf>) {
   if (ix <= 0 || iy <= 0) return false;
   const area = (q: typeof a) => (q.x1 - q.x0) * (q.y1 - q.y0);
   return ix * iy > 0.35 * Math.min(area(a), area(b));
-}
-
-/** Otsu threshold of a grey image (sampled). */
-function otsu(g: Uint8Array): number {
-  const hist = new Float64Array(256);
-  const step = Math.max(1, Math.floor(g.length / 400000));
-  let n = 0;
-  for (let i = 0; i < g.length; i += step) { hist[g[i]]++; n++; }
-  let sum = 0;
-  for (let i = 0; i < 256; i++) sum += i * hist[i];
-  let sumB = 0, wB = 0, best = 0, thr = 128;
-  for (let t = 0; t < 256; t++) {
-    wB += hist[t];
-    if (!wB) continue;
-    const wF = n - wB;
-    if (!wF) break;
-    sumB += t * hist[t];
-    const mB = sumB / wB, mF = (sum - sumB) / wF;
-    const v = wB * wF * (mB - mF) * (mB - mF);
-    if (v > best) { best = v; thr = t; }
-  }
-  // stay on the dark side: shadows and paper texture are not ink
-  return Math.min(thr, 200);
 }
 
 /** Dark pixels per row between columns x0..x1. */

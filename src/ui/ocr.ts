@@ -100,26 +100,108 @@ export interface OcrLine extends LayerLine {
   conf: number;
 }
 
-/** Lines of a recognition result; `toPdf` maps image pixels to PDF user space. */
-export function linesOf(data: any, toPdf: (x: number, y: number) => [number, number], ptPerPx: number): OcrLine[] {
+type Seg = { x0: number; x1: number; y0: number; y1: number };
+
+/**
+ * Table borders and other ruled lines of a page picture. `clean` is the picture with them painted
+ * white (recognition then reads cells instead of "|" signs and whole rows); `cut` tells whether a
+ * vertical border runs between two points of a line, so the line is split into its cells there.
+ * `s` is pixels per point.
+ */
+export function findRules(gray: Uint8Array, w: number, h: number, thr: number, s: number) {
+  // shortest border: longer than any letter stroke (upright) or any run of touching letters (across)
+  const LV = Math.max(12, Math.round(20 * s)), LH = Math.max(24, Math.round(40 * s));
+  const T = Math.max(3, Math.round(3.5 * s)); // thickest border: thicker is a filled box or a picture
+  // unbroken dark runs along one direction, joined across neighbouring rows / columns into segments
+  const scan = (vertical: boolean): Seg[] => {
+    const n = vertical ? w : h, m = vertical ? h : w;
+    const L = vertical ? LV : LH;
+    const step = vertical ? w : 1;
+    const done: Seg[] = [];
+    let open: Seg[] = [];
+    for (let a = 0; a < n; a++) {
+      const next: Seg[] = [];
+      const base = vertical ? a : a * w;
+      let b = 0;
+      while (b < m) {
+        if (gray[base + b * step] >= thr) { b++; continue; }
+        let e = b + 1;
+        while (e < m && gray[base + e * step] < thr) e++;
+        if (e - b >= L) {
+          const o = open.find((g) => (vertical ? g.y0 <= e && g.y1 >= b : g.x0 <= e && g.x1 >= b));
+          if (o) {
+            open = open.filter((g) => g !== o);
+            if (vertical) { o.x1 = a; o.y0 = Math.min(o.y0, b); o.y1 = Math.max(o.y1, e - 1); }
+            else { o.y1 = a; o.x0 = Math.min(o.x0, b); o.x1 = Math.max(o.x1, e - 1); }
+            next.push(o);
+          } else next.push(vertical ? { x0: a, x1: a, y0: b, y1: e - 1 } : { x0: b, x1: e - 1, y0: a, y1: a });
+        }
+        b = e;
+      }
+      done.push(...open);
+      open = next;
+    }
+    done.push(...open);
+    return done.filter((g) => (vertical ? g.x1 - g.x0 : g.y1 - g.y0) < T);
+  };
+  const vs = scan(true), hs = scan(false);
+  const clean = gray.slice();
+  for (const g of [...vs, ...hs]) {
+    for (let y = Math.max(0, g.y0 - 1); y <= Math.min(h - 1, g.y1 + 1); y++) {
+      for (let x = Math.max(0, g.x0 - 1); x <= Math.min(w - 1, g.x1 + 1); x++) if (clean[y * w + x] < 235) clean[y * w + x] = 255;
+    }
+  }
+  /** a vertical border between x = xa..xb that covers most of rows ya..yb */
+  const cut = (xa: number, xb: number, ya: number, yb: number) =>
+    vs.some((g) => g.x1 >= xa && g.x0 <= xb && Math.min(g.y1, yb) - Math.max(g.y0, ya) >= (yb - ya) * 0.5);
+  return { clean, cut, vertical: vs, horizontal: hs };
+}
+
+/**
+ * Lines of a recognition result; `toPdf` maps image pixels to PDF user space. A line that runs over
+ * several table cells (a border between, or a wide gap like between columns) comes back as one line
+ * per cell. `cut` (image px) tells where a vertical border is.
+ */
+export function linesOf(data: any, toPdf: (x: number, y: number) => [number, number], ptPerPx: number,
+  cut?: (xa: number, xb: number, ya: number, yb: number) => boolean): OcrLine[] {
   const out: OcrLine[] = [];
   for (const block of data.blocks ?? []) for (const para of block.paragraphs ?? []) for (const line of para.lines ?? []) {
-    const words = (line.words ?? []).filter((w: any) => w.text?.trim() && w.confidence > 25);
+    const words = (line.words ?? [])
+      .filter((w: any) => w.text?.trim() && w.confidence > 25 && !/^[|¦│]+$/.test(w.text.trim()))
+      .sort((a: any, b: any) => a.bbox.x0 - b.bbox.x0);
     if (!words.length) continue;
-    const text = words.map((w: any) => w.text.trim()).join(' ');
     // baseline (image px): tesseract's line baseline, else the bottom of letters without descenders
     const bl = line.baseline && line.baseline.x1 > line.baseline.x0 ? line.baseline : null;
-    const left = Math.min(...words.map((w: any) => w.bbox.x0)), right = Math.max(...words.map((w: any) => w.bbox.x1));
     const yAt = (x: number) => (bl ? bl.y0 + ((bl.y1 - bl.y0) * (x - bl.x0)) / (bl.x1 - bl.x0) : line.bbox.y1);
     // size from the cap / ascender height: the top of words with capitals, digits or tall letters
-    const tall = words.filter((w: any) => /[A-ZÄÖÜ0-9bdfhklß]/.test(w.text));
-    const tops = (tall.length ? tall : words).map((w: any) => w.bbox.y0).sort((a: number, b: number) => a - b);
-    const top = tops[Math.floor(tops.length / 2)];
-    const capPx = Math.max(4, yAt((left + right) / 2) - top);
-    const [x0, y0] = toPdf(left, yAt(left));
-    const [x1, y1] = toPdf(right, yAt(right));
-    const conf = words.reduce((s: number, w: any) => s + w.confidence, 0) / words.length;
-    out.push({ text, x0, y0, x1, y1, size: (capPx / 0.72) * ptPerPx, box: { x0: left, y0: line.bbox.y0, x1: right, y1: line.bbox.y1 }, conf });
+    const capOf = (ws: any[]) => {
+      const tall = ws.filter((w: any) => /[A-ZÄÖÜ0-9bdfhklß]/.test(w.text));
+      if (!tall.length && ws !== words) return null;
+      const tops = (tall.length ? tall : ws).map((w: any) => w.bbox.y0).sort((a: number, b: number) => a - b);
+      const l = Math.min(...ws.map((w: any) => w.bbox.x0)), r = Math.max(...ws.map((w: any) => w.bbox.x1));
+      return Math.max(4, yAt((l + r) / 2) - tops[Math.floor(tops.length / 2)]);
+    };
+    const lineCap = capOf(words)!;
+    const em = lineCap / 0.72;
+    // cells: split where a border runs between two words, or where the gap is far wider than a space
+    const parts: any[][] = [[words[0]]];
+    for (let i = 1; i < words.length; i++) {
+      const a = words[i - 1], b = words[i];
+      const ya = Math.min(a.bbox.y0, b.bbox.y0), yb = Math.max(a.bbox.y1, b.bbox.y1);
+      const gap = b.bbox.x0 - a.bbox.x1;
+      if (gap > em * 1.5 || (cut && gap > 0 && cut(a.bbox.x1, b.bbox.x0, ya, yb))) parts.push([b]);
+      else parts[parts.length - 1].push(b);
+    }
+    for (const ws of parts) {
+      const text = ws.map((w: any) => w.text.trim()).join(' ');
+      const left = Math.min(...ws.map((w: any) => w.bbox.x0)), right = Math.max(...ws.map((w: any) => w.bbox.x1));
+      const capPx = parts.length > 1 ? capOf(ws) ?? lineCap : lineCap;
+      const [x0, y0] = toPdf(left, yAt(left));
+      const [x1, y1] = toPdf(right, yAt(right));
+      const conf = ws.reduce((s: number, w: any) => s + w.confidence, 0) / ws.length;
+      const top = Math.min(...ws.map((w: any) => w.bbox.y0)), bottom = Math.max(...ws.map((w: any) => w.bbox.y1));
+      out.push({ text, x0, y0, x1, y1, size: (capPx / 0.72) * ptPerPx, box: { x0: left, y0: Math.min(top, line.bbox.y0), x1: right, y1: Math.max(bottom, line.bbox.y1) }, conf });
+    }
   }
   return out;
 }
@@ -131,6 +213,29 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
 export async function recognizeCanvas(worker: OcrWorker, canvas: HTMLCanvasElement, toPdf: (x: number, y: number) => [number, number], ptPerPx: number): Promise<LayerLine[]> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const gray = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
-  const { data } = await worker.recognize(toPgm(gray, canvas.width, canvas.height), {}, { blocks: true, text: false, hocr: false, tsv: false });
-  return linesOf(data, toPdf, ptPerPx);
+  const rules = findRules(gray, canvas.width, canvas.height, grayThreshold(gray), 1 / ptPerPx);
+  const { data } = await worker.recognize(toPgm(rules.clean, canvas.width, canvas.height), {}, { blocks: true, text: false, hocr: false, tsv: false });
+  return linesOf(data, toPdf, ptPerPx, rules.cut);
+}
+
+/** Otsu threshold of a grey image (sampled), kept on the dark side: shadows and paper texture are not ink. */
+export function grayThreshold(g: Uint8Array): number {
+  const hist = new Float64Array(256);
+  const step = Math.max(1, Math.floor(g.length / 400000));
+  let n = 0;
+  for (let i = 0; i < g.length; i += step) { hist[g[i]]++; n++; }
+  let sum = 0;
+  for (let i = 0; i < 256; i++) sum += i * hist[i];
+  let sumB = 0, wB = 0, best = 0, thr = 128;
+  for (let t = 0; t < 256; t++) {
+    wB += hist[t];
+    if (!wB) continue;
+    const wF = n - wB;
+    if (!wF) break;
+    sumB += t * hist[t];
+    const mB = sumB / wB, mF = (sum - sumB) / wF;
+    const v = wB * wF * (mB - mF) * (mB - mF);
+    if (v > best) { best = v; thr = t; }
+  }
+  return Math.min(thr, 200);
 }
