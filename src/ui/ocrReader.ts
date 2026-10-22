@@ -6,7 +6,7 @@ import type { TextRun } from '../engine/pdfText';
 import type { M } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import { runBox, sampleColors } from './geometry';
-import { newOcrWorker, OcrWorker, grayOf, toPgm, linesOf, OcrLine, findRules, grayThreshold } from './ocr';
+import { newOcrWorker, OcrWorker, grayOf, toPgm, linesOf, OcrLine, findRules, grayThreshold, inkOf } from './ocr';
 
 export const OCR_FONT = 'ocr';
 export const isOcrRun = (r: TextRun) => r.fontName === OCR_FONT;
@@ -195,8 +195,10 @@ export class PageReader {
           // the old line, and the printed line under the finger (a layer line can sit a little off)
           const tx = x * s, ty = y * s;
           const lb = lineBand(img, tx, ty);
-          const by0 = Math.max(0, Math.floor(Math.min(Y0 - h * 0.35, lb?.[0] ?? Infinity)));
-          const by1 = Math.max(Y1 + h * 0.35, lb?.[1] ?? 0);
+          // with whole lines above and below in the band (cut-off letters were read into the line
+          // and made it far too big); only the lines on the old one are kept
+          const by0 = Math.max(0, Math.floor(Math.min(Y0 - h, lb?.[0] ?? Infinity)));
+          const by1 = Math.max(Y1 + h, lb?.[1] ?? 0);
           // only what lies on the old line (or right under the finger) replaces it
           await this.readBand(w, src, img, by0, by1, true, (l) => {
             const cx = (l.box.x0 + l.box.x1) / 2, cy = (l.box.y0 + l.box.y1) / 2 + by0;
@@ -351,8 +353,8 @@ export class PageReader {
     if (y1 - y0 < 4) return;
     const { data } = await w.recognize(toPgm(img.gray, img.w, img.h, y0, y1), {}, { blocks: true, text: false, hocr: false, tsv: false });
     const bandH = y1 - y0;
-    const all = linesOf(data, (x, y) => img.toPdf(x, y + y0), 1 / img.s, (xa, xb, ya, yb) => img.cut(xa, xb, ya + y0, yb + y0));
-    if ((globalThis as any).__ocrDebug) console.log('ocr band', src, y0, y1, all.map((l) => `${Math.round(l.conf)} ${l.text}`));
+    const all = linesOf(data, (x, y) => img.toPdf(x, y + y0), 1 / img.s, (xa, xb, ya, yb) => img.cut(xa, xb, ya + y0, yb + y0), inkOf(img.gray, img.w, img.h, img.thr, y0));
+    if ((globalThis as any).__ocrDebug) console.log('ocr band', src, y0, y1, all.map((l) => `${Math.round(l.conf)} ${l.size.toFixed(1)} [${Math.round(l.box.y0)}-${Math.round(l.box.y1)}] ${l.text}`));
     const lines = all.filter((l: OcrLine) => {
       // specks, rules and table borders read as stray symbols
       const t = l.text.replace(/\s/g, '');

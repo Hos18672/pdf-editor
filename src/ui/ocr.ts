@@ -117,6 +117,9 @@ export function findRules(gray: Uint8Array, w: number, h: number, thr: number, s
     const n = vertical ? w : h, m = vertical ? h : w;
     const L = vertical ? LV : LH;
     const step = vertical ? w : 1;
+    // table borders are often light grey: upright ones are found with a lighter threshold (text
+    // never makes such long unbroken upright runs, while touching letters could make long ones across)
+    const t = vertical ? Math.max(thr, 215) : thr;
     const done: Seg[] = [];
     let open: Seg[] = [];
     for (let a = 0; a < n; a++) {
@@ -124,9 +127,9 @@ export function findRules(gray: Uint8Array, w: number, h: number, thr: number, s
       const base = vertical ? a : a * w;
       let b = 0;
       while (b < m) {
-        if (gray[base + b * step] >= thr) { b++; continue; }
+        if (gray[base + b * step] >= t) { b++; continue; }
         let e = b + 1;
-        while (e < m && gray[base + e * step] < thr) e++;
+        while (e < m && gray[base + e * step] < t) e++;
         if (e - b >= L) {
           const o = open.find((g) => (vertical ? g.y0 <= e && g.y1 >= b : g.x0 <= e && g.x1 >= b));
           if (o) {
@@ -157,13 +160,62 @@ export function findRules(gray: Uint8Array, w: number, h: number, thr: number, s
   return { clean, cut, vertical: vs, horizontal: hs };
 }
 
+/** Dark pixels per row of an image area (image px, rows y0..y1-1, columns x0..x1-1). */
+export type Ink = (x0: number, x1: number, y0: number, y1: number) => Uint32Array;
+export const inkOf = (gray: Uint8Array, w: number, h: number, thr: number, yOff = 0): Ink => (x0, x1, y0, y1) => {
+  x0 = Math.max(0, Math.floor(x0)); x1 = Math.min(w, Math.ceil(x1));
+  const out = new Uint32Array(Math.max(0, Math.ceil(y1) - Math.floor(y0)));
+  for (let r = 0; r < out.length; r++) {
+    const y = Math.floor(y0) + r + yOff;
+    if (y < 0 || y >= h) continue;
+    let c = 0;
+    const o = y * w;
+    for (let x = x0; x < x1; x++) if (gray[o + x] < thr) c++;
+    out[r] = c;
+  }
+  return out;
+};
+
+/**
+ * Baseline and cap height (image px) of printed letters in a box: the body of the letters is where most
+ * ink is; descenders and ascenders are thin. Without capitals or tall letters the cap height is taken
+ * from the x-height.
+ */
+function measureInk(ink: Ink, x0: number, x1: number, y0: number, y1: number, tall: boolean): { base: number; cap: number } | null {
+  const h = y1 - y0;
+  if (h < 6 || x1 - x0 < 4) return null;
+  const pad = Math.round(h * 0.15);
+  const rows = ink(x0, x1, y0 - pad, y1 + pad);
+  let max = 0;
+  for (const v of rows) max = Math.max(max, v);
+  if (max < 3) return null;
+  // the body: the longest stretch of rows with at least 35% of the densest row
+  let bs = -1, be = -1, cs = -1;
+  for (let r = 0; r <= rows.length; r++) {
+    if (r < rows.length && rows[r] >= max * 0.35) { if (cs < 0) cs = r; continue; }
+    if (cs >= 0 && r - cs > be - bs) { bs = cs; be = r; }
+    cs = -1;
+  }
+  if (bs < 0) return null;
+  const base = be; // first row below the body
+  let top = bs;
+  if (tall) {
+    // ascenders and capitals: rows with some ink right above the body
+    while (top > 0 && rows[top - 1] >= max * 0.05) top--;
+  }
+  const xh = base - bs;
+  const cap = tall ? base - top : xh / 0.72;
+  if (cap < 3 || (tall && cap < xh * 1.05)) return null;
+  return { base: base + y0 - pad, cap };
+}
+
 /**
  * Lines of a recognition result; `toPdf` maps image pixels to PDF user space. A line that runs over
  * several table cells (a border between, or a wide gap like between columns) comes back as one line
  * per cell. `cut` (image px) tells where a vertical border is.
  */
 export function linesOf(data: any, toPdf: (x: number, y: number) => [number, number], ptPerPx: number,
-  cut?: (xa: number, xb: number, ya: number, yb: number) => boolean): OcrLine[] {
+  cut?: (xa: number, xb: number, ya: number, yb: number) => boolean, ink?: Ink): OcrLine[] {
   const out: OcrLine[] = [];
   for (const block of data.blocks ?? []) for (const para of block.paragraphs ?? []) for (const line of para.lines ?? []) {
     const words = (line.words ?? [])
@@ -172,7 +224,8 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
     if (!words.length) continue;
     // baseline (image px): tesseract's line baseline, else the bottom of letters without descenders
     const bl = line.baseline && line.baseline.x1 > line.baseline.x0 ? line.baseline : null;
-    const yAt = (x: number) => (bl ? bl.y0 + ((bl.y1 - bl.y0) * (x - bl.x0)) / (bl.x1 - bl.x0) : line.bbox.y1);
+    const blAt = (x: number) => (bl ? bl.y0 + ((bl.y1 - bl.y0) * (x - bl.x0)) / (bl.x1 - bl.x0) : line.bbox.y1);
+    const yAt = blAt;
     // size from the cap / ascender height: the top of words with capitals, digits or tall letters
     const capOf = (ws: any[]) => {
       const tall = ws.filter((w: any) => /[A-ZÄÖÜ0-9bdfhklß]/.test(w.text));
@@ -189,15 +242,29 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
       const a = words[i - 1], b = words[i];
       const ya = Math.min(a.bbox.y0, b.bbox.y0), yb = Math.max(a.bbox.y1, b.bbox.y1);
       const gap = b.bbox.x0 - a.bbox.x1;
-      if (gap > em * 1.5 || (cut && gap > 0 && cut(a.bbox.x1, b.bbox.x0, ya, yb))) parts.push([b]);
+      // text that runs right up to a border: look for it a little into the word ends too
+      // (tesseract's word boxes can also reach a little over a border)
+      const reach = Math.min(em * 0.35, (a.bbox.x1 - a.bbox.x0) * 0.25);
+      const reachB = Math.min(em * 0.8, (b.bbox.x1 - b.bbox.x0) * 0.25);
+      if (gap > em * 1.5 || (cut && gap > -em * 0.3 && cut(a.bbox.x1 - reach, b.bbox.x0 + reachB, ya, yb))) parts.push([b]);
       else parts[parts.length - 1].push(b);
     }
     for (const ws of parts) {
       const text = ws.map((w: any) => w.text.trim()).join(' ');
       const left = Math.min(...ws.map((w: any) => w.bbox.x0)), right = Math.max(...ws.map((w: any) => w.bbox.x1));
-      const capPx = parts.length > 1 ? capOf(ws) ?? lineCap : lineCap;
-      const [x0, y0] = toPdf(left, yAt(left));
-      const [x1, y1] = toPdf(right, yAt(right));
+      let capPx = parts.length > 1 ? capOf(ws) ?? lineCap : lineCap;
+      let at = yAt;
+      // tesseract's boxes and baseline can be several pixels off (most in short lines such as table
+      // cells, where that made the text far too big): the printed letters themselves decide
+      const top0 = Math.min(...ws.map((w: any) => w.bbox.y0)), bot0 = Math.max(...ws.map((w: any) => w.bbox.y1));
+      const m = ink ? measureInk(ink, left, right, top0, bot0, /[A-ZÄÖÜ0-9bdfhklß]/.test(ws.map((w: any) => w.text).join(''))) : null;
+      if (m && Math.abs(m.base - yAt((left + right) / 2)) < (bot0 - top0) * 0.6) {
+        const d = m.base - yAt((left + right) / 2);
+        at = (x: number) => yAt(x) + d;
+        capPx = m.cap;
+      }
+      const [x0, y0] = toPdf(left, at(left));
+      const [x1, y1] = toPdf(right, at(right));
       const conf = ws.reduce((s: number, w: any) => s + w.confidence, 0) / ws.length;
       const top = Math.min(...ws.map((w: any) => w.bbox.y0)), bottom = Math.max(...ws.map((w: any) => w.bbox.y1));
       out.push({ text, x0, y0, x1, y1, size: (capPx / 0.72) * ptPerPx, box: { x0: left, y0: Math.min(top, line.bbox.y0), x1: right, y1: Math.max(bottom, line.bbox.y1) }, conf });
@@ -215,7 +282,7 @@ export async function recognizeCanvas(worker: OcrWorker, canvas: HTMLCanvasEleme
   const gray = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
   const rules = findRules(gray, canvas.width, canvas.height, grayThreshold(gray), 1 / ptPerPx);
   const { data } = await worker.recognize(toPgm(rules.clean, canvas.width, canvas.height), {}, { blocks: true, text: false, hocr: false, tsv: false });
-  return linesOf(data, toPdf, ptPerPx, rules.cut);
+  return linesOf(data, toPdf, ptPerPx, rules.cut, inkOf(rules.clean, canvas.width, canvas.height, grayThreshold(gray)));
 }
 
 /** Otsu threshold of a grey image (sampled), kept on the dark side: shadows and paper texture are not ink. */
