@@ -85,13 +85,25 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
   if (font.data && !font.missingFile) {
     try { fk = fontkit.create(font.data as any); } catch { fk = null; }
   }
+  // A subset font often keeps a slot for every code, but the letters the document doesn't use are empty
+  // or a copy of the "missing letter" box (also how pdf.js maps codes the font lacks): those letters are
+  // not in the font (typed ones come from a matching font instead of showing a box or nothing).
+  let notdef: string | null = null;
+  try { const z = fk?.getGlyph(0)?.path; notdef = z && z.commands.length ? z.toSVG() : null; } catch { notdef = null; }
+  const missing = (g: any, uni: string) => {
+    try {
+      const path = g.path;
+      if (!path.commands.length) return !/^\s$/.test(uni);
+      return notdef !== null && path.toSVG() === notdef;
+    } catch { return false; }
+  };
   for (const [code, raw] of toUnicodeEntries(font.toUnicode)) {
     const uni = raw?.normalize('NFC');
     if (!uni || [...uni].length !== 1) continue;
     const fc = font.toFontChar?.[code] ?? code;
     let gid = 0;
     if (fk) {
-      try { const g = fk.glyphForCodePoint(fc); gid = g ? g.id : 0; } catch { gid = 0; }
+      try { const g = fk.glyphForCodePoint(fc); gid = g && !missing(g, uni) ? g.id : 0; } catch { gid = 0; }
       if (!gid) continue;
     } else if (font.data && !font.missingFile) continue;
     if (charMap[uni] === undefined) {

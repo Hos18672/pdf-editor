@@ -592,14 +592,6 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
   const taRef = useRef<HTMLTextAreaElement>(null);
   const [value, setValue] = useState(edit?.text ?? run.str);
   useEffect(() => { if (editing) setValue(edit?.text ?? run.str); }, [editing]); // eslint-disable-line
-  useLayoutEffect(() => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.width = '0px';
-    ta.style.height = '0px';
-    ta.style.width = ta.scrollWidth + 4 + 'px';
-    ta.style.height = ta.scrollHeight + 'px';
-  }, [value, editing]);
   // distance along the line (page units) where the user tapped; the caret goes there
   const tapAt = useRef<number | null>(null);
   const begin = (e: React.MouseEvent) => {
@@ -669,6 +661,24 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
     transform: b.angle ? `rotate(${b.angle}rad)` : undefined,
     transformOrigin: `0 ${b.asc * zoom}px`,
   };
+
+  // the editing box fits its text: again when the text, the zoom or the font changes, and once the
+  // fonts have loaded (a box measured before a zoom cut the text off)
+  const fitBox = () => {
+    const ta = taRef.current;
+    if (!ta) return;
+    ta.style.width = '0px';
+    ta.style.height = '0px';
+    ta.style.width = ta.scrollWidth + 4 + 'px';
+    ta.style.height = ta.scrollHeight + 'px';
+  };
+  useLayoutEffect(fitBox, [value, editing, size, lineH, fontCss]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    const fonts = (document as any).fonts;
+    if (!editing || !fonts?.addEventListener) return;
+    fonts.addEventListener('loadingdone', fitBox);
+    return () => fonts.removeEventListener('loadingdone', fitBox);
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // a scan line: the new letters (made of the page's own) over the old ones, as it will be saved
   if (clone && edit && !editing) {
