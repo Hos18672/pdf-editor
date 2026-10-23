@@ -207,9 +207,10 @@ button { cursor: pointer; }
 .s2-card { position: relative; border-radius: 28px; padding: 28px; background: var(--surface); box-shadow: 0 1px 2px rgba(20,23,46,.06), 0 24px 60px rgba(20,23,46,.12); display: flex; align-items: center; gap: 18px; animation: pe-in .26s var(--ease); }
 :root[data-theme="dark"] .s2-card { box-shadow: 0 0 0 1px var(--line), 0 24px 60px rgba(0,0,0,.45); }
 .s2-card.drop { cursor: pointer; }
-.s2-card.drop .dash { position: absolute; inset: 8px; border-radius: 22px; pointer-events: none;
-  background-image: linear-gradient(90deg, var(--line-3) 50%, transparent 50%), linear-gradient(90deg, var(--line-3) 50%, transparent 50%), linear-gradient(0deg, var(--line-3) 50%, transparent 50%), linear-gradient(0deg, var(--line-3) 50%, transparent 50%);
-  background-repeat: repeat-x, repeat-x, repeat-y, repeat-y; background-size: 14px 1.5px, 14px 1.5px, 1.5px 14px, 1.5px 14px; background-position: 0 0, 0 100%, 0 0, 100% 0; animation: s2-dash 2.4s linear infinite; }
+/* marching dashes that follow the rounded corners (an SVG outline; pathLength 1000 keeps the dashes even
+   on any card size, the loop moves exactly one dash + gap so it never jumps) */
+.s2-card.drop .dash { position: absolute; inset: 8px; width: calc(100% - 16px); height: calc(100% - 16px); overflow: visible; pointer-events: none; }
+.s2-card.drop .dash rect { fill: none; stroke: var(--line-3); stroke-width: 1.5px; stroke-dasharray: 5 5; animation: s2-dash 2.4s linear infinite; }
 .s2-card.stack { flex-direction: column; align-items: stretch; }
 .s2-card.over { background: #1E2559; color: #fff; transform: scale(1.02); animation: s2-glowpulse 1.6s ease-in-out infinite; }
 .s2-head { display: flex; align-items: center; gap: 16px; flex: 1; min-width: 0; }
@@ -273,7 +274,7 @@ button { cursor: pointer; }
 @keyframes s2-blink { 50% { opacity: 0; } }
 @keyframes s2-sig { 0%, 40% { clip-path: inset(0 100% 0 0); } 80%, 100% { clip-path: inset(0 0 0 0); } }
 @keyframes s2-pop { 0%, 55% { opacity: 0; transform: translate(-50%, 6px) scale(.94); } 70%, 100% { opacity: 1; transform: translate(-50%, 0) scale(1); } }
-@keyframes s2-dash { to { background-position: 40px 0, -40px 100%, 0 -40px, 100% 40px; } }
+@keyframes s2-dash { to { stroke-dashoffset: -30; } }
 @keyframes s2-scan { 0% { top: 6%; } 100% { top: 90%; } }
 @keyframes s2-shim { to { background-position: -200% 0; } }
 @keyframes s2-up { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
@@ -322,7 +323,8 @@ button { cursor: pointer; }
   .s2-pill .lk { width: 22px; height: 22px; }
   .start h1 { font-size: 36px; line-height: 1; letter-spacing: -.04em; } .s2-lead { font-size: 15px; line-height: 1.45; }
   .s2-card { padding: 16px; flex-direction: column; align-items: stretch; gap: 14px; border-radius: 24px; }
-  .s2-card.drop .dash { inset: 6px; border-radius: 19px; }
+  .s2-card.drop .dash { inset: 6px; width: calc(100% - 12px); height: calc(100% - 12px); }
+  .s2-card.drop .dash rect { rx: 19px; ry: 19px; }
   .s2-card.row { flex-direction: row; align-items: center; }
   .s2-tile { width: 48px; height: 48px; border-radius: 15px; }
   .s2-tile svg { width: 23px; height: 23px; }
@@ -343,7 +345,7 @@ button { cursor: pointer; }
 }
 @container (max-width: 379px) { .start h1 { font-size: 31px; } .s2-chip { font-size: 11.5px; } }
 @media (prefers-reduced-motion: reduce) {
-  .s2-art *, .s2-card .dash, .s2-mini .scan, .s2-bar > div, .s2-card.over { animation: none !important; }
+  .s2-art *, .s2-card .dash rect, .s2-mini .scan, .s2-bar > div, .s2-card.over { animation: none !important; }
   .front .sig .bar { opacity: 1; transform: translate(-50%, 0); }
   .front .hl .sweep { width: 78%; }
 }

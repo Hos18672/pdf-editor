@@ -114,7 +114,7 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onR
   } else {
     card = (
       <div className="s2-card drop" onClick={onPick}>
-        <span className="dash" aria-hidden="true" />
+        <svg className="dash" aria-hidden="true"><rect x="0" y="0" width="100%" height="100%" rx="22" ry="22" pathLength="1000" /></svg>
         <div className="s2-head">
           <div className="s2-tile"><Icon name="file-arrow-up:bold" size={28} /></div>
           <div className="s2-ct"><b>{mobile ? 'Open a PDF' : 'Drop a PDF anywhere'}</b><span>{mobile ? 'From Files, Drive or Downloads' : 'Or paste one with Ctrl+V'}</span></div>

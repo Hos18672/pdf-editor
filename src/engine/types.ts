@@ -124,6 +124,11 @@ export interface ExportInput {
   matchFont?: (file: string) => Promise<Uint8Array>;
   /** table borders and other rules of a page (viewport units): covers over edited lines keep them */
   rules?: (page: number) => Promise<{ x: number; y: number; w: number; h: number; color: string }[]>;
+  /**
+   * the page under a cover (viewport units) with the old letters filled in from the background around
+   * them, as a picture placed over `x, y, w, h` (null: not available, a flat paper colour is used)
+   */
+  coverImage?: (page: number, rect: { x: number; y: number; w: number; h: number }, lineH: number, bg: string, fg: string) => Promise<{ png: Uint8Array; x: number; y: number; w: number; h: number } | null>;
 }
 
 /** Replacement text for a line of a scan, as a picture made of the page's own letters. */

@@ -300,7 +300,25 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       for (const g of glyphsInRegion(glyphs, { region } as TextEdit)) if (g.style.Tr === 3 || g.style.Tr === 7) remove.add(g);
     }
     const rules = edits.length && input.rules && vm ? await input.rules(pi).catch(() => []) : [];
-    const cover = (e: TextEdit, scan = false) => whiteoutRegion(e, scan) + rulesOver(coverPts(e, scan), rules, vm);
+    // the page under the cover with the old letters filled in from the background around them (a pattern
+    // or a tint stays); a flat paper colour where that's not possible
+    const cover = async (e: TextEdit, scan = false) => {
+      const pts = coverPts(e, scan);
+      if (input.coverImage && vm && Math.abs(Math.atan2(e.region.u[1], e.region.u[0])) < 0.02) {
+        const v = pts.map(([x, y]) => applyM(vm, x, y));
+        const X0 = Math.min(...v.map((p) => p[0])), X1 = Math.max(...v.map((p) => p[0]));
+        const Y0 = Math.min(...v.map((p) => p[1])), Y1 = Math.max(...v.map((p) => p[1]));
+        const lineH = Math.hypot(vm[2], vm[3]) * e.region.height;
+        const img = await input.coverImage(pi, { x: X0, y: Y0, w: X1 - X0, h: Y1 - Y0 }, lineH, e.bgColor, e.fgColor ?? '#000000').catch(() => null);
+        if (img) {
+          const inv = invert(vm);
+          const p00 = applyM(inv, img.x, img.y + img.h), p10 = applyM(inv, img.x + img.w, img.y + img.h), p01 = applyM(inv, img.x, img.y);
+          const key = leaf.newXObject('CvR', (await doc.embedPng(img.png)).ref).asString();
+          return `q ${[p10[0] - p00[0], p10[1] - p00[1], p01[0] - p00[0], p01[1] - p00[1], p00[0], p00[1]].map(f).join(' ')} cm ${key} Do Q\n` + rulesOver(pts, rules, vm);
+        }
+      }
+      return whiteoutRegion(e, scan) + rulesOver(pts, rules, vm);
+    };
     for (const e of edits) {
       const hits = e.ocr ? [] : glyphsInRegion(glyphs, e).filter((g) => !remove.has(g));
       hits.forEach((g) => remove.add(g));
@@ -308,7 +326,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       // see are part of an image, so cover them with the paper colour and draw the new text visibly.
       const hidden = !!e.ocr || (hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length);
       if (!e.text.trim()) {
-        if (!hits.length || hidden) add += cover(e, hidden);
+        if (!hits.length || hidden) add += await cover(e, hidden);
         continue;
       }
       const lines = e.text.split('\n');
@@ -320,12 +338,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       if (hidden && input.scanImage && !af) {
         const img = await input.scanImage(e).catch((err) => { console.warn('scan text', err); return null; });
         if (img) {
-          add += cover({ ...e, scan: { ...(e.scan ?? { family: 'Arimo', bold: false, sizeRatio: 1, stretch: 1, blur: 0, score: 0 }), inkX0: img.inkX0, inkX1: img.inkX1, dy: img.dy, inkUp: img.inkUp, inkDown: img.inkDown } }, true);
+          add += await cover({ ...e, scan: { ...(e.scan ?? { family: 'Arimo', bold: false, sizeRatio: 1, stretch: 1, blur: 0, score: 0 }), inkX0: img.inkX0, inkX1: img.inkX1, dy: img.dy, inkUp: img.inkUp, inkDown: img.inkDown } }, true);
           add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, 0, 0);
           continue;
         }
       }
-      if (hidden) add += cover(e, true);
+      if (hidden) add += await cover(e, true);
       const inkOf = () => {
         // the sampled ink, unless it is barely different from the paper (nothing visible was there)
         if (!e.fgColor) return '#000000';
@@ -398,7 +416,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         add += s;
       } else {
         // Text lives somewhere we cannot rewrite (e.g. inside a form) — cover it.
-        if (!hidden) add += cover(e);
+        if (!hidden) add += await cover(e);
         const fb = await stdFont(e.fallback.family, e.fallback.bold, e.fallback.italic);
         const key = leaf.newFontDictionary('FbE', fb.ref).asString();
         const h = e.region.height * e.sizeScale;

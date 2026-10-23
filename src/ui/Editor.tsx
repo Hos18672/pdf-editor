@@ -1,5 +1,5 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { pageRules } from './rules';
+import { pageCover, pageRules } from './rules';
 import { gesture } from './gesture';
 import { Icon } from './icons';
 import { openPdf } from './pdfjs';
@@ -551,6 +551,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   // table borders etc. that covers over edited lines keep
   const rulesOf = (src: number) => pageRules(pdf, src, infos[src], pageData[src]?.runs ?? []);
+  // the page under a cover with the old letters filled in (patterns and tints stay)
+  const coverOf = (src: number, rect: { x: number; y: number; w: number; h: number }, lineH: number, bg: string, fg: string) =>
+    infos[src] ? pageCover(pdf, src, infos[src], rect, lineH, bg, fg) : Promise.resolve(null);
 
   // ----- edits on scans: shown straight away as the new letters over the page (no re-written PDF) -----
   // pages whose text is an invisible layer over a picture (an OCR'd scan)
@@ -643,7 +646,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const t = setTimeout(async () => {
       try {
         const bytes = await exportPdf({
-          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage, rules: rulesOf, matchFont: matchFontBytes,
+          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage, rules: rulesOf, coverImage: coverOf, matchFont: matchFontBytes,
           viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
         });
         if (seq !== previewSeq.current) return;
@@ -700,7 +703,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     try {
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
-        viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage, rules: rulesOf,
+        viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])), forms: snap.forms, flatten, scanImage, rules: rulesOf, coverImage: coverOf,
         ocrLayer: ocrLayer(), dropText: droppedText(), matchFont: matchFontBytes,
       });
       const name = outName(rename ?? docName);

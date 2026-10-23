@@ -549,11 +549,12 @@ export function lineRooms(runs: TextRun[]): Record<string, { up: number; down: n
 type PageRef = { canvas: React.RefObject<HTMLCanvasElement | null>; w: number; paints: number };
 
 /**
- * Paper-coloured cover over the original letters of an edited line, placed in the line's own frame
- * (x, y from the start of the line's box, page units). Table borders and other rules that cross it
- * are copied from the page, so they stay visible.
+ * Cover over the original letters of an edited line, placed in the line's own frame (x, y from the
+ * start of the line's box, page units): the page itself with only the old letters filled in from the
+ * background around them, so patterns, tints and two background colours meeting under the line stay
+ * as they are (see coverPixels). Table borders and other rules that cross it stay visible.
  */
-function Cover({ page, b, bg, zoom, x, y, w, h }: { page: PageRef; b: ReturnType<typeof runBox>; bg: string; zoom: number; x: number; y: number; w: number; h: number }) {
+function Cover({ page, b, bg, fg, zoom, x, y, w, h }: { page: PageRef; b: ReturnType<typeof runBox>; bg: string; fg: string; zoom: number; x: number; y: number; w: number; h: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useLayoutEffect(() => {
     const c = ref.current, pc = page.canvas.current;
@@ -570,12 +571,12 @@ function Cover({ page, b, bg, zoom, x, y, w, h }: { page: PageRef; b: ReturnType
       const sc = src.getContext('2d', { willReadFrequently: true })!;
       sc.fillStyle = bg; sc.fillRect(0, 0, W, H);
       sc.drawImage(pc, sx, sy, Math.min(pc.width, x0 + W) - sx, Math.min(pc.height, y0 + H) - sy, sx - x0, sy - y0, Math.min(pc.width, x0 + W) - sx, Math.min(pc.height, y0 + H) - sy);
-      const img = coverPixels(sc.getImageData(0, 0, W, H).data, W, H, m, bg, b.h * k);
+      const img = coverPixels(sc.getImageData(0, 0, W, H).data, W, H, m, bg, b.h * k, fg);
       c.width = img.width; c.height = img.height;
       c.getContext('2d')!.putImageData(img, 0, 0);
     } catch { c.width = c.height = 0; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page.paints, bg, x, y, w, h, b.x, b.top, b.h, b.angle]);
+  }, [page.paints, bg, fg, x, y, w, h, b.x, b.top, b.h, b.angle]);
   // until drawn (or for a turned line) the canvas is see-through and its background covers
   return <canvas ref={ref} className="cover" style={{ background: bg, left: x * zoom, top: y * zoom, width: w * zoom, height: h * zoom, right: 'auto', bottom: 'auto' }} />;
 }
@@ -681,7 +682,7 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
       <div className={`run changed cloned${selected ? ' selected' : ''}`} data-key={run.key}
         style={{ ...style, width: Math.max(b.w, c.w - c.left) * z }}
         title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
-        <Cover page={page} b={b} bg={bg} zoom={z} x={l} y={oy + dy - up} w={r - l} h={up + down} />
+        <Cover page={page} b={b} bg={bg} fg={color?.fg ?? '#000'} zoom={z} x={l} y={oy + dy - up} w={r - l} h={up + down} />
         <img className="clone" src={clone.url} alt="" draggable={false}
           style={{ left: -c.left * z, top: (oy + c.below - c.h) * z, width: c.w * z, height: c.h * z }} />
       </div>
@@ -702,7 +703,7 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
     <div className={`run edited${editing ? ' editing' : ''}${selected ? ' selected' : ''}`} data-key={run.key} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
       {/* hide the original glyphs completely (accents, descenders) but stay clear of the lines around it;
           only where the original text was: longer text runs on over the page, as it will be saved */}
-      <Cover page={page} b={b} bg={bg} zoom={zoom}
+      <Cover page={page} b={b} bg={bg} fg={color?.fg ?? '#000'} zoom={zoom}
         x={-Math.max(2 / zoom, b.h * 0.06)} w={b.w + 2 * Math.max(2 / zoom, b.h * 0.06)}
         y={b.asc - (room?.up ?? b.h * 0.94) - 1 / zoom} h={(room?.up ?? b.h * 0.94) + (room?.down ?? b.h * 0.3) + 2 / zoom} />
       {editing ? (
