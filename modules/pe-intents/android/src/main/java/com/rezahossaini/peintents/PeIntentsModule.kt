@@ -81,6 +81,9 @@ class PeIntentsModule : Module() {
         .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
       if (limit > 0) b.setPageLimit(limit)
       activity.runOnUiThread {
+        // anything going wrong here is reported to the page (which then uses its own camera); it must
+        // never take the app down
+        try {
         GmsDocumentScanning.getClient(b.build()).getStartScanIntent(activity)
           .addOnSuccessListener { sender ->
             scanPromise?.resolve(null)
@@ -89,6 +92,7 @@ class PeIntentsModule : Module() {
             catch (e: Throwable) { scanPromise = null; promise.reject("E_SCAN_START", e.message, e) }
           }
           .addOnFailureListener { e -> promise.reject("E_SCAN_UNAVAILABLE", e.message, e) }
+        } catch (e: Throwable) { promise.reject("E_SCAN_UNAVAILABLE", e.message, e) }
       }
     }
 
