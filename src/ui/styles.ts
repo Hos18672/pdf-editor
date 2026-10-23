@@ -1105,6 +1105,20 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .scrop-tool { min-width: 92px; height: 64px; border: 0; border-radius: 16px; background: transparent; color: #fff; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; font-size: 12.5px; font-weight: 600; }
 .scrop-tool:hover:not(:disabled) { background: rgba(255,255,255,.08); }
 .scrop-tool:disabled { opacity: .4; }
+.serase .scrop-stage { cursor: none; }
+.serase-pic { position: absolute; transform-origin: 50% 50%; box-shadow: 0 10px 40px rgba(0,0,0,.5); }
+.serase-pic img, .serase-pic canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; -webkit-user-drag: none; }
+.serase-brush { position: absolute; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); transform: translate(-50%, -50%); pointer-events: none; }
+.serase-busy { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(20,22,32,.85); font-size: 13px; font-weight: 600; pointer-events: none; }
+.serase-zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; }
+.serase-zoom button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(30,32,44,.85); color: #fff; display: grid; place-items: center; }
+.serase-zoom button:disabled { opacity: .4; }
+.serase-bar { align-items: center; }
+.serase-sizes { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.08); margin-right: 8px; }
+.serase-sizes button { width: 48px; height: 48px; border-radius: 50%; border: 0; background: transparent; display: grid; place-items: center; }
+.serase-sizes button i { display: block; border-radius: 50%; background: #fff; opacity: .7; }
+.serase-sizes button.on { background: #FFE14D; }
+.serase-sizes button.on i { background: #1E2559; opacity: 1; }
 
 /* review */
 .scr { height: var(--app-h, 100%); display: flex; flex-direction: column; overflow: hidden; background: var(--desk-dots), var(--desk); width: 100%; min-width: 0; }
@@ -1161,6 +1175,7 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .sc-acts button:hover { background: var(--surface-2); }
 .sc-acts button.danger { color: var(--danger); }
 .sc-acts button.add { color: var(--ink); }
+.sc-acts button.on { color: var(--sel); background: var(--sel-tint); }
 .sc-strip { display: flex; gap: 10px; align-items: center; max-width: 100%; overflow-x: auto; padding: 4px 4px 6px; flex: none; }
 .sc-strip > div, .sc-strip { scrollbar-width: thin; }
 .sc-thb { border: 0; background: none; padding: 0; flex: none; touch-action: manipulation; }

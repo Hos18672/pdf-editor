@@ -4,7 +4,7 @@ import { orientKernels, type Orientation } from './orient';
 import { workerUrl } from './workerUrl';
 import { WORKER_VERSION } from './workerVersion';
 import { aspectOf, dist, FORMATS, fullQuad, snapRatio, type Quad } from './geom';
-import { scanKernels, type Filter, type JobResult, type Kernels, type PixelImage } from './kernels';
+import { scanKernels, type Filter, type JobResult, type Kernels, type PixelImage, type Stroke } from './kernels';
 import { bendReach, scaleBend, traceBend, turnBend, type Bend } from './bend';
 import { turnGrid, type AiInfo } from './dewarp';
 import type { Bentness, Grid } from './kernels';
@@ -39,7 +39,30 @@ export interface ScanPage {
   ai?: { key: string; grid: Grid | null; info: AiInfo } | null;
   /** AI flattening switched off for this page */
   aiOff?: boolean;
+  /** things painted over to be removed, on the page before its quarter turns */
+  erase?: Stroke[];
 }
+
+/** strokes on the page after `rot` clockwise quarter turns */
+export function turnStrokes(st: Stroke[] | undefined, rot: number): Stroke[] | undefined {
+  const r = ((rot % 4) + 4) % 4;
+  if (!st?.length || !r) return st;
+  return st.map((s) => {
+    const pts: number[] = [];
+    for (let i = 0; i + 1 < s.pts.length; i += 2) {
+      const x = s.pts[i], y = s.pts[i + 1];
+      if (r === 1) pts.push(1 - y, x); else if (r === 2) pts.push(1 - x, 1 - y); else pts.push(y, 1 - x);
+    }
+    return { r: s.r, pts };
+  });
+}
+/** a short tag that changes with the strokes (for keys of cached pictures) */
+export const eraseTag = (p: ScanPage) => {
+  if (!p.erase?.length) return '';
+  let h = 0;
+  for (const s of p.erase) for (const v of s.pts) h = (h * 31 + Math.round(v * 1e4)) | 0;
+  return `e${p.erase.length}.${h}`;
+};
 
 export const DEFAULT_FILTER: Record<ScanMode, Filter> = { doc: 'auto', id: 'auto', passport: 'auto', receipt: 'auto', book: 'auto' };
 export const MODE_RATIOS: Record<ScanMode, number[] | undefined> = {
@@ -335,7 +358,7 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
   const jpeg = opt.jpeg ?? (card ? 0.9 : filter === 'bw' ? 0.82 : 0.85);
   const src = await cropSource(p, ow, oh, p.rot);
   // turned upright here already: text runs along the rows
-  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh), flatten: flattens(p) ? 'rows' as const : null, grid: gridOf(p, p.rot), card: isCard(p) };
+  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh), flatten: flattens(p) ? 'rows' as const : null, grid: gridOf(p, p.rot), card: isCard(p), erase: turnStrokes(p.erase, p.rot) };
   const orient = !!opt.orient && p.rot === 0;
   let res: { blob?: Blob; img?: PixelImage; w?: number; h?: number; blur: number; orient?: Orientation | null; times?: any };
   try {
@@ -400,7 +423,7 @@ function baseOf(p: ScanPage, long: number, low?: boolean): Promise<Base> {
 export const forgetBases = () => bases.clear();
 
 /** A page on screen in a given look (straightening reused from earlier looks of the same crop). */
-export async function renderLook(p: ScanPage, opt: { long: number; filter?: Filter; orient?: boolean; jpeg?: number }): Promise<Rendered> {
+export async function renderLook(p: ScanPage, opt: { long: number; filter?: Filter; orient?: boolean; jpeg?: number; noErase?: boolean }): Promise<Rendered> {
   const t0 = performance.now();
   const base = await baseOf(p, opt.long);
   const filter = opt.filter ?? p.filter;
@@ -409,12 +432,13 @@ export async function renderLook(p: ScanPage, opt: { long: number; filter?: Filt
   const jpeg = opt.jpeg ?? (card ? 0.9 : 0.85);
   const radius = radiusOf(p, filter, base.ow, base.oh);
   const orient = !!opt.orient && p.rot === 0;
+  const erase = opt.noErase ? undefined : p.erase;
   let r: { blob?: Blob; img?: PixelImage; w?: number; h?: number; orient?: Orientation | null };
   try {
-    r = await post({ type: 'look', img, filter, blur: base.blur, radius, rot: p.rot, orient, jpeg, card: isCard(p) }, []);
+    r = await post({ type: 'look', img, filter, blur: base.blur, radius, rot: p.rot, orient, jpeg, card: isCard(p), erase }, []);
   } catch {
     const { K, O } = localKernels();
-    const out = K.finish({ w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) }, filter, base.blur, radius, p.rot, isCard(p));
+    const out = K.finish({ w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) }, filter, base.blur, radius, p.rot, isCard(p), erase);
     r = { img: out, orient: orient ? O.textOrientation(out) : undefined };
   }
   const b = await blobOf(r, jpeg);
@@ -430,11 +454,11 @@ export async function renderThumbs(p: ScanPage, filters: Filter[], long: number,
   const radius = radiusOf(p, 'auto', base.ow, base.oh);
   let items: { filter: Filter; blob?: Blob; img?: PixelImage; w?: number; h?: number }[];
   try {
-    items = (await post<{ items: typeof items }>({ type: 'thumbs', img, filters, blur: base.blur, radius, rot: p.rot, max, jpeg: 0.8, card: isCard(p) }, [])).items;
+    items = (await post<{ items: typeof items }>({ type: 'thumbs', img, filters, blur: base.blur, radius, rot: p.rot, max, jpeg: 0.8, card: isCard(p), erase: p.erase }, [])).items;
   } catch {
     const { K } = localKernels();
     const small = K.shrink(img, max), k = small.w / img.w;
-    items = filters.map((f) => ({ filter: f, img: K.finish({ w: small.w, h: small.h, data: new Uint8ClampedArray(small.data) }, f, base.blur * k, f === 'original' ? 0 : radius * k, p.rot, isCard(p)) }));
+    items = filters.map((f) => ({ filter: f, img: K.finish({ w: small.w, h: small.h, data: new Uint8ClampedArray(small.data) }, f, base.blur * k, f === 'original' ? 0 : radius * k, p.rot, isCard(p), p.erase) }));
   }
   const out: Record<string, string> = {};
   for (const it of items) out[it.filter] = URL.createObjectURL((await blobOf(it, 0.8)).blob);
@@ -447,7 +471,8 @@ export async function renderThumbs(p: ScanPage, filters: Filter[], long: number,
  * direction. Cards and passport pages that came out portrait are turned to landscape.
  */
 export function turnsFor(p: ScanPage, o: Orientation | null | undefined): number | null {
-  const card = p.format === 'id1' || p.format === 'id3';
+  // (a passport photographed open shows two pages one above the other: upright, that is portrait)
+  const card = p.format === 'id1' || (p.format === 'id3' && p.kind !== 'passport');
   if (o?.sure) {
     // a card's text may run sideways in places (vertical strips); trust only turns that make it landscape
     if (card && ((p.ratio < 1) !== (o.turns % 2 === 1))) return p.ratio < 1 ? 1 : 0;

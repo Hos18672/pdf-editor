@@ -12,8 +12,9 @@ import type { Quad } from './geom';
 import type { Filter } from './kernels';
 import { Camera, MODES } from './Camera';
 import { CropEditor } from './CropEditor';
+import { EraseEditor } from './EraseEditor';
 import { Pager } from './Pager';
-import { aiKey, stopAi, DEFAULT_FILTER, decode, findDocument, flattenPage, forget, forgetBases, gridOf, looksCurved, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
+import { aiKey, eraseTag, stopAi, DEFAULT_FILTER, decode, findDocument, flattenPage, forget, forgetBases, gridOf, looksCurved, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
 import { findGutter, splitSpread } from './book';
 import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
 
@@ -27,7 +28,7 @@ const FORMAT_LABEL: Record<string, string> = { a4: 'A4', letter: 'Letter', legal
 interface Render { key: string; url: string; w: number; h: number; quick?: boolean }
 const keyOf = (p: ScanPage) => `${p.id}:${p.ver}`;
 /** crop + turns: what the look previews and the compare picture depend on */
-const geoKey = (p: ScanPage) => `${p.id}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 1 : 0}:${p.rot}`;
+const geoKey = (p: ScanPage) => `${p.id}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 1 : 0}:${p.rot}:${eraseTag(p)}`;
 
 const readMode = (): ScanMode => { try { const m = localStorage.getItem('pe.scan.mode'); return (['doc', 'id', 'passport', 'receipt', 'book'] as const).find((x) => x === m) ?? 'doc'; } catch { return 'doc'; } };
 const stamp = () => {
@@ -50,6 +51,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   const toCamera = () => setView('camera');
   const [cur, setCur] = useState(0);
   const [crop, setCrop] = useState<string | null>(null);
+  const [erasing, setErasing] = useState<string | null>(null);
   const [renders, setRenders] = useState<Record<string, Render>>({});
   const [previews, setPreviews] = useState<Record<string, Record<string, string>>>({});
   // the page at the screen's full sharpness (and sharper still when you zoom in): a few pages' worth
@@ -214,7 +216,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
         const k = geoKey(p);
         if (origs[k] === undefined && !busy.has('o' + k)) {
           if (!room()) return;
-          start('o' + k, () => renderLook(p, { long: LONG, filter: 'original' }).then((r) => setOrigs((o) => ({ ...o, [k]: r.url })), () => setOrigs((o) => ({ ...o, [k]: '' }))));
+          start('o' + k, () => renderLook(p, { long: LONG, filter: 'original', noErase: true }).then((r) => setOrigs((o) => ({ ...o, [k]: r.url })), () => setOrigs((o) => ({ ...o, [k]: '' }))));
         }
       }
       if (view === 'review') {
@@ -366,7 +368,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   // Escape
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (crop || askClose || sheetOpen) return;
+      if (crop || erasing || askClose || sheetOpen) return;
       const typing = (e.target as HTMLElement)?.closest?.('input, textarea');
       if (view === 'review' && !typing && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         setCur((c) => Math.max(0, Math.min(pages.length - 1, c + (e.key === 'ArrowLeft' ? -1 : 1))));
@@ -382,6 +384,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
 
   const crumbs = (
     <>
+      {erasing && pages.find((p) => p.id === erasing) && <EraseEditor page={pages.find((p) => p.id === erasing)!} long={LONG}
+        onApply={(st) => { const id = erasing; setErasing(null); patch(id, () => ({ erase: st.length ? st : undefined })); }} onCancel={() => setErasing(null)} />}
       {crop && pages.find((p) => p.id === crop) && <CropEditor page={pages.find((p) => p.id === crop)!} onApply={applyCrop} onCancel={() => setCrop(null)} />}
       {askClose && (
         <ConfirmClose changes={pages.length} sheet={mobile} title="Leave the scan?"
@@ -478,6 +482,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
           {page && (
             <div className="sc-acts">
               <button onClick={() => setCrop(page.id)}><Icon name="crop" size={21} /><span>Crop</span></button>
+              <button onClick={() => setErasing(page.id)} className={page.erase?.length ? 'on' : ''}><Icon name="eraser" size={21} /><span>Remove</span></button>
               <button onClick={() => rotate(-1)}><Icon name="restore" size={21} /><span>Left</span></button>
               <button onClick={() => rotate(1)}><Icon name="rotate" size={21} /><span>Right</span></button>
               <button onClick={() => remove(page.id)} className="danger"><Icon name="trash" size={21} /><span>Delete</span></button>

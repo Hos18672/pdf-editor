@@ -24,7 +24,11 @@ export interface Job {
   grid?: Grid | null;
   /** an ID card or passport: looks that keep the card (see cardFilter) */
   card?: boolean;
+  /** things painted over by hand to be removed (filled in from around them), in output fractions */
+  erase?: Stroke[] | null;
 }
+/** a brush stroke: points as x, y pairs (fractions of the page's width and height), radius as a fraction of its longer side */
+export interface Stroke { r: number; pts: number[] }
 /**
  * A smooth map over the output: node (i, j) of a gw × gh lattice (corners on the output's corners)
  * holds the point of the found page (fractions of the outline, 0…1 edge to edge; x, y pairs) shown there.
@@ -39,7 +43,7 @@ export interface Kernels {
   process(job: Job): JobResult;
   prepare(job: Omit<Job, 'filter' | 'radius'>): Prepared;
   /** applies a look to a straightened page (in place unless turned), then `rot` quarter turns and corners */
-  finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number, card?: boolean): PixelImage;
+  finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number, card?: boolean, erase?: Stroke[] | null): PixelImage;
   shrink(img: PixelImage, max: number): PixelImage;
   estimateBlur(img: PixelImage): number;
   /** the page straightened at any size (`pad`: share of the page added as a margin on every side) */
@@ -963,7 +967,8 @@ export function scanKernels(): Kernels {
       Yg[q] = 0.299 * r + 0.587 * g + 0.114 * b;
       // (cards: fingers in shade or tinted by the card's light count too)
       skin[q] = loose
-        ? (r > 60 && r > g + 8 && r > b + 25 && (r - b) / r > 0.18 && (r - b) / r < 0.62 && g > b * 0.82 ? 1 : 0)
+        // (skin is orange-ish: green above blue; pink and red print has blue at or above green)
+        ? (r > 60 && r > g + 8 && r > b + 25 && (r - b) / r > 0.18 && (r - b) / r < 0.62 && g >= b + r * 0.04 ? 1 : 0)
         : (r > 80 && r > g + 10 && r > b + 30 && (r - b) / r > 0.2 && (r - b) / r < 0.58 && g > b * 0.85 ? 1 : 0);
     }
     // the paper's brightness (a bright tail of the page); skin is clearly darker than it
@@ -985,6 +990,16 @@ export function scanKernels(): Kernels {
         const x = Math.min(w - 1, gx * s + (s >> 1)), y = Math.min(h - 1, gy * s + (s >> 1)), i = (y * w + x) * 4;
         if ((d[i] - d[i + 2]) / Math.max(1, d[i]) < cardWarm + 0.1) skin[q] = 0;
       }
+    }
+    if (loose) {
+      // only solid patches: an opening wider than printed strokes and patterns (ornament bands, guilloches,
+      // a coloured stripe's thin lines), so a finger next to them isn't joined to them
+      const ro = Math.max(2, Math.round(Math.max(gw, gh) * 0.01));
+      const F = new Float32Array(gn);
+      for (let q = 0; q < gn; q++) F[q] = skin[q];
+      const er = runMax(runMax(F, gw, gh, ro, false, false), gw, gh, ro, false, true);
+      const op = runMax(runMax(er, gw, gh, ro, true, false), gw, gh, ro, true, true);
+      for (let q = 0; q < gn; q++) skin[q] = skin[q] && op[q] > 0 ? 1 : 0;
     }
     const keep = new Float32Array(gn), seen = new Uint8Array(gn), stack: number[] = [], comp: number[] = [];
     let any = false;
@@ -1042,7 +1057,7 @@ export function scanKernels(): Kernels {
    * doesn't run along it, and print touching a line is cut off it at the line's own width.
    * (Desks can be coloured: brightness alone decides.)
    */
-  function deskMask(V: Float32Array, w: number, h: number): Uint8Array | null {
+  function deskMask(V: Float32Array, w: number, h: number, card = false): Uint8Array | null {
     const n = w * h, m = Math.min(w, h), out = new Uint8Array(n);
     const dark = (j: number) => V[j] < 0.55;
     let any = false;
@@ -1092,7 +1107,15 @@ export function scanKernels(): Kernels {
         if (!ok[k]) { k++; continue; }
         let e = k, last = k;
         while (e + 1 < len && e + 1 - last <= L) { e++; if (ok[e]) last = e; }
-        if (last - k + 1 < len * 0.08) for (let q = k; q <= last; q++) ok[q] = 0;
+        let drop = last - k + 1 < len * (card ? 0.3 : 0.08);
+        if (card && !drop) {
+          // on a card the line must have the card itself just past it: not a broad coloured band whose white
+          // print (where it comes near the edge) would end the "line" there
+          let n = 0, broad = 0;
+          for (let q = k; q <= last; q++) if (ok[q]) { n++; if (Wd[q] > wideMax) broad++; }
+          drop = broad > n * 0.3;
+        }
+        if (drop) for (let q = k; q <= last; q++) ok[q] = 0;
         k = last + 1;
       }
       // its width: the narrow end of the widths nearby (print touching the line, or just past it, only
@@ -1159,10 +1182,12 @@ export function scanKernels(): Kernels {
       const fill = comp.length / ((x1 - x0 + 1) * (y1 - y0 + 1));
       const along = (c: number, depth: number, max: number) => c >= minAlong && depth < max && c >= 1.2 * depth;
       const sides = (cT > 0 ? 1 : 0) + (cB > 0 ? 1 : 0) + (cL > 0 ? 1 : 0) + (cR > 0 ? 1 : 0);
-      const sliver = along(cT, y1 + 1, ch * 0.15) || along(cB, ch - y0, ch * 0.15) || along(cL, x1 + 1, cw * 0.25) || along(cR, cw - x0, cw * 0.25) ||
-        (sides >= 2 && (x1 - x0 < cw * 0.6 || y1 - y0 < ch * 0.25) && Math.max(cT, cB, cL, cR) > (m * 0.05) / s);
+      // (cards: only thin slivers and small wedges; a coloured band along a card's edge is print)
+      const dv = card ? 0.035 : 0.15, dh = card ? 0.035 : 0.25, dc = card ? 0.12 : 0.4;
+      const sliver = along(cT, y1 + 1, ch * dv) || along(cB, ch - y0, ch * dv) || along(cL, x1 + 1, cw * dh) || along(cR, cw - x0, cw * dh) ||
+        (!card && sides >= 2 && (x1 - x0 < cw * 0.6 || y1 - y0 < ch * 0.25) && Math.max(cT, cB, cL, cR) > (m * 0.05) / s);
       // a wedge in a corner (both of its sides touched, small next to the page)
-      const corner = ((cT && (cL || cR)) || (cB && (cL || cR))) && x1 - x0 < cw * 0.4 && y1 - y0 < ch * 0.4 && fill > 0.2;
+      const corner = ((cT && (cL || cR)) || (cB && (cL || cR))) && x1 - x0 < cw * dc && y1 - y0 < ch * dc && fill > 0.2;
       if ((fill > 0.4 && sliver) || corner) { for (const q of comp) inB[q] = 1; anyB = true; }
     };
     for (let x = 0; x < cw; x++) { seedAt(x); seedAt((ch - 1) * cw + x); }
@@ -1596,49 +1621,128 @@ export function scanKernels(): Kernels {
     }
   }
 
-  /** pixels covered by something in front of the page (a finger): filled from the card on both sides */
-  function fillFromAround(img: PixelImage, M: Float32Array): void {
+  /**
+   * Fills the covered pixels (M: 0…1) from what is around them: a pyramid of the uncovered pixels'
+   * average colours, read back from the coarsest level down (push–pull), so a hole of any size and shape
+   * gets a smooth blend of the colours at its border (no streaks along rows or columns).
+   */
+  function inpaint(img: PixelImage, M: Float32Array, V?: Float32Array): void {
     const w = img.w, h = img.h, d = img.data;
-    const src = new Uint8ClampedArray(d);
-    const pick = (x: number, y: number) => { const i = (y * w + x) * 4; return [src[i], src[i + 1], src[i + 2]]; };
-    // rows: each covered stretch between the colours just outside it (or the one side there is)
-    const rowFill = new Float32Array(w * h * 3), rowW = new Float32Array(w * h);
-    const colFill = new Float32Array(w * h * 3), colW = new Float32Array(w * h);
-    const pass = (len: number, lines: number, at: (line: number, k: number) => [number, number], fill: Float32Array, wt: Float32Array) => {
-      for (let l = 0; l < lines; l++) {
-        let k = 0;
-        while (k < len) {
-          const [x0, y0] = at(l, k);
-          if (M[y0 * w + x0] < 0.3) { k++; continue; }
-          let e = k;
-          while (e < len) { const [x, y] = at(l, e); if (M[y * w + x] < 0.3) break; e++; }
-          const a = k > 0 ? pick(...at(l, k - 1)) : null, b = e < len ? pick(...at(l, e)) : null;
-          for (let q = k; q < e; q++) {
-            const t = (q - k + 1) / (e - k + 1);
-            const cA = a ?? b, cB = b ?? a;
-            if (!cA || !cB) continue;
-            const [x, y] = at(l, q), p = y * w + x;
-            // nearer the image edge the stretch comes from, trust the other side more
-            const wgt = a && b ? 1 : 0.5;
-            fill[p * 3] = cA[0] + (cB[0] - cA[0]) * t; fill[p * 3 + 1] = cA[1] + (cB[1] - cA[1]) * t; fill[p * 3 + 2] = cA[2] + (cB[2] - cA[2]) * t;
-            wt[p] = wgt;
+    // only the area round the holes
+    let bx0 = w, by0 = h, bx1 = -1, by1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0, p = y * w; x < w; x++, p++) if (M[p] > 0.02) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+    if (bx1 < 0) return;
+    const pad = Math.max(8, Math.round(Math.max(bx1 - bx0, by1 - by0) * 0.5));
+    bx0 = Math.max(0, bx0 - pad); by0 = Math.max(0, by0 - pad); bx1 = Math.min(w - 1, bx1 + pad); by1 = Math.min(h - 1, by1 + pad);
+    const lw = bx1 - bx0 + 1, lh = by1 - by0 + 1, ln = lw * lh;
+    const W0 = new Float32Array(ln), S0 = new Float32Array(ln * 3);
+    let known = 0;
+    for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+      const q = y * lw + x, p = (y + by0) * w + x + bx0, i = p * 4;
+      if (M[p] > 0.02) continue;
+      // what lies under something is mostly the background: print and photos next to the hole count little
+      const k = V ? Math.max(0.03, Math.min(1, (V[p] - 0.55) / 0.35)) : 1;
+      W0[q] = k; S0[q * 3] = d[i] * k; S0[q * 3 + 1] = d[i + 1] * k; S0[q * 3 + 2] = d[i + 2] * k; known++;
+    }
+    if (!known) return;
+    const levels: { w: number; h: number; W: Float32Array; S: Float32Array }[] = [{ w: lw, h: lh, W: W0, S: S0 }];
+    for (;;) {
+      const L = levels[levels.length - 1];
+      let full = true;
+      for (let q = 0; q < L.w * L.h; q++) if (L.W[q] <= 0) { full = false; break; }
+      if (full || (L.w <= 1 && L.h <= 1)) break;
+      const nw = Math.ceil(L.w / 2), nh = Math.ceil(L.h / 2), Wn = new Float32Array(nw * nh), Sn = new Float32Array(nw * nh * 3);
+      for (let y = 0; y < nh; y++) for (let x = 0; x < nw; x++) {
+        let c = 0, ws = 0, r = 0, g = 0, b = 0;
+        for (let yy = y * 2; yy < Math.min(L.h, y * 2 + 2); yy++) for (let xx = x * 2; xx < Math.min(L.w, x * 2 + 2); xx++) {
+          const q = yy * L.w + xx;
+          c++; ws += L.W[q]; r += L.S[q * 3]; g += L.S[q * 3 + 1]; b += L.S[q * 3 + 2];
+        }
+        const o = y * nw + x;
+        Wn[o] = ws / c; Sn[o * 3] = r / c; Sn[o * 3 + 1] = g / c; Sn[o * 3 + 2] = b / c;
+      }
+      levels.push({ w: nw, h: nh, W: Wn, S: Sn });
+    }
+    // the coarsest level: plain averages; then each finer level takes what it knows and the rest from above
+    const top = levels[levels.length - 1];
+    let F = new Float32Array(top.w * top.h * 3);
+    for (let q = 0; q < top.w * top.h; q++) { const k = top.W[q] > 0 ? 1 / top.W[q] : 0; F[q * 3] = top.S[q * 3] * k; F[q * 3 + 1] = top.S[q * 3 + 1] * k; F[q * 3 + 2] = top.S[q * 3 + 2] * k; }
+    for (let l = levels.length - 2; l >= 0; l--) {
+      const L = levels[l], up = levels[l + 1], G = new Float32Array(L.w * L.h * 3);
+      for (let y = 0; y < L.h; y++) {
+        const fy = Math.max(0, Math.min(up.h - 1, (y + 0.5) / 2 - 0.5)), y0 = Math.floor(fy), y1 = Math.min(up.h - 1, y0 + 1), ty = fy - y0;
+        for (let x = 0; x < L.w; x++) {
+          const q = y * L.w + x, k = 1 - Math.min(1, L.W[q]);
+          if (k <= 0) { G[q * 3] = L.S[q * 3]; G[q * 3 + 1] = L.S[q * 3 + 1]; G[q * 3 + 2] = L.S[q * 3 + 2]; continue; }
+          const fx = Math.max(0, Math.min(up.w - 1, (x + 0.5) / 2 - 0.5)), x0 = Math.floor(fx), x1 = Math.min(up.w - 1, x0 + 1), tx = fx - x0;
+          for (let ch = 0; ch < 3; ch++) {
+            const a = F[(y0 * up.w + x0) * 3 + ch] * (1 - tx) + F[(y0 * up.w + x1) * 3 + ch] * tx;
+            const c = F[(y1 * up.w + x0) * 3 + ch] * (1 - tx) + F[(y1 * up.w + x1) * 3 + ch] * tx;
+            G[q * 3 + ch] = L.S[q * 3 + ch] + k * (a + (c - a) * ty);
           }
-          k = e;
         }
       }
-    };
-    pass(w, h, (l, k) => [k, l], rowFill, rowW);
-    pass(h, w, (l, k) => [l, k], colFill, colW);
-    for (let p = 0, i = 0; p < w * h; p++, i += 4) {
-      const a = M[p] > 0.98 ? 1 : M[p];
-      if (a < 0.01) continue;
-      const wr = rowW[p], wc = colW[p], ws = wr + wc;
-      if (!ws) continue;
-      for (let ch = 0; ch < 3; ch++) {
-        const v = (rowFill[p * 3 + ch] * wr + colFill[p * 3 + ch] * wc) / ws;
-        d[i + ch] = d[i + ch] + (v - d[i + ch]) * a;
+      F = G;
+    }
+    for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+      const p = (y + by0) * w + x + bx0, m = M[p];
+      if (m <= 0.02) continue;
+      const a = Math.min(1, m * 1.6), i = p * 4, q = y * lw + x;
+      d[i] = d[i] + (F[q * 3] - d[i]) * a; d[i + 1] = d[i + 1] + (F[q * 3 + 1] - d[i + 1]) * a; d[i + 2] = d[i + 2] + (F[q * 3 + 2] - d[i + 2]) * a;
+    }
+  }
+
+  /** the brush strokes painted over things to remove, as coverage (0…1) of the image's pixels */
+  function strokeMask(w: number, h: number, strokes: Stroke[]): Float32Array | null {
+    if (!strokes.length) return null;
+    const M = new Float32Array(w * h), L = Math.max(w, h);
+    for (const s of strokes) {
+      const r = Math.max(1, s.r * L) + 1;
+      const P: number[] = [];
+      for (let i = 0; i + 1 < s.pts.length; i += 2) P.push(s.pts[i] * w, s.pts[i + 1] * h);
+      if (P.length === 2) P.push(P[0], P[1]);
+      for (let i = 0; i + 3 < P.length; i += 2) {
+        const ax = P[i], ay = P[i + 1], bx = P[i + 2], by = P[i + 3], vx = bx - ax, vy = by - ay, vv = vx * vx + vy * vy;
+        const x0 = Math.max(0, Math.floor(Math.min(ax, bx) - r - 1)), x1 = Math.min(w - 1, Math.ceil(Math.max(ax, bx) + r + 1));
+        const y0 = Math.max(0, Math.floor(Math.min(ay, by) - r - 1)), y1 = Math.min(h - 1, Math.ceil(Math.max(ay, by) + r + 1));
+        for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+          const px = x + 0.5 - ax, py = y + 0.5 - ay;
+          const t = vv > 0 ? Math.max(0, Math.min(1, (px * vx + py * vy) / vv)) : 0;
+          const dd = Math.hypot(px - t * vx, py - t * vy);
+          const v = Math.max(0, Math.min(1, r - dd + 0.5)), p = y * w + x;
+          if (v > M[p]) M[p] = v;
+        }
       }
     }
+    return M;
+  }
+
+  /** brightness against the page's own bright level nearby (1: the paper or card itself, lower: print, shade) */
+  function brightness(img: PixelImage): Float32Array {
+    const w = img.w, h = img.h, n = w * h;
+    const Y = lumaPlane(img);
+    // the bright level: a wide maximum on a small copy, smoothed
+    const k = Math.max(1, Math.round(Math.max(w, h) / 400)), sw = Math.max(4, Math.round(w / k)), sh = Math.max(4, Math.round(h / k));
+    const small = shrinkPlane(Y, w, h, sw, sh);
+    // (wide: a coloured band along an edge with white print in it is still darker than the card)
+    const rr = Math.max(3, Math.round(Math.max(sw, sh) * 0.12));
+    const env = boxSmooth(runMax(runMax(small, sw, sh, rr, true, false), sw, sh, rr, true, true), sw, sh, rr * 0.5);
+    const E = resizePlane(env, sw, sh, w, h);
+    for (let p = 0; p < n; p++) Y[p] = Y[p] / Math.max(24, E[p]);
+    return Y;
+  }
+
+  /**
+   * Desk, the cover or a dark gap left along a card's or passport page's edges: the page's brightness
+   * against its own bright level nearby, then the same rules as for sheets (see deskMask). Null: none.
+   */
+  function cardEdges(img: PixelImage, V: Float32Array): Float32Array | null {
+    const w = img.w, h = img.h, n = w * h;
+    const D = deskMask(V, w, h, true);
+    if (!D) return null;
+    const M = new Float32Array(n);
+    for (let p = 0; p < n; p++) M[p] = D[p];
+    return M;
   }
 
   function roundCorners(img: PixelImage, r: number): void {
@@ -1752,11 +1856,19 @@ export function scanKernels(): Kernels {
     return { warped, sharp, blur, times: T, bent };
   }
 
-  function finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number, card = false): PixelImage {
+  function finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number, card = false, erase?: Stroke[] | null): PixelImage {
+    // what was painted over by hand goes in every look
+    const SM = erase?.length ? strokeMask(img.w, img.h, erase) : null;
+    if (SM) inpaint(img, SM, brightness(img));
     if (filter !== 'original') {
-      // cards: a finger holding the card is filled in from the card around it (all looks but the original)
-      const EO = card && filter !== 'bw' ? edgeObjects(img, true) : null;
-      if (EO) fillFromAround(img, EO);
+      // cards: a finger holding the card, and desk or cover showing along the edges, are filled in from the
+      // card around them (all looks but the original)
+      if (card && filter !== 'bw') {
+        const V = brightness(img), EO = edgeObjects(img, true), CE = cardEdges(img, V);
+        if (EO && CE) for (let p = 0; p < EO.length; p++) if (CE[p] > EO[p]) EO[p] = CE[p];
+        const M = EO ?? CE;
+        if (M) inpaint(img, M, V);
+      }
       if (card && filter !== 'color' && filter !== 'bw') {
         // ID cards and passports: the photograph improved, the card kept (see cardFilter)
         // (no local-contrast boost: it rings round the photo's dark hair and edges)
@@ -1778,7 +1890,7 @@ export function scanKernels(): Kernels {
   function process(job: Job): JobResult {
     const p = prepare({ ...job, sharpen: job.filter === 'original' ? 'off' : job.sharpen });
     const t = Date.now();
-    const img = finish(p.sharp ?? p.warped, job.filter, p.blur, job.radius, 0, !!job.card);
+    const img = finish(p.sharp ?? p.warped, job.filter, p.blur, job.radius, 0, !!job.card, job.erase);
     return { img, blur: p.blur, times: { ...p.times, look: Date.now() - t } };
   }
 
