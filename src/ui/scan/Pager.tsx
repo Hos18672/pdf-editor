@@ -175,8 +175,10 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
   // the page fitted into the view (explicit size, so overlays sit exactly on it)
   const pad = 6;
   const fit = (w: number, h: number) => {
-    const s = Math.min((box.w - pad * 2) / w, (box.h - pad * 2) / h);
-    return { width: Math.max(1, Math.floor(w * s)), height: Math.max(1, Math.floor(h * s)) };
+    // a tall page (a long receipt) stops above the zoom buttons instead of running under them
+    const tall = h > w * 1.6 ? 52 : 0;
+    const s = Math.min((box.w - pad * 2) / w, (box.h - pad * 2 - tall) / h);
+    return { width: Math.max(1, Math.floor(w * s)), height: Math.max(1, Math.floor(h * s)), marginBottom: tall };
   };
   const shapeOf = (p: ScanPage) => {
     const r = renders[p.id];

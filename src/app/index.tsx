@@ -14,6 +14,10 @@ const addToCalendar = async (e: { title: string; begin: number; allDay: boolean;
   if (!PeIntents) return false;
   try { return PeIntents.addCalendarEvent(e.title, e.begin, e.allDay, e.note); } catch { return false; }
 };
+const scanDocs = async (limit: number) => {
+  if (!PeIntents?.scanDocuments) throw new Error('Not available');
+  return PeIntents.scanDocuments(limit, true);
+};
 const readShared = (uri: string) => (PeIntents ? PeIntents.readUri(uri) : Promise.reject(new Error('Not available')));
 
 async function pickPdf() {
@@ -140,6 +144,7 @@ function NativeShell({ dark }: { dark: boolean }) {
         getInsets={getInsets}
         takeIntent={takeIntent}
         readShared={readShared}
+        scanDocs={scanDocs}
         addToCalendar={addToCalendar}
         dom={{
           style: { flex: 1, backgroundColor: desk },

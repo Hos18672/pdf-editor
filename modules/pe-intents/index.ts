@@ -13,6 +13,8 @@ export interface Incoming {
 interface PeIntentsModule {
   takeIntent(): Incoming | null;
   readUri(uri: string): Promise<string>;
+  /** Google's document scanner: page images (file URIs), or null when cancelled */
+  scanDocuments(limit: number, gallery: boolean): Promise<string[] | null>;
   refreshShortcuts(): void;
   addCalendarEvent(title: string, beginMs: number, allDay: boolean, description: string): boolean;
   addListener(event: 'onIntent', fn: () => void): { remove(): void };

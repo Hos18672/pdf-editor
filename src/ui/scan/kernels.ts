@@ -842,9 +842,13 @@ export function scanKernels(): Kernels {
   function fineShade(img: PixelImage, P: Paper | null): Float32Array {
     const W = img.w, H = img.h;
     // half size on big pages: the shading needs no more detail, and it is 4× cheaper
-    const f = W * H > 4.2e6 ? 2 : 1;
+    const f = W * H > 1.6e6 ? 2 : 1;
     const w = Math.max(8, Math.round(W / f)), h = Math.max(8, Math.round(H / f)), n = w * h;
-    const r = Math.max(3, Math.min(12, Math.round(Math.sqrt(W * H) / 220 / f)));
+    // wide enough to take away the print: on a sheet that is about the page's size / 220; a till
+    // receipt's print is far larger for its size (a line of text is a 25th of its width)
+    const narrow = Math.min(W, H) / Math.max(W, H) < 0.45;
+    const rs = Math.min(12 * f, Math.sqrt(W * H) / 220);
+    const r = Math.max(3, Math.round(Math.max(rs, narrow ? Math.min(W, H) / 40 : 0) / f));
     const d = img.data;
     const Yf = lumaPlane(img), Chf = new Float32Array(W * H);
     for (let p = 0, i = 0; p < W * H; p++, i += 4) Chf[p] = Math.max(d[i], d[i + 1], d[i + 2]) - Math.min(d[i], d[i + 1], d[i + 2]);
@@ -882,13 +886,16 @@ export function scanKernels(): Kernels {
     // dark line of a crease. A smaller closing removes only the strokes of text; what it keeps on top
     // of the large one is a band — printed (a thick rule, a QR module: sharp all round) or shading
     // (soft on at least one side), which then joins the shading.
-    const r2 = Math.max(2, Math.round(r / 3));
+    // the size of a crease line, not of the print
+    const r2 = Math.max(2, Math.round(rs / f / 3));
     if (r2 < r) {
       const C2 = closing(Y, w, h, r2), R2 = new Float32Array(n), P2 = new Float32Array(n);
       for (let p = 0; p < n; p++) R2[p] = C2[p] / Math.max(1, C[p]);
       sharpAreas(R2, w, h, r2, 0.93, P2);
+      // a receipt's print is larger than a crease line: inside a band, bold print is not shading
+      const rm = Math.round(r / 2), Cm = narrow && rm > r2 ? closing(Y, w, h, rm) : C2;
       for (let p = 0; p < n; p++) if (R2[p] < 0.97 && !P2[p]) {
-        const ratio = C2[p] / Math.max(20, PY[p]);
+        const ratio = Math.max(C2[p], Cm[p]) / Math.max(20, PY[p]);
         S[p] = ratio < 0.3 ? 0.3 : ratio > 1.12 ? 1.12 : ratio;
       }
     }

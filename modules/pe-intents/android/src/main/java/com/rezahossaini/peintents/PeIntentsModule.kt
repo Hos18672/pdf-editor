@@ -12,6 +12,10 @@ import android.webkit.MimeTypeMap
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -66,6 +70,37 @@ class PeIntentsModule : Module() {
       true
     }
 
+    // Google's document scanner (ML Kit, runs on the phone): its own camera with edge finding and
+    // clean-up; resolves with the pages' JPEG files, or null when cancelled
+    AsyncFunction("scanDocuments") { limit: Int, gallery: Boolean, promise: Promise ->
+      val activity = appContext.currentActivity
+      if (activity == null) { promise.reject("E_NO_ACTIVITY", "No activity", null); return@AsyncFunction }
+      val b = GmsDocumentScannerOptions.Builder()
+        .setGalleryImportAllowed(gallery)
+        .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+        .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+      if (limit > 0) b.setPageLimit(limit)
+      activity.runOnUiThread {
+        GmsDocumentScanning.getClient(b.build()).getStartScanIntent(activity)
+          .addOnSuccessListener { sender ->
+            scanPromise?.resolve(null)
+            scanPromise = promise
+            try { activity.startIntentSenderForResult(sender, SCAN_REQ, null, 0, 0, 0) }
+            catch (e: Throwable) { scanPromise = null; promise.reject("E_SCAN_START", e.message, e) }
+          }
+          .addOnFailureListener { e -> promise.reject("E_SCAN_UNAVAILABLE", e.message, e) }
+      }
+    }
+
+    OnActivityResult { _, payload ->
+      if (payload.requestCode != SCAN_REQ) return@OnActivityResult
+      val p = scanPromise ?: return@OnActivityResult
+      scanPromise = null
+      if (payload.resultCode != Activity.RESULT_OK) { p.resolve(null); return@OnActivityResult }
+      val res = try { GmsDocumentScanningResult.fromActivityResultIntent(payload.data) } catch (e: Throwable) { null }
+      p.resolve(res?.pages?.map { it.imageUri.toString() } ?: emptyList<String>())
+    }
+
     Function("refreshShortcuts") {
       try { publishShortcuts(context) } catch (e: Throwable) { /* not supported */ }
     }
@@ -73,6 +108,8 @@ class PeIntentsModule : Module() {
 
   companion object {
     private const val SEEN = "pe_seen"
+    private const val SCAN_REQ = 0x5ca7
+    @Volatile private var scanPromise: Promise? = null
     @Volatile private var pending: Intent? = null
 
     private fun take(activity: Activity?): Intent? {

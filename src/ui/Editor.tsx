@@ -44,6 +44,8 @@ export interface HostProps {
   readShared?: (uri: string) => Promise<string>;
   /** Android: open the calendar app with an event filled in */
   addToCalendar?: (e: CalEvent) => Promise<boolean>;
+  /** Android: Google's on-device document scanner; the pages' image files (URIs), null when cancelled */
+  scanDocs?: (limit: number) => Promise<string[] | null>;
 }
 export interface CalEvent { title: string; begin: number; allDay: boolean; note: string }
 export interface Incoming {
