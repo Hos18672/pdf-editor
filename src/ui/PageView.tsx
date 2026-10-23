@@ -5,8 +5,9 @@ import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
 import { uid } from './store';
-import { BASELINE, textSize } from '../engine/matchFonts';
-import { registerEditFont, baselineInLine, docFontOf, objectFontCss } from './textFonts';
+import { BASELINE, textSize, arabicText } from '../engine/matchFonts';
+import { hasArabic, isRtl } from '../engine/rtl';
+import { registerEditFont, baselineInLine, docFontOf, objectFontCss, arabicFace, ARABIC_CSS } from './textFonts';
 import { gesture } from './gesture';
 import { Icon } from './icons';
 import { isRefocusing, editingHeld } from './hooks';
@@ -640,10 +641,15 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
   // Best: the embedded font re-registered with a Unicode cmap (exact glyphs while typing).
   // Otherwise the pdf.js font when its codes are plain Unicode, else a similar system font.
   const identity = font ? Object.entries(font.display).every(([k, v]) => k === v) : false;
-  const fontCss = font?.editFamily
+  // Arabic or Persian typed in: the shipped Arabic font (as in the saved file), lines that read right to
+  // left keep the original line's right end
+  const arText = hasArabic(editing ? value : edit?.text ?? '');
+  const rtl = arText && isRtl(editing ? value : edit?.text ?? '');
+  if (arText) arabicFace();
+  const fontCss = arText ? `${ARABIC_CSS}, ${font?.cssFallback ?? 'sans-serif'}` : font?.editFamily
     ? `"${font.editFamily}", ${font.cssFallback}`
     : font && identity ? `"${font.loadedName}", ${font.cssFallback}` : font?.cssFallback ?? 'Arial, sans-serif';
-  const mapped = !!font && !font.editFamily && !identity;
+  const mapped = !arText && !!font && !font.editFamily && !identity;
   // put the baseline of the first line exactly on the original baseline
   const lineTop = b.asc * zoom - baselineInLine(fontCss, size, lineH);
   // Edited text can be longer (or have more lines) than the original line: the tap target grows with
@@ -689,7 +695,8 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
   // without faking bold on the embedded font itself
   const textStyle: React.CSSProperties = {
     fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop,
-    fontWeight: font?.fallback.bold ? 700 : 400, fontStyle: font?.fallback.italic ? 'italic' : 'normal', fontSynthesis: 'none',
+    fontWeight: font?.fallback.bold ? 700 : 400, fontStyle: font?.fallback.italic && !arText ? 'italic' : 'normal', fontSynthesis: 'none',
+    ...(rtl ? { left: 'auto', right: ((grown?.w ?? b.w) - b.w) * zoom, direction: 'rtl', textAlign: 'right' } as React.CSSProperties : {}),
   };
   return (
     <div className={`run edited${editing ? ' editing' : ''}${selected ? ' selected' : ''}`} data-key={run.key} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
@@ -701,6 +708,7 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
       {editing ? (
         <textarea
           ref={taRef}
+          dir="auto"
           value={value}
           spellCheck={false}
           autoCapitalize="off"
@@ -717,7 +725,7 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
           style={{ ...textStyle, background: 'transparent', caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
         />
       ) : (
-        <div className="txt" style={textStyle}>
+        <div className="txt" style={textStyle} dir={arText ? 'auto' : undefined}>
           {lines.map((line, li) => (
             <div key={li} style={{ height: lineH }}>
               {mapped
@@ -966,15 +974,15 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
         fontSize: textSize(o) * zoom, color: o.color, fontFamily: objectFontCss(o),
         fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
         // a document font is drawn as it is (it is already bold / italic when it should be)
-        ...(o.font ? { fontSynthesis: 'none' } as any : {}),
+        ...(o.font || arabicText(o) ? { fontSynthesis: 'none' } as any : {}),
       };
       inner = (
         <>
-          <div ref={measureRef} className="tview" style={{ ...ts, position: 'absolute', inset: 'auto', left: 0, top: 0, visibility: editing ? 'hidden' : 'visible', pointerEvents: 'none' }}>
+          <div ref={measureRef} className="tview" dir="auto" style={{ ...ts, position: 'absolute', inset: 'auto', left: 0, top: 0, visibility: editing ? 'hidden' : 'visible', pointerEvents: 'none' }}>
             {(o.text || ' ') + (o.text.endsWith('\n') ? ' ' : '')}
           </div>
           {editing && (
-            <textarea ref={taRef} value={o.text} spellCheck={false} style={{ ...ts, touchAction: 'none' }} placeholder="Type here"
+            <textarea ref={taRef} dir="auto" value={o.text} spellCheck={false} style={{ ...ts, touchAction: 'none' }} placeholder="Type here"
               onChange={(e) => onChange({ text: e.target.value } as any, true)}
               onBlur={(e) => { if (isRefocusing(e.currentTarget) || editingHeld()) return; if (!drag.current || drag.current.mode === 'pending') onEditing(false); }}
               onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); e.stopPropagation(); }} />

@@ -1,7 +1,8 @@
 import { withCmap } from '../engine/sfnt';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { DocFont, FontFamily } from '../engine/types';
-import { matchFor, matchFile, wholeMatch, MatchFont, MATCH_X } from '../engine/matchFonts';
+import { matchFor, matchFile, wholeMatch, arabicText, MatchFont, MATCH_X } from '../engine/matchFonts';
+import { arabicFile } from '../engine/rtl';
 import { appBase } from './assets';
 
 const registered = new Map<string, Promise<string | undefined>>();
@@ -138,9 +139,28 @@ export function matchFontBytes(file: string): Promise<Uint8Array> {
   });
 }
 
+/** the shipped Arabic font on screen (regular and bold under one name, so the weight picks the file) */
+export const ARABIC_CSS = '"pe-arabic"';
+let arabicLoaded: Promise<void> | null = null;
+export function arabicFace(): Promise<void> {
+  arabicLoaded ??= (async () => {
+    if (typeof FontFace === 'undefined') return;
+    await Promise.all([false, true].map(async (bold) => {
+      try {
+        const face = new FontFace('pe-arabic', `url("${appBase()}fonts/match/${arabicFile(bold)}")`, { weight: bold ? '700' : '400' });
+        await face.load();
+        (document as any).fonts.add(face);
+      } catch { /* not available: a system font shows */ }
+    }));
+  })();
+  return arabicLoaded;
+}
+
 /** CSS font-family of a text object */
-export const objectFontCss = (o: { text: string; family: FontFamily; font?: DocFont }) =>
-  !o.font ? FAMILY_CSS[o.family] : wholeMatch(o) ? `${matchCss(o.font.match)}, ${FAMILY_CSS[o.family]}` : o.font.css;
+export const objectFontCss = (o: { text: string; family: FontFamily; font?: DocFont }) => {
+  if (arabicText(o)) { arabicFace(); return `${ARABIC_CSS}, ${FAMILY_CSS[o.family]}`; }
+  return !o.font ? FAMILY_CSS[o.family] : wholeMatch(o) ? `${matchCss(o.font.match)}, ${FAMILY_CSS[o.family]}` : o.font.css;
+};
 
 export const FAMILY_CSS: Record<FontFamily, string> = {
   Helvetica: 'Arial, Helvetica, sans-serif',

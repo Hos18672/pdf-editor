@@ -1,7 +1,8 @@
 import React, { useLayoutEffect, useRef, useState } from 'react';
 import type { EditorObject } from '../engine/types';
-import { textBase, textSize } from '../engine/matchFonts';
+import { textBase, textSize, arabicText } from '../engine/matchFonts';
 import { objectFontCss } from './textFonts';
+import { isRtl } from '../engine/rtl';
 
 const W = 248;
 const H = 112;
@@ -90,9 +91,13 @@ export function Loupe({ x, y, page, obj, pdf, pageW, pageH, rotation, zoom }: {
     ctx.setLineDash([]);
     // the text itself
     ctx.fillStyle = obj.color;
-    ctx.font = obj.font ? `${tsz}px ${objectFontCss(obj)}` : `${obj.italic ? 'italic ' : ''}${obj.bold ? 700 : 400} ${obj.size}px ${objectFontCss(obj)}`;
+    ctx.font = obj.font && !arabicText(obj) ? `${tsz}px ${objectFontCss(obj)}` : `${obj.italic ? 'italic ' : ''}${obj.bold ? 700 : 400} ${obj.size}px ${objectFontCss(obj)}`;
     ctx.textBaseline = 'alphabetic';
-    (obj.text || ' ').split('\n').forEach((line, i) => ctx.fillText(line, obj.x, base + tsz * 1.2 * i));
+    // right-to-left text (Arabic, Persian) ends at the box's right side, as on the page
+    const rtl = isRtl(obj.text);
+    if (rtl) { ctx.direction = 'rtl'; ctx.textAlign = 'right'; }
+    const tx = rtl ? obj.x + Math.max(0, obj.w - 2) : obj.x;
+    (obj.text || ' ').split('\n').forEach((line, i) => ctx.fillText(line, tx, base + tsz * 1.2 * i));
     ctx.restore();
   });
 

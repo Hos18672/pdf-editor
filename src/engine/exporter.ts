@@ -7,7 +7,8 @@ import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
 import { addTextLayer } from './textLayer';
-import { BASELINE, MATCH_BASE, matchFile, wholeMatch, textSize, MatchFont } from './matchFonts';
+import { BASELINE, MATCH_BASE, matchFile, wholeMatch, textSize, arabicText, MatchFont } from './matchFonts';
+import { ARABIC_BASE, arabicFile, hasArabic, isRtl, visualRuns } from './rtl';
 import * as fontkitNs from '@pdf-lib/fontkit';
 import type { ExportInput, EditorObject, FontFamily, TextEdit } from './types';
 import { decodeImage, writeJpeg } from './images';
@@ -162,8 +163,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
   // shipped fonts for the letters a document font lacks (embedded as subsets)
   const matchFonts = new Map<string, Promise<PDFFont | null>>();
   let fontkitOn = false;
-  const matchPdf = (m: MatchFont): Promise<PDFFont | null> => {
-    const file = matchFile(m);
+  const filePdf = (file: string): Promise<PDFFont | null> => {
     if (!matchFonts.has(file)) {
       matchFonts.set(file, (async () => {
         if (!input.matchFont) return null;
@@ -175,6 +175,8 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     }
     return matchFonts.get(file)!;
   };
+  const matchPdf = (m: MatchFont) => filePdf(matchFile(m));
+  const arabicPdf = (bold: boolean) => filePdf(arabicFile(bold));
   // fonts of the document used again for new text: the glyphs of the page the font was picked on
   const fontPages = new Map<number, { glyphs: Glyph[]; fontDict?: PDFDict; toUni: (res: string) => Record<string, number> } | null>();
   const fontPage = (pi: number) => {
@@ -311,8 +313,11 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       }
       const lines = e.text.split('\n');
       const glyphless = hits.length > 0 && hits.every((g) => /GlyphLess/i.test(baseFontOf(fontDict, g.style.fontRes)));
+      // Arabic and Persian: written with the shipped Arabic font (joined letters, right to left)
+      const arabic = hasArabic(e.text);
+      const af = arabic ? await arabicPdf(e.fallback.bold) : null;
       // Scans / picture pages: the new text made of the page's own letters
-      if (hidden && input.scanImage) {
+      if (hidden && input.scanImage && !af) {
         const img = await input.scanImage(e).catch((err) => { console.warn('scan text', err); return null; });
         if (img) {
           add += cover({ ...e, scan: { ...(e.scan ?? { family: 'Arimo', bold: false, sizeRatio: 1, stretch: 1, blur: 0, score: 0 }), inkX0: img.inkX0, inkX1: img.inkX1, dy: img.dy, inkUp: img.inkUp, inkDown: img.inkDown } }, true);
@@ -328,7 +333,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         return Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) > 0.6 ? e.fgColor : '#000000';
       };
       // Scans / picture pages: draw the new text as a picture that matches the scan's own lettering
-      if (hidden && e.scan) {
+      if (hidden && e.scan && !af) {
         const img = await renderScanText(lines, e.scan, e.region.height * e.scan.sizeRatio * e.sizeScale, e.color ?? inkOf()).catch(() => null);
         if (img) {
           // the printed letters' own start and baseline (the hidden layer can be a little off)
@@ -372,7 +377,20 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         s += ink ? rgb(ink, 'rg') + ' ' : (st.fill.join(' ') || '0 g') + ' ';
         s += first.tm.map(f).join(' ') + ' Tm ';
         const lead = sources[0].fs * 1.2;
-        lines.forEach((line, li) => {
+        if (af) {
+          // right-to-left lines end where the original line ended (the text matrix measures in its own units)
+          const ak = leaf.newFontDictionary('ArE', af.ref).asString();
+          const A = mulM(first.tm, st.ctm), k = Math.hypot(A[0], A[1]) * (st.Tz / 100) || 1;
+          const rtl = isRtl(e.text), fs = sources[0].fs;
+          let prev = 0;
+          s += `0 Tc 0 Tw ${ak} ${f(fs)} Tf `;
+          lines.forEach((line, li) => {
+            const w = arabicLine(af, line, rtl, fs);
+            const dx = rtl ? e.region.width / k - w.width : 0;
+            s += `${f(dx - prev)} ${f(li > 0 ? -lead : 0)} Td ${w.tj}`;
+            prev = dx;
+          });
+        } else lines.forEach((line, li) => {
           if (li > 0) s += `0 ${f(-lead)} Td `;
           s += encodeMixed(line.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe);
         });
@@ -386,10 +404,17 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         const h = e.region.height * e.sizeScale;
         const [ux, uy] = e.region.u;
         let s = `q BT ${rgb(e.color ?? (hidden ? inkOf() : '#000000'), 'rg')} ${key} 1 Tf `;
+        const ak = af ? leaf.newFontDictionary('ArE', af.ref).asString() : '';
+        const rtl = af ? isRtl(e.text) : false;
         lines.forEach((line, li) => {
-          const ox = e.region.o[0] + uy * h * 1.2 * li;
-          const oy = e.region.o[1] - ux * h * 1.2 * li;
-          s += `${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm ${fb.encodeText(safe(fb, line)).toString()} Tj `;
+          let ox = e.region.o[0] + uy * h * 1.2 * li;
+          let oy = e.region.o[1] - ux * h * 1.2 * li;
+          if (af) {
+            const w = arabicLine(af, line, rtl, 1);
+            const dx = rtl ? e.region.width - w.width * h : 0;
+            ox += ux * dx; oy += uy * dx;
+            s += `${ak} 1 Tf ${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm ${w.tj}`;
+          } else s += `${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm ${fb.encodeText(safe(fb, line)).toString()} Tj `;
         });
         add += s + 'ET Q\n';
       }
@@ -402,7 +427,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link');
     if (objs.length) {
       add += 'q ' + invert(vm).map(f).join(' ') + ' cm\n';
-      for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe, { docSources, matchPdf });
+      for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe, { docSources, matchPdf, arabicPdf });
       add += 'Q\n';
     }
     // links: clickable areas (annotations), nothing drawn
@@ -602,6 +627,23 @@ function fontFamilies(glyphs: Glyph[], toUni: (res: string) => Record<string, nu
 
 interface Source { key: string; bpc: number; map: Record<string, number>; fs: number }
 
+/** one line of Arabic-script text: its pieces in screen order, shaped by the font, and its width */
+function arabicLine(af: PDFFont, line: string, rtl: boolean, size: number): { tj: string; width: number } {
+  const runs = visualRuns(line.normalize('NFC'), rtl);
+  if (!runs.length) return { tj: '', width: 0 };
+  // the shaper turns round anything it takes for Arabic script, Persian digits included: a piece that
+  // must stay left to right is handed over turned round already
+  const fk = (af as any).embedder?.font;
+  const texts = runs.map((r) => {
+    if (r.rtl || !fk?.layout) return r.text;
+    try { return fk.layout(r.text).direction === 'rtl' ? [...r.text].reverse().join('') : r.text; } catch { return r.text; }
+  });
+  return {
+    tj: '[' + texts.map((t) => af.encodeText(t).toString()).join(' ') + '] TJ ',
+    width: texts.reduce((w, t) => w + af.widthOfTextAtSize(t, size), 0),
+  };
+}
+
 function encodeMixed(
   line: string, sources: Source[], fbKey: string, fbSize: number, fb: PDFFont, safe: (f: PDFFont, s: string) => string,
   /** a space the fonts lack: a gap in the current font (false: the stand-in font's space) */
@@ -672,6 +714,7 @@ async function drawObject(
   fontsOf: {
     docSources: (o: Extract<EditorObject, { type: 'text' }>, leaf: any) => Source[] | null;
     matchPdf: (m: MatchFont) => Promise<PDFFont | null>;
+    arabicPdf: (bold: boolean) => Promise<PDFFont | null>;
   },
 ): Promise<string> {
   let s = 'q ';
@@ -735,6 +778,20 @@ async function drawObject(
       break;
     }
     case 'text': {
+      // Arabic and Persian: the shipped Arabic font, lines right-aligned in the box when they read right to left
+      const af = arabicText(o) ? await fontsOf.arabicPdf(o.bold) : null;
+      if (af) {
+        const ak = leaf.newFontDictionary('ArT', af.ref).asString();
+        const rtl = isRtl(o.text);
+        s += `BT ${rgb(o.color, 'rg')} 0 Tc 0 Tw 100 Tz 0 Ts 0 Tr ${ak} ${f(o.size)} Tf `;
+        o.text.split('\n').forEach((line, i) => {
+          const w = arabicLine(af, line, rtl, o.size);
+          const x = rtl ? o.x + Math.max(0, o.w - 2) - w.width : o.x;
+          s += `1 0 0 -1 ${f(x)} ${f(o.y + o.size * 1.2 * i + o.size * ARABIC_BASE)} Tm ${w.tj}`;
+        });
+        s += 'ET ';
+        break;
+      }
       const font = await stdFont(o.family, o.bold, o.italic);
       const key = leaf.newFontDictionary('FbT', font.ref).asString();
       // a font of the document: the same letters as the page's own text; letters it lacks come from the

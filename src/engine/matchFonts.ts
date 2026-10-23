@@ -1,6 +1,7 @@
 // Full fonts that ship with the app (public/fonts/match, Latin): they write the letters a document's
 // own (subset) font lacks. Metric-compatible with the common office fonts, so mixed in they don't show.
 import type { DocFont, FontFamily } from './types';
+import { ARABIC_BASE, hasArabic } from './rtl';
 
 export type MatchFamily = 'Arimo' | 'Tinos' | 'Cousine' | 'Carlito' | 'Caladea';
 export type MatchCut = 'Regular' | 'Bold' | 'Italic' | 'BoldItalic';
@@ -40,10 +41,13 @@ type TextObj = { text: string; family: FontFamily; font?: DocFont };
  * the shipped font instead (a few odd letters in between would stand out more).
  */
 export const wholeMatch = (o: TextObj) =>
-  !!o.font && !o.font.match.same && [...o.text].some((ch) => !/\s/.test(ch) && !o.font!.chars.includes(ch));
+  !arabicText(o) && !!o.font && !o.font.match.same && [...o.text].some((ch) => !/\s/.test(ch) && !o.font!.chars.includes(ch));
 
 /** font size the text is written at: a shipped font of another design is sized to the document font's letter height */
 export const textSize = (o: TextObj & { size: number }) => (wholeMatch(o) ? o.size * (o.font!.matchScale ?? 1) : o.size);
 
 /** where the baseline of a text object's first line sits below its top (× font size) */
-export const textBase = (o: TextObj) => (wholeMatch(o) ? MATCH_BASE[o.font!.match.family] : o.font ? o.font.base : BASELINE[o.family]);
+export const textBase = (o: TextObj) => (arabicText(o) ? ARABIC_BASE : wholeMatch(o) ? MATCH_BASE[o.font!.match.family] : o.font ? o.font.base : BASELINE[o.family]);
+
+/** Arabic or Persian letters in the text: written with the shipped Arabic font (screen and file alike) */
+export const arabicText = (o: { text: string }) => hasArabic(o.text);

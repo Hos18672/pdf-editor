@@ -6,6 +6,8 @@ import * as fontkitNs from '@pdf-lib/fontkit';
 const fontkit: { create: (data: Uint8Array) => any } = ((fontkitNs as any).default ?? fontkitNs) as any;
 import type { FontFamily } from './types';
 
+import { drawnOrder, hasArabic, visualToLogical } from './rtl';
+
 export interface FontInfo {
   loadedName: string;
   name: string;
@@ -29,6 +31,8 @@ export interface TextRun {
   fontChars?: Record<string, number>;
   /** PDF user space */
   region: { o: [number, number]; u: [number, number]; width: number; height: number };
+  /** while building: the pieces as drawn (position along the line), for right-to-left text */
+  pieces?: { at: number; str: string; w: number }[];
 }
 
 type PdfjsFont = {
@@ -136,6 +140,7 @@ function mergeNeighbours(runs: TextRun[]) {
         }
         a.width = Math.max(a.width, t + b.width);
         a.height = Math.max(a.height, b.height);
+        A.pieces = [...(A.pieces ?? []), ...(B.pieces ?? [])];
         A.fontChars = fc;
         A.fontName = Object.entries(fc).sort((x, y) => y[1] - x[1])[0][0];
         runs.splice(j, 1);
@@ -176,6 +181,7 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       if (sameLine && gap > -r.height * 0.3 && gap < r.height * maxGap) {
         if (gap > r.height * 0.12 && !cur.str.endsWith(' ') && !it.str.startsWith(' ')) cur.str += ' ';
         cur.str += it.str;
+        cur.pieces!.push({ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w });
         r.width = Math.max(r.width, t + w);
         const fc = (cur.fontChars ??= { [cur.fontName]: [...cur.str].length - [...it.str].length });
         fc[it.fontName] = (fc[it.fontName] ?? 0) + [...it.str].length;
@@ -183,12 +189,23 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       }
       runs.push(cur);
     }
-    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: w, height } };
+    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: w, height }, pieces: [{ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w }] };
   }
   if (cur) runs.push(cur);
   mergeNeighbours(runs);
   runs.forEach((r, i) => {
     r.key = `${page}:${i}`;
+    // Arabic and Persian: the pieces in the order they are drawn, then read right to left
+    if (r.pieces && hasArabic(r.str)) {
+      const ps = r.pieces.slice().sort((a, b) => a.at - b.at);
+      let vis = '', end = -Infinity;
+      for (const p of ps) {
+        if (vis && p.at - end > r.region.height * 0.12 && !vis.endsWith(' ') && !p.str.startsWith(' ')) vis += ' ';
+        vis += p.str; end = Math.max(end, p.at + p.w);
+      }
+      r.str = visualToLogical(vis.trim());
+    }
+    delete r.pieces;
     r.str = r.str.replace(/\s+$/, '').normalize('NFC');
     if (r.fontChars) r.fontName = Object.entries(r.fontChars).sort((a, b) => b[1] - a[1])[0][0];
   });

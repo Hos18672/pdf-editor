@@ -636,7 +636,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const t = setTimeout(async () => {
       try {
         const bytes = await exportPdf({
-          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage, rules: rulesOf,
+          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage, rules: rulesOf, matchFont: matchFontBytes,
           viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
         });
         if (seq !== previewSeq.current) return;
