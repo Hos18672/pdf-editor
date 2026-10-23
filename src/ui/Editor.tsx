@@ -23,10 +23,20 @@ import { useBack } from './back';
 import { cloneLineText, pageGlyphs, PageCtx } from './scanGlyphs';
 import type { EditorObject, TextEdit, FontFamily, ClonedText, DocFont } from '../engine/types';
 import { docFontOf, plainFontName, matchFontBytes } from './textFonts';
+import { useLineSelSize, lineEditor } from './lineEdit';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop } from './hooks';
 import { ThemeButton } from './Start';
+
+/** a copied line: its text and how it looks (pasted as a text box) */
+interface Clip { text: string; size: number; color: string; font: DocFont | null; family: FontFamily; bold: boolean; italic: boolean }
+
+/** a move on the screen (viewport units) as a move in PDF user space */
+function userDelta(vm: number[], dx: number, dy: number): [number, number] {
+  const det = vm[0] * vm[3] - vm[1] * vm[2] || 1;
+  return [(vm[3] * dx - vm[2] * dy) / det, (-vm[1] * dx + vm[0] * dy) / det];
+}
 
 export interface HostProps {
   isNative?: boolean;
@@ -530,6 +540,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         room: (rooms[page] ??= lineRooms(pageData[page].runs))[key],
         scan: scanStyles.get(key),
         ocr: run.fontName === 'ocr' || undefined,
+        scales: e.scales,
+        offset: (e.dx || e.dy) && infos[page] ? userDelta(infos[page].vm, e.dx ?? 0, e.dy ?? 0) : undefined,
       });
     }
     return out;
@@ -749,6 +761,72 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const selRun = selected?.includes(':') ? findRun(selected) : undefined;
   const selObj = selected && !selected.includes(':') ? snap.objects.find((o) => o.id === selected) : undefined;
 
+  // ----- copy, cut, move and paste lines of the document's text -----
+  const [moving, setMoving] = useState<string | null>(null);
+  const [clip, setClip] = useState<Clip | null>(null);
+  const [pasting, setPasting] = useState(false);
+  useEffect(() => { if (moving && selected !== moving) setMoving(null); }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+  const runText = (r: TextRun) => snap.edits[r.key]?.text ?? r.str;
+  /** what a line looks like, for pasting it as a text box */
+  const clipOf = (r: TextRun): Clip => {
+    const e = snap.edits[r.key];
+    const info = fonts[r.fontName];
+    const b = runBox(r, infos[r.page].vm);
+    let color = e?.color ?? pageData[r.page]?.colors[r.key]?.fg ?? '#000000';
+    const [cr, cg, cb] = [1, 3, 5].map((i) => parseInt(color.slice(i, i + 2), 16));
+    if (Math.max(cr, cg, cb) < 40 && Math.max(cr, cg, cb) - Math.min(cr, cg, cb) < 12) color = '#000000';
+    const fb = info?.fallback ?? { family: 'Helvetica' as const, bold: false, italic: false };
+    return { text: runText(r), size: Math.round(b.h * (e?.sizeScale ?? 1) * 10) / 10, color, font: docFontOf(r, fonts, pageData[r.page]?.runs ?? []), family: fb.family, bold: fb.bold, italic: fb.italic };
+  };
+  const toClipboard = (text: string) => {
+    const legacy = () => {
+      const ta = document.createElement('textarea');
+      ta.value = text; ta.setAttribute('readonly', ''); ta.style.position = 'fixed'; ta.style.opacity = '0';
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand('copy'); } catch { /* not allowed */ }
+      ta.remove();
+    };
+    try { navigator.clipboard?.writeText(text).catch(legacy) ?? legacy(); } catch { legacy(); }
+  };
+  const copyRun = (r: TextRun, cut = false) => afterBlur(() => {
+    const c = clipOf(r);
+    toClipboard(c.text);
+    setClip(c);
+    setPasting(true);
+    if (cut) {
+      const cur = snap.edits[r.key] ?? { text: r.str, sizeScale: 1, color: null };
+      setRunEdit(r.key, { ...cur, text: '' });
+    }
+    setSelected(null);
+    setMoving(null);
+  });
+  const startMove = (r: TextRun) => afterBlur(() => { setEditing(null); setSelected(r.key); setMoving(r.key); setPasting(false); });
+  const moveRun = (key: string, dx: number, dy: number) => {
+    const r = findRun(key);
+    if (!r) return;
+    const cur = snap.edits[key] ?? { text: r.str, sizeScale: 1, color: null };
+    const near0 = Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05;
+    const next: RunEdit = { ...cur, dx: near0 ? undefined : dx, dy: near0 ? undefined : dy };
+    if (near0) { delete next.dx; delete next.dy; }
+    const plain = next.text === r.str && next.sizeScale === 1 && next.color === null && !next.scales && near0;
+    setRunEdit(key, plain ? null : next);
+  };
+  /** the copied line as a text box at a point of a page (its top-left there) */
+  const pasteAt = (src: number, x: number, y: number) => {
+    if (!clip) { setPasting(false); return; }
+    const id = uid();
+    addObject({ id, page: src, type: 'text', x, y: y - clip.size * 0.6, w: 20, h: clip.size * 1.2, text: clip.text, family: clip.family,
+      size: clip.size, color: clip.color, bold: clip.bold, italic: clip.italic, ...(clip.font ? { font: clip.font } : {}) });
+    setPasting(false);
+    setSelected(id);
+  };
+  /** paste without a tap (keyboard): in the middle of the page in view */
+  const pasteHere = () => {
+    const info = infos[curPage];
+    if (!clip || !info) return;
+    pasteAt(curPage, info.w * 0.3, info.h * 0.4);
+  };
+
   const nextRun = (key: string) => {
     const page = +key.split(':')[0];
     const order = snap.pages.map((p) => p.src);
@@ -894,11 +972,19 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       else if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomStep(1); }
       else if (mod && k === '-') { e.preventDefault(); zoomStep(-1); }
       else if (mod && k === 'd' && selObj) { e.preventDefault(); duplicateObject(selObj.id); }
+      else if (mod && (k === 'c' || k === 'x') && selRun) { e.preventDefault(); copyRun(selRun, k === 'x'); }
+      else if (mod && k === 'v' && clip && !selObj) { e.preventDefault(); pasteHere(); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
         e.preventDefault();
         if (selRun) setRunEdit(selRun.key, { text: '', sizeScale: 1, color: null });
         else if (selObj) removeObject(selObj.id);
         setSelected(null);
+      } else if (e.key.startsWith('Arrow') && selRun && moving === selRun.key) {
+        // nudge the line being moved
+        e.preventDefault();
+        const d = e.shiftKey ? 10 : 1;
+        const cur = snap.edits[selRun.key];
+        moveRun(selRun.key, (cur?.dx ?? 0) + (e.key === 'ArrowLeft' ? -d : e.key === 'ArrowRight' ? d : 0), (cur?.dy ?? 0) + (e.key === 'ArrowUp' ? -d : e.key === 'ArrowDown' ? d : 0));
       } else if (e.key.startsWith('Arrow') && selObj) {
         e.preventDefault();
         const d = e.shiftKey ? 10 : 1;
@@ -909,7 +995,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         railClick(RAIL.find((r) => r.key === e.key.toUpperCase())!);
       } else if (e.key === 'Escape') {
         if (view === 'pages') setView('doc');
-        setSelected(null); setFlyout(null); setMoreOpen(false); setSheetFor(null);
+        setSelected(null); setFlyout(null); setMoreOpen(false); setSheetFor(null); setPasting(false); setMoving(null);
         if (!selected) setTool('edit');
       }
     };
@@ -1119,7 +1205,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       known={(c) => [selRun.fontName, ...Object.keys(selRun.fontChars ?? {})].some((n) => fonts[n]?.charMap[c] !== undefined)}
       origColor={pageData[+selRun.key.split(':')[0]]?.colors[selRun.key]?.fg ?? '#000000'}
       onEdit={(e) => (e.text === '' ? afterBlur(() => { setRunEdit(selRun.key, e); if (mobile) setSelected(null); }) : setRunEdit(selRun.key, e))}
-      onReset={() => afterBlur(() => setRunEdit(selRun.key, null))} onClose={() => setSelected(null)} />
+      onReset={() => afterBlur(() => setRunEdit(selRun.key, null))} onClose={() => setSelected(null)}
+      onCopy={() => copyRun(selRun)} onCut={() => copyRun(selRun, true)} onMove={() => startMove(selRun)} />
   );
   const objProps = (compact: boolean) => selObj && (
     <ObjProps o={selObj} compact={compact} docFonts={docFonts} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
@@ -1258,7 +1345,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   fields={fieldsByPage[p.src] ?? []} forms={snap.forms} activeField={activeField} fillMark={tool === 'fill' ? fillMark : null}
                   mobile={mobile} onFieldValue={setFieldValue} onFieldFocus={(id) => { setActiveField(id); setSelected(null); }}
                   onFieldSign={(f) => setShowSig({ field: f })}
-                  onNextRun={nextRun} onMore={(id) => setSheetFor(id)} />
+                  onNextRun={nextRun} onMore={(id) => setSheetFor(id)}
+                  moving={moving} onRunMove={moveRun} pasting={pasting && !!clip} onPasteAt={pasteAt} />
               ))}
             </div>
           </div>
@@ -1342,10 +1430,24 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         })()}
       </div>
 
+      {pasting && clip && (
+        <div className={`pastepill${mobile ? '' : ' desk'}`} role="status">
+          <Icon name="clipboard-text" size={18} />
+          <span className="pp-t">Tap where to paste “{clip.text.length > 24 ? clip.text.slice(0, 23) + '…' : clip.text}”</span>
+          <button onClick={() => setPasting(false)}>Cancel</button>
+        </div>
+      )}
+      {moving && !pasting && (
+        <div className={`pastepill${mobile ? '' : ' desk'}`} role="status">
+          <Icon name="move" size={18} />
+          <span className="pp-t">{mobile ? 'Drag the line to move it' : 'Drag the line, or use the arrow keys'}</span>
+          <button onClick={() => { setMoving(null); setSelected(null); }}>Done</button>
+        </div>
+      )}
       {mobile && mobileEditing && (
         <SlimBar open={slimOpen} onOpen={setSlimOpen} onDone={() => (document.activeElement as HTMLElement | null)?.blur?.()}
           run={selRun && editing === selRun.key ? { label: fontLabel(fonts[selRun.fontName]), css: fonts[selRun.fontName]?.cssFallback,
-            size: selRun.region.height * (snap.edits[selRun.key]?.sizeScale ?? 1),
+            size: selRun.region.height * (snap.edits[selRun.key]?.sizeScale ?? 1), key: selRun.key,
             color: snap.edits[selRun.key]?.color ?? pageData[+selRun.key.split(':')[0]]?.colors[selRun.key]?.fg ?? '#000',
             onSize: (v) => { const cur = snap.edits[selRun.key] ?? { text: selRun.str, sizeScale: 1, color: null }; setRunEdit(selRun.key, { ...cur, sizeScale: v / selRun.region.height }); } } : undefined}
           obj={selObj?.type === 'text' ? selObj : undefined} docFonts={docFonts.length > 0}
@@ -1528,7 +1630,7 @@ function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize, onA
 // ---------------- phone: slim properties bar above the keyboard ----------------
 function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: {
   open: boolean; onOpen: (v: boolean) => void; onDone: () => void;
-  run?: { label: string; css?: string; size: number; color: string; onSize: (v: number) => void };
+  run?: { label: string; css?: string; size: number; color: string; onSize: (v: number) => void; key?: string };
   obj?: Extract<EditorObject, { type: 'text' }>; onObj: (p: any) => void; children: React.ReactNode;
   /** the document has fonts new text can use */
   docFonts?: boolean;
@@ -1537,6 +1639,8 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: 
   const famLabel: Record<FontFamily, string> = { Helvetica: 'Sans', Times: 'Serif', Courier: 'Mono' };
   const famCss: Record<FontFamily, string> = { Helvetica: 'Arial, sans-serif', Times: '"Times New Roman", serif', Courier: '"Courier New", monospace' };
   const onToggle = () => onOpen(!open);
+  // letters selected in the line being typed: the size control is theirs
+  const selSize = useLineSelSize(run?.key);
   // While the options are open the keyboard stays down (the caret stays), so changing a setting
   // doesn't bring it back each time. Tapping the text, or closing the options, shows it again.
   const latestOpen = useRef(onOpen);
@@ -1544,7 +1648,7 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: 
   useEffect(() => {
     if (!open) return;
     const el = document.activeElement;
-    if (!(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement)) return;
+    if (!(el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement || (el instanceof HTMLElement && el.isContentEditable))) return;
     setSoftKeyboard(el, false);
     const backToTyping = () => latestOpen.current(false);
     el.addEventListener('pointerdown', backToTyping);
@@ -1569,7 +1673,8 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: 
                 <span style={{ fontFamily: famCss[obj.family] }}>Aa</span><span className="fn">{famLabel[obj.family]}</span>
               </button>
         )}
-        {run && <Stepper soft value={run.size} min={2} max={300} onChange={run.onSize} label="size" />}
+        {run && <Stepper soft value={selSize ?? run.size} min={2} max={300} label={selSize !== null ? 'size of the selected letters' : 'size'}
+          onChange={(v) => { if (selSize !== null && lineEditor()?.setSelSize(v)) return; run.onSize(v); }} />}
         {obj && <Stepper soft value={obj.size} min={4} max={200} onChange={(size) => onObj({ size })} label="size" />}
         <button className="cdot" onClick={onToggle} aria-label="Colour"><i style={{ background: run?.color ?? obj?.color }} /></button>
         <button className="ibtn muted" onClick={onToggle} aria-label={open ? 'Fewer options' : 'More options'} aria-expanded={open}><Icon name={open ? 'down' : 'up'} size={20} /></button>

@@ -8,6 +8,16 @@ export interface RunEdit {
   text: string;
   sizeScale: number;
   color: string | null;
+  /** size of each character (code point of `text`) × sizeScale; absent: all the same */
+  scales?: number[];
+  /** the line moved on its page (viewport units at zoom 1) */
+  dx?: number; dy?: number;
+}
+
+/** per-character sizes worth keeping (null when they are all 1 or don't fit the text) */
+export function cleanScales(text: string, scales?: number[] | null): number[] | undefined {
+  if (!scales || scales.length !== [...text].length || scales.every((k) => Math.abs(k - 1) < 1e-3)) return undefined;
+  return scales.map((k) => Math.round(k * 1000) / 1000);
 }
 
 export interface Snapshot {

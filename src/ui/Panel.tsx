@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useLineSelSize, lineEditor } from './lineEdit';
 import type { DocFont, EditorObject, FontFamily } from '../engine/types';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { RunEdit, Tool, ToolStyle } from './store';
@@ -96,14 +97,17 @@ export const fontLabel = (font?: FontInfo) => {
 };
 
 /** Properties of an existing line of text */
-export function RunProps({ run, font, known, edit, line, origColor, onEdit, onReset, onClose, compact }: {
+export function RunProps({ run, font, known, edit, line, origColor, onEdit, onReset, onClose, compact, onCopy, onCut, onMove }: {
   run: TextRun; font?: FontInfo; known?: (c: string) => boolean; edit?: RunEdit; line: string; origColor: string;
   onEdit: (e: RunEdit) => void; onReset: () => void; onClose?: () => void; compact?: boolean;
+  onCopy?: () => void; onCut?: () => void; onMove?: () => void;
 }) {
   const cur: RunEdit = edit ?? { text: run.str, sizeScale: 1, color: null };
   const missing = [...new Set([...cur.text].filter((c) => !/\s/.test(c) && font && !(known ? known(c) : font.charMap[c] !== undefined)))];
-  const size = run.region.height * cur.sizeScale;
-  const setSize = (v: number) => onEdit({ ...cur, sizeScale: v / run.region.height });
+  // letters selected in the line being typed: the size is theirs
+  const selSize = useLineSelSize(run.key);
+  const size = selSize ?? run.region.height * cur.sizeScale;
+  const setSize = (v: number) => { if (selSize !== null && lineEditor()?.setSelSize(v)) return; onEdit({ ...cur, sizeScale: v / run.region.height }); };
   return (
     <div className="props">
       {!compact && <Head kicker="Existing text" title={line} onClose={onClose} />}
@@ -119,12 +123,21 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
           <span>The embedded font has no {missing.slice(0, 10).join(' ')}{missing.length > 10 ? '…' : ''}. Those characters use a similar standard font.</span>
         </div>
       )}
-      <div className="field"><div className="label">Size</div>
-        <Stepper value={size} min={2} max={300} onChange={setSize} label="size" unit="pt" />
+      <div className="field"><div className="label">{selSize !== null ? 'Size of the selected letters' : 'Size'}</div>
+        {/* the line being typed keeps the focus (and its selected letters) */}
+        <div onMouseDown={(e) => e.preventDefault()}><Stepper value={size} min={2} max={300} onChange={setSize} label="size" unit="pt" /></div>
+        {selSize === null && !compact && <div className="hint">Select a word or letters while typing to size just them.</div>}
       </div>
       <div className="field"><div className="label">Colour</div>
         <Swatches value={cur.color} original={origColor} title="Text colour" onPick={(c) => onEdit({ ...cur, color: c })} />
       </div>
+      {(onCopy || onCut || onMove) && (
+        <div className="lineacts" role="group" aria-label="Line">
+          {onCopy && <button className="btn outline" onClick={onCopy}><Icon name="copy" size={17} />Copy</button>}
+          {onCut && <button className="btn outline" onClick={onCut}><Icon name="scissors" size={17} />Cut</button>}
+          {onMove && <button className="btn outline" onClick={onMove}><Icon name="move" size={17} />Move</button>}
+        </div>
+      )}
       <div className="acts">
         {edit && <button className="btn outline" onClick={onReset}><Icon name="restore" size={17} />Restore original</button>}
         <button className="btn danger" onClick={() => onEdit({ ...cur, text: '' })}><Icon name="trash" size={17} />Delete line</button>

@@ -73,16 +73,21 @@ export const isRefocusing = (el: EventTarget | null) => !!(el as HTMLElement | n
  * Show or hide the phone keyboard for a focused text field without leaving it (caret and editing stay).
  * Android only re-reads `inputmode` on focus, so the field is re-focused quietly.
  */
-export function setSoftKeyboard(el: HTMLTextAreaElement | HTMLInputElement, show: boolean) {
+export function setSoftKeyboard(el: HTMLElement, show: boolean) {
   if (show) el.removeAttribute('inputmode');
   else el.setAttribute('inputmode', 'none');
   if (document.activeElement !== el) return;
-  const { selectionStart: a, selectionEnd: b } = el;
+  const field = el instanceof HTMLTextAreaElement || el instanceof HTMLInputElement ? el : null;
+  const a = field?.selectionStart ?? null, b = field?.selectionEnd ?? null;
+  // an editable element: its selection is a range
+  const sel = window.getSelection();
+  const range = !field && sel?.rangeCount ? sel.getRangeAt(0).cloneRange() : null;
   el.dataset.refocus = '1';
   try {
     el.blur();
     el.focus({ preventScroll: true });
-    if (a !== null && b !== null) el.setSelectionRange(a, b);
+    if (field && a !== null && b !== null) field.setSelectionRange(a, b);
+    if (range && sel) { sel.removeAllRanges(); sel.addRange(range); }
   } finally { delete el.dataset.refocus; }
 }
 

@@ -463,6 +463,19 @@ button { cursor: pointer; }
 .run img.clone { position: absolute; max-width: none; pointer-events: none; user-select: none; }
 .run textarea { position: absolute; left: 0; margin: 0; padding: 0; border: 0; border-radius: 3px; resize: none; overflow: hidden; white-space: pre; outline: none; box-shadow: 0 0 0 1.5px #1E2559; font-kerning: normal; }
 .run.selected:not(.editing) { outline: 2px solid #1E2559; outline-offset: 3px; }
+/* the editing field of a line: plain text, letters may have their own sizes (spans in em) */
+.run .lfield { position: absolute; margin: 0; padding: 0 1px; border-radius: 3px; white-space: pre; outline: none; box-shadow: 0 0 0 1.5px #1E2559; font-kerning: normal; cursor: text; -webkit-user-select: text; user-select: text; }
+.run .lfield ::selection, .run .lfield::selection { background: rgba(52,70,201,.28); }
+/* moving a line: a dashed box to drag */
+.run.moving { z-index: 4; }
+.run .movebox { position: absolute; border: 1.5px dashed #3446C9; border-radius: 6px; background: rgba(52,70,201,.06); cursor: move; touch-action: none; pointer-events: auto; }
+.run .movebox .grip { position: absolute; left: -12px; top: -12px; width: 24px; height: 24px; border-radius: 12px; background: #3446C9; color: #fff; display: grid; place-items: center; box-shadow: 0 2px 6px rgba(20,23,46,.25); }
+/* copied text: tap where it goes */
+.pastepill { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(150px + env(safe-area-inset-bottom)); z-index: 60; display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 16px; border-radius: 999px; background: #1E2559; color: #fff; font-size: 14px; font-weight: 600; box-shadow: 0 10px 30px rgba(20,23,46,.3); max-width: calc(100vw - 32px); }
+.pastepill .pp-t { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pastepill button { border: 0; border-radius: 999px; background: rgba(255,255,255,.14); color: #fff; font: inherit; font-size: 13px; padding: 6px 12px; cursor: pointer; }
+.desk .pastepill, .pastepill.desk { bottom: 24px; }
+.page.pasting { cursor: copy; }
 .run.changed, .run.edited { z-index: 1; }
 .run.editing { z-index: 3; }
 .draft, .draftline { z-index: 3; }
@@ -513,6 +526,8 @@ button { cursor: pointer; }
 .props .acts { display: flex; flex-direction: column; gap: 8px; }
 .props .acts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .props .hint { font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+.props .lineacts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.props .lineacts .btn { justify-content: center; padding-left: 8px; padding-right: 8px; min-width: 0; }
 .props .keys { font-size: 12.5px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
 .props .keys b { font-weight: 600; }
 .fontbox { height: 44px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line-2); display: flex; align-items: center; gap: 10px; padding: 0 12px; min-width: 0; }

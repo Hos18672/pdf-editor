@@ -23,6 +23,10 @@ export interface TextEdit {
   scan?: ScanStyle;
   /** a line recognised on a picture page (its letters are only in the picture) */
   ocr?: boolean;
+  /** size of each character (code point of `text`, newlines included) × the line's size; absent: all 1 */
+  scales?: number[];
+  /** the line moved by this much (PDF user space) */
+  offset?: [number, number];
 }
 
 export interface ScanStyle {

@@ -339,7 +339,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         const img = await input.scanImage(e).catch((err) => { console.warn('scan text', err); return null; });
         if (img) {
           add += await cover({ ...e, scan: { ...(e.scan ?? { family: 'Arimo', bold: false, sizeRatio: 1, stretch: 1, blur: 0, score: 0 }), inkX0: img.inkX0, inkX1: img.inkX1, dy: img.dy, inkUp: img.inkUp, inkDown: img.inkDown } }, true);
-          add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, 0, 0);
+          add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, ...moveAlong(e, 0, 0));
           continue;
         }
       }
@@ -356,7 +356,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         if (img) {
           // the printed letters' own start and baseline (the hidden layer can be a little off)
           const sh = e.region.height;
-          add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, (e.scan.dx ?? 0) * sh, (e.scan.dy ?? 0) * sh);
+          add += placeImage(img, e, leaf, (await doc.embedPng(img.png)).ref, ...moveAlong(e, (e.scan.dx ?? 0) * sh, (e.scan.dy ?? 0) * sh));
           continue;
         }
       }
@@ -389,11 +389,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
           const map = res === main && Object.keys(e.charMap).length ? e.charMap : toUni(res);
           sources.push({ key: '/' + res, bpc: fonts(res)?.bytesPerCode ?? 1, map, fs });
         }
-        let s = 'q ' + st.ctm.map(f).join(' ') + ' cm BT ';
+        let s = 'q ' + (e.offset ? `1 0 0 1 ${f(e.offset[0])} ${f(e.offset[1])} cm ` : '') + st.ctm.map(f).join(' ') + ' cm BT ';
         s += `${f(st.Tc)} Tc ${f(st.Tw)} Tw ${f(st.Tz)} Tz ${f(st.Ts)} Ts ${st.Tr === 3 ? 0 : st.Tr} Tr `;
         const ink = e.color ?? (hidden ? inkOf() : null);
         s += ink ? rgb(ink, 'rg') + ' ' : (st.fill.join(' ') || '0 g') + ' ';
         s += first.tm.map(f).join(' ') + ' Tm ';
+        const lineK = lineScales(e);
         const lead = sources[0].fs * 1.2;
         if (af) {
           // right-to-left lines end where the original line ended (the text matrix measures in its own units)
@@ -409,8 +410,9 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
             prev = dx;
           });
         } else lines.forEach((line, li) => {
-          if (li > 0) s += `0 ${f(-lead)} Td `;
-          s += encodeMixed(line.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe);
+          // the next line as far down as its largest letters need
+          if (li > 0) s += `0 ${f(-lead * Math.max(1, ...(lineK?.[li] ?? [1])))} Td `;
+          s += encodeMixed(line.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe, true, lineK?.[li]);
         });
         s += 'ET Q\n';
         add += s;
@@ -424,15 +426,23 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         let s = `q BT ${rgb(e.color ?? (hidden ? inkOf() : '#000000'), 'rg')} ${key} 1 Tf `;
         const ak = af ? leaf.newFontDictionary('ArE', af.ref).asString() : '';
         const rtl = af ? isRtl(e.text) : false;
+        const lineK = af ? null : lineScales(e);
+        const [mx, my] = e.offset ?? [0, 0];
+        let down = 0;
         lines.forEach((line, li) => {
-          let ox = e.region.o[0] + uy * h * 1.2 * li;
-          let oy = e.region.o[1] - ux * h * 1.2 * li;
+          if (li > 0) down += h * 1.2 * Math.max(1, ...(lineK?.[li] ?? [1]));
+          let ox = e.region.o[0] + mx + uy * down;
+          let oy = e.region.o[1] + my - ux * down;
           if (af) {
             const w = arabicLine(af, line, rtl, 1);
             const dx = rtl ? e.region.width - w.width * h : 0;
             ox += ux * dx; oy += uy * dx;
             s += `${ak} 1 Tf ${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm ${w.tj}`;
-          } else s += `${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm ${fb.encodeText(safe(fb, line)).toString()} Tj `;
+          } else {
+            s += `${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm `;
+            // letters of other sizes: the same font at their size, one piece per size
+            for (const [part, k] of sizeParts(line, lineK?.[li])) s += `${key} ${f(k)} Tf ${fb.encodeText(safe(fb, part)).toString()} Tj `;
+          }
         });
         add += s + 'ET Q\n';
       }
@@ -666,16 +676,19 @@ function encodeMixed(
   line: string, sources: Source[], fbKey: string, fbSize: number, fb: PDFFont, safe: (f: PDFFont, s: string) => string,
   /** a space the fonts lack: a gap in the current font (false: the stand-in font's space) */
   gapSpace = true,
+  /** size of each character (code point) × the line's size */
+  scales?: number[],
 ): string {
-  // split into runs per font: the line's own fonts first, a standard font for anything else
+  // split into runs per font and size: the line's own fonts first, a standard font for anything else
   let out = '';
   let cur = -2; // source index, -1 = fallback
+  let curK = 1;
   let buf: number[] = [];
   let fbBuf = '';
   const flush = () => {
     if (cur >= 0 && buf.length) {
       const src = sources[cur];
-      out += `${src.key} ${f(src.fs)} Tf [`;
+      out += `${src.key} ${f(src.fs * curK)} Tf [`;
       let bytes: number[] = [];
       const parts: string[] = [];
       for (const c of buf) {
@@ -689,20 +702,49 @@ function encodeMixed(
       if (bytes.length) parts.push(toHex(Uint8Array.from(bytes)));
       out += parts.join(' ') + '] TJ ';
     } else if (cur === -1 && fbBuf) {
-      out += `${fbKey} ${f(fbSize)} Tf ${fb.encodeText(safe(fb, fbBuf)).toString()} Tj `;
+      out += `${fbKey} ${f(fbSize * curK)} Tf ${fb.encodeText(safe(fb, fbBuf)).toString()} Tj `;
     }
     buf = [];
     fbBuf = '';
   };
+  let ci = 0;
   for (const ch of line) {
+    const k = scales?.[ci++] ?? 1;
     let idx = sources.findIndex((s) => s.map[ch] !== undefined);
     if (idx < 0 && ch === ' ' && gapSpace) idx = cur >= 0 ? cur : 0; // keep spaces in the current font (as a gap)
-    if (idx !== cur) { flush(); cur = idx; }
+    if (idx !== cur || k !== curK) { flush(); cur = idx; curK = k; }
     if (idx >= 0) buf.push(sources[idx].map[ch] ?? -1);
     else fbBuf += ch;
   }
   flush();
   return out;
+}
+
+/** per-character sizes of each line of an edit (null: all the same) */
+function lineScales(e: TextEdit): number[][] | null {
+  const chars = [...e.text];
+  if (!e.scales || e.scales.length !== chars.length) return null;
+  const out: number[][] = [[]];
+  chars.forEach((c, i) => { if (c === '\n') out.push([]); else out[out.length - 1].push(e.scales![i]); });
+  return out;
+}
+/** a line split into pieces of one size each */
+function sizeParts(line: string, scales?: number[]): [string, number][] {
+  const out: [string, number][] = [];
+  let i = 0;
+  for (const ch of line) {
+    const k = scales?.[i++] ?? 1;
+    const last = out[out.length - 1];
+    if (last && last[1] === k) last[0] += ch; else out.push([ch, k]);
+  }
+  return out;
+}
+/** a moved line's move as distances along and across it (for pictures placed along the line) */
+function moveAlong(e: TextEdit, dx: number, dy: number): [number, number] {
+  if (!e.offset) return [dx, dy];
+  const [ux, uy] = e.region.u, [mx, my] = e.offset;
+  // placeImage moves by dx along the line and dy down across it (−normal)
+  return [dx + mx * ux + my * uy, dy - (-mx * uy + my * ux)];
 }
 
 const KAPPA = 0.5522847498;

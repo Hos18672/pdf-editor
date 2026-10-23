@@ -4,7 +4,7 @@ import type { ClonedText, EditorObject, FormValues, M } from '../engine/types';
 import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
-import { uid } from './store';
+import { uid, cleanScales } from './store';
 import { BASELINE, textSize, arabicText } from '../engine/matchFonts';
 import { hasArabic, isRtl } from '../engine/rtl';
 import { registerEditFont, baselineInLine, docFontOf, objectFontCss, arabicFace, ARABIC_CSS } from './textFonts';
@@ -14,6 +14,7 @@ import { isRefocusing, editingHeld } from './hooks';
 import { FormLayer, FormField } from './Fields';
 import { matchScanStyle, scanStyles } from './scanStyle';
 import { coverPixels } from './rules';
+import { fillField, readField, fieldSelection, setFieldSelection, setLineEditor, lineEditor, lineEditorChanged, type LineEditor } from './lineEdit';
 
 export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
 
@@ -78,6 +79,12 @@ interface Props {
   onPictureTap?: (x: number, y: number) => void;
   /** a tap on a line of the page's text (viewport point): true when it is handled there */
   onRunTap?: (run: TextRun, x: number, y: number) => boolean;
+  /** the line being moved (drag it), if any */
+  moving?: string | null;
+  onRunMove?: (key: string, dx: number, dy: number) => void;
+  /** copied text waiting for a tap on the page to be placed there */
+  pasting?: boolean;
+  onPasteAt?: (src: number, x: number, y: number) => void;
   /** picture page: text being read (whole page in the background, a tapped line) */
   reading?: { page: boolean; band: { y0: number; y1: number } | null; at: { x: number; y: number } | null };
 }
@@ -192,6 +199,7 @@ export function PageView(p: Props) {
     return m;
   }, [shownKey]);
   const liveRun = (key: string) => !!p.edits[key] && shownEdits.get(key) === JSON.stringify(p.edits[key]);
+  const shownEdit = (key: string): RunEdit | null => { const j = shownEdits.get(key); try { return j ? JSON.parse(j) : null; } catch { return null; } };
 
   // Opening a line for editing: note the look of its letters on the page (font, weight, width,
   // softness), so the edit can be drawn to match when the text is part of a scan / picture.
@@ -218,6 +226,7 @@ export function PageView(p: Props) {
   const dragTools: Tool[] = ['whiteout', 'redact', 'highlight', 'underline', 'strike', 'rect', 'ellipse', 'line', 'arrow', 'draw', 'link'];
   const onLayerClick = (e: React.MouseEvent) => {
     if (gesture.multi) return;
+    if (p.pasting && p.onPasteAt) { p.onPasteAt(p.src, local(e).x, local(e).y); return; }
     if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
     const id = uid();
@@ -406,7 +415,7 @@ export function PageView(p: Props) {
   };
 
   // existing text stays clickable (= editable) with the Edit and Add-text tools
-  const passive = p.tool !== 'edit' && p.tool !== 'text';
+  const passive = (p.tool !== 'edit' && p.tool !== 'text') || !!p.pasting;
   const rooms = useMemo(() => lineRooms(p.data?.runs ?? []), [p.data]);
   // snap targets: page centre and the left margin(s) the text already uses
   const snap = useMemo(() => {
@@ -427,7 +436,7 @@ export function PageView(p: Props) {
     <div ref={outerRef} className="pageOuter" data-src={p.src} data-rot={rotation} style={{ width: swap ? H : W, height: swap ? W : H }}>
       <div
         ref={pageRef}
-        className={`page tool-${p.tool}`}
+        className={`page tool-${p.tool}${p.pasting ? ' pasting' : ''}`}
         style={{ width: W, height: H, transform: `translate(-50%, -50%) rotate(${rotation}deg)` }}
         onPointerDownCapture={(e) => { downAt.current = local(e); }}
         onPointerDown={onLayerDown}
@@ -443,7 +452,8 @@ export function PageView(p: Props) {
           ))}
           {p.data?.runs.map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
-              edit={p.edits[r.key]} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={liveRun(r.key)}
+              edit={p.edits[r.key]} shown={shownEdit(r.key)} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={liveRun(r.key)}
+              moving={p.moving === r.key} onMove={(dx, dy) => p.onRunMove?.(r.key, dx, dy)}
               page={{ canvas: canvasRef, w: info.w, paints }}
               clone={p.edits[r.key] ? p.cloneFor?.(r.key) : undefined}
               local={local} onNext={() => p.onNextRun(r.key)}
@@ -452,12 +462,15 @@ export function PageView(p: Props) {
                 if (at && p.onRunTap?.(r, at.x, at.y)) return;
                 p.onSelect(r.key); p.onEditing(r.key);
               }}
-              onCommit={(raw) => {
+              onCommit={(raw, ks) => {
                 const text = raw.normalize('NFC');
                 const prev = p.edits[r.key];
-                const next: RunEdit = { text, sizeScale: prev?.sizeScale ?? 1, color: prev?.color ?? null };
-                const unchanged = text === r.str && next.sizeScale === 1 && next.color === null;
-                if (unchanged ? prev : !prev || prev.text !== text) p.onRunEdit(r.key, unchanged ? null : next);
+                const scales = cleanScales(text, ks);
+                const next: RunEdit = { text, sizeScale: prev?.sizeScale ?? 1, color: prev?.color ?? null,
+                  ...(scales ? { scales } : {}), ...(prev?.dx || prev?.dy ? { dx: prev.dx ?? 0, dy: prev.dy ?? 0 } : {}) };
+                const unchanged = text === r.str && next.sizeScale === 1 && next.color === null && !scales && !next.dx && !next.dy;
+                const same = !!prev && prev.text === text && JSON.stringify(prev.scales ?? null) === JSON.stringify(scales ?? null);
+                if (unchanged ? prev : !same) p.onRunEdit(r.key, unchanged ? null : next);
                 p.onStopEditing(r.key);
               }} />
           ))}
@@ -581,48 +594,30 @@ function Cover({ page, b, bg, fg, zoom, x, y, w, h }: { page: PageRef; b: Return
   return <canvas ref={ref} className="cover" style={{ background: bg, left: x * zoom, top: y * zoom, width: w * zoom, height: h * zoom, right: 'auto', bottom: 'auto' }} />;
 }
 
-function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, live, clone, page, local, onStart, onCommit, onNext }: {
+function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, moving, room, live, clone, page, local, onStart, onCommit, onMove, onNext }: {
   page: PageRef; live?: boolean; selected: boolean; onNext: () => void; clone?: { url: string; img: ClonedText };
   run: TextRun; vm: M; zoom: number; font?: FontInfo; color?: { bg: string; fg: string }; edit?: RunEdit;
+  /** the edit of this line as the page picture already shows it (null: the original line) */
+  shown?: RunEdit | null;
   room?: { up: number; down: number };
-  editing: boolean; onStart: () => void; onCommit: (text: string) => void;
+  editing: boolean; onStart: () => void; onCommit: (text: string, scales?: number[]) => void;
+  /** being moved: dragging it moves the line (viewport units, from its original place) */
+  moving?: boolean; onMove?: (dx: number, dy: number) => void;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
 }) {
   const b = runBox(run, vm);
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
   const [value, setValue] = useState(edit?.text ?? run.str);
-  useEffect(() => { if (editing) setValue(edit?.text ?? run.str); }, [editing]); // eslint-disable-line
+  const scalesRef = useRef<number[] | undefined>(edit?.scales);
+  const [selVer, setSelVer] = useState(0);
+  useEffect(() => { if (editing) { setValue(edit?.text ?? run.str); scalesRef.current = edit?.scales; } }, [editing]); // eslint-disable-line
   // distance along the line (page units) where the user tapped; the caret goes there
   const tapAt = useRef<number | null>(null);
   const begin = (e: React.MouseEvent) => {
+    if (moving) return;
     const pt = local(e);
-    tapAt.current = (pt.x - b.x) * Math.cos(b.angle) + (pt.y - b.y) * Math.sin(b.angle);
+    tapAt.current = (pt.x - b.x - (edit?.dx ?? 0)) * Math.cos(b.angle) + (pt.y - b.y - (edit?.dy ?? 0)) * Math.sin(b.angle);
     onStart();
-  };
-  useEffect(() => {
-    const ta = taRef.current;
-    if (!editing || !ta) return;
-    // never let the browser scroll the page to the end of the line
-    ta.focus({ preventScroll: true });
-    const text = ta.value;
-    const at = caretIndex(text, tapAt.current, fontCss, b.h * (edit?.sizeScale ?? 1), !edit ? b.w : null);
-    ta.setSelectionRange(at, at);
-    tapAt.current = null;
-  }, [editing]); // eslint-disable-line
-  const latest = useRef({ value, onCommit, committed: false, cancel: false });
-  latest.current.value = value;
-  latest.current.onCommit = onCommit;
-  useEffect(() => {
-    if (!editing) return;
-    latest.current.committed = false;
-    latest.current.cancel = false;
-    return () => { if (!latest.current.committed) { latest.current.committed = true; latest.current.onCommit(latest.current.value); } };
-  }, [editing]);
-  const original = edit?.text ?? run.str;
-  const commitOnce = () => {
-    if (latest.current.committed) return;
-    latest.current.committed = true;
-    onCommit(latest.current.cancel ? original : value);
   };
 
   const scale = edit?.sizeScale ?? 1;
@@ -645,40 +640,174 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
   const mapped = !arText && !!font && !font.editFamily && !identity;
   // put the baseline of the first line exactly on the original baseline
   const lineTop = b.asc * zoom - baselineInLine(fontCss, size, lineH);
+
+  // ----- editing -----
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!editing || !el) return;
+    // plain text only (no bold or pasted formatting); older browsers get a rich field that is kept plain
+    try { el.contentEditable = 'plaintext-only'; } catch { /* unsupported */ }
+    if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
+    fillField(el, edit?.text ?? run.str, edit?.scales);
+    // never let the browser scroll the page to the end of the line
+    el.focus({ preventScroll: true });
+    const text = edit?.text ?? run.str;
+    const at = caretIndex(text, tapAt.current, fontCss, b.h * (edit?.sizeScale ?? 1), !edit ? b.w : null);
+    setFieldSelection(el, at);
+    tapAt.current = null;
+  }, [editing]); // eslint-disable-line
+  // the letters last selected in the field (kept when a button takes the focus for a moment)
+  const lastSel = useRef<[number, number] | null>(null);
+  useEffect(() => {
+    if (!editing) return;
+    const onSel = () => {
+      const el = fieldRef.current;
+      if (!el || document.activeElement !== el) return;
+      const s = fieldSelection(el);
+      if (s) { lastSel.current = s; lineEditorChanged(); }
+    };
+    document.addEventListener('selectionchange', onSel);
+    return () => document.removeEventListener('selectionchange', onSel);
+  }, [editing]);
+  const baseSize = b.h * scale;
+  useEffect(() => {
+    if (!editing) return;
+    const api: LineEditor = {
+      key: run.key,
+      selSize: () => {
+        const s = lastSel.current;
+        if (!s || s[0] === s[1]) return null;
+        return Math.round(baseSize * (scalesRef.current?.[s[0]] ?? 1) * 10) / 10;
+      },
+      setSelSize: (pt) => {
+        const el = fieldRef.current, s = lastSel.current;
+        if (!el || !s || s[0] === s[1]) return false;
+        const { text, scales } = readField(el);
+        const k = Math.max(0.2, Math.min(8, pt / baseSize));
+        for (let i = s[0]; i < s[1] && i < scales.length; i++) if (text[i] !== '\n') scales[i] = k;
+        scalesRef.current = scales;
+        fillField(el, text, scales);
+        el.focus({ preventScroll: true });
+        setFieldSelection(el, s[0], s[1]);
+        setSelVer((v) => v + 1);
+        lineEditorChanged();
+        return true;
+      },
+    };
+    setLineEditor(api);
+    return () => { if (lineEditor() === api) setLineEditor(null); };
+  }, [editing, baseSize, run.key]);
+  const latest = useRef({ value, onCommit, committed: false, cancel: false });
+  latest.current.value = value;
+  latest.current.onCommit = onCommit;
+  useEffect(() => {
+    if (!editing) return;
+    latest.current.committed = false;
+    latest.current.cancel = false;
+    return () => { if (!latest.current.committed) { latest.current.committed = true; latest.current.onCommit(latest.current.value, scalesRef.current); } };
+  }, [editing]);
+  const original = edit?.text ?? run.str;
+  const commitOnce = () => {
+    if (latest.current.committed) return;
+    latest.current.committed = true;
+    if (latest.current.cancel) onCommit(original, edit?.scales);
+    else onCommit(value, scalesRef.current);
+  };
+  const readBack = () => {
+    const el = fieldRef.current;
+    if (!el) return;
+    const { text, scales } = readField(el);
+    scalesRef.current = scales;
+    setValue(text);
+  };
+  /** put plain text in at the caret (newlines, pasted text) */
+  const insertPlain = (t: string) => {
+    const el = fieldRef.current;
+    if (!el) return;
+    const s = fieldSelection(el) ?? lastSel.current;
+    if (!s) return;
+    const { text, scales } = readField(el);
+    const cps = [...text];
+    const k = scales[Math.max(0, s[0] - 1)] ?? 1;
+    const add = [...t.replace(/\r\n?/g, '\n')];
+    cps.splice(s[0], s[1] - s[0], ...add);
+    scales.splice(s[0], s[1] - s[0], ...add.map(() => k));
+    fillField(el, cps.join(''), scales);
+    setFieldSelection(el, s[0] + add.length);
+    readBack();
+  };
+
+  // ----- where the line is drawn -----
+  // the line's move (a drag in progress, else the saved one)
+  const [drag, setDrag] = useState<{ dx: number; dy: number } | null>(null);
+  const dx = drag?.dx ?? edit?.dx ?? 0, dy = drag?.dy ?? edit?.dy ?? 0;
+  const moved = dx !== 0 || dy !== 0;
+  // in the line's own (possibly turned) frame
+  const ca = Math.cos(b.angle), sa = Math.sin(b.angle);
+  const ldx = dx * ca + dy * sa, ldy = -dx * sa + dy * ca;
   // Edited text can be longer (or have more lines) than the original line: the tap target grows with
   // it, measured against the original line so it follows the real font's widths.
-  const shown = edit && !editing ? edit.text : null;
-  const grown = useMemo(() => {
-    if (shown === null || shown === run.str) return null;
-    const ls = shown.split('\n');
+  const extent = (t: string, ks?: number[]) => {
+    const ls = t.split('\n');
     const base = textWidth(run.str, fontCss) || 1;
-    const widest = Math.max(...ls.map((l) => textWidth(l, fontCss)));
-    return { w: Math.max(b.w, (b.w * widest * scale) / base), lines: ls.length };
-  }, [shown, run.str, fontCss, b.w, scale]);
+    let i = 0, widest = 0, tall = 0;
+    for (const l of ls) {
+      let w = 0, k1 = 1;
+      for (const ch of l) { const k = ks?.[i++] ?? 1; w += textWidth(ch, fontCss) * k; k1 = Math.max(k1, k); }
+      i++; // the newline
+      widest = Math.max(widest, w);
+      tall += k1;
+    }
+    return { w: Math.max(b.w, (b.w * widest * scale) / base), lines: ls.length, tall };
+  };
+  const shownText = edit && !editing ? edit.text : null;
+  const grown = useMemo(() => (shownText === null || (shownText === run.str && !edit?.scales) ? null : extent(shownText, edit?.scales)),
+    [shownText, edit?.scales, run.str, fontCss, b.w, scale]); // eslint-disable-line react-hooks/exhaustive-deps
   const style: React.CSSProperties = {
     left: b.x * zoom, top: b.top * zoom, width: (grown?.w ?? b.w) * zoom,
-    height: (b.height + (grown && grown.lines > 1 ? (grown.lines - 1) * b.h * scale * 1.2 : 0)) * zoom,
+    height: (b.height + (grown && grown.tall > 1 ? (grown.tall - 1) * b.h * scale * 1.2 : 0)) * zoom,
     transform: b.angle ? `rotate(${b.angle}rad)` : undefined,
     transformOrigin: `0 ${b.asc * zoom}px`,
   };
+  // the cover goes where the page picture shows the line now (its earlier move and length included)
+  const sh = shown ?? null;
+  const shownBox = useMemo(() => (sh ? extent(sh.text, sh.scales) : null), [sh, fontCss, b.w]); // eslint-disable-line react-hooks/exhaustive-deps
+  const cdx = sh?.dx ?? 0, cdy = sh?.dy ?? 0;
+  const cl = cdx * ca + cdy * sa, ct = -cdx * sa + cdy * ca;
+  const coverW = Math.max(b.w, shownBox?.w ?? b.w), coverTall = Math.max(1, shownBox?.tall ?? 1) * (sh?.sizeScale ?? 1);
 
-  // the editing box fits its text: again when the text, the zoom or the font changes, and once the
-  // fonts have loaded (a box measured before a zoom cut the text off)
-  const fitBox = () => {
-    const ta = taRef.current;
-    if (!ta) return;
-    ta.style.width = '0px';
-    ta.style.height = '0px';
-    ta.style.width = ta.scrollWidth + 4 + 'px';
-    ta.style.height = ta.scrollHeight + 'px';
-  };
-  useLayoutEffect(fitBox, [value, editing, size, lineH, fontCss]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    const fonts = (document as any).fonts;
-    if (!editing || !fonts?.addEventListener) return;
-    fonts.addEventListener('loadingdone', fitBox);
-    return () => fonts.removeEventListener('loadingdone', fitBox);
-  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // dragging the line while it is being moved
+  const dragFrom = useRef<{ x: number; y: number; dx: number; dy: number; id: number } | null>(null);
+  const moveBox = moving ? (
+    <div className="movebox" title="Drag to move the line"
+      style={{ left: ldx * zoom - 6, top: ldy * zoom - 6, width: (grown?.w ?? b.w) * zoom + 12, height: style.height as number + 12 }}
+      onPointerDown={(e) => {
+        e.stopPropagation(); e.preventDefault();
+        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+        const pt = local(e);
+        dragFrom.current = { x: pt.x, y: pt.y, dx: edit?.dx ?? 0, dy: edit?.dy ?? 0, id: e.pointerId };
+        setDrag({ dx: edit?.dx ?? 0, dy: edit?.dy ?? 0 });
+      }}
+      onPointerMove={(e) => {
+        const d = dragFrom.current;
+        if (!d || d.id !== e.pointerId) return;
+        const pt = local(e);
+        setDrag({ dx: d.dx + pt.x - d.x, dy: d.dy + pt.y - d.y });
+      }}
+      onPointerUp={(e) => {
+        const d = dragFrom.current;
+        if (!d || d.id !== e.pointerId) return;
+        dragFrom.current = null;
+        const pt = local(e);
+        const ndx = d.dx + pt.x - d.x, ndy = d.dy + pt.y - d.y;
+        setDrag(null);
+        if (Math.abs(ndx - d.dx) > 0.01 || Math.abs(ndy - d.dy) > 0.01) onMove?.(ndx, ndy);
+      }}
+      onPointerCancel={() => { dragFrom.current = null; setDrag(null); }}
+      onClick={(e) => e.stopPropagation()}>
+      <span className="grip"><Icon name="move" size={14} /></span>
+    </div>
+  ) : null;
 
   // a scan line: the new letters (made of the page's own) over the old ones, as it will be saved
   if (clone && edit && !editing) {
@@ -686,68 +815,110 @@ function RunView({ run, vm, zoom, font, color, edit, editing, selected, room, li
     const pad = h * 0.15;
     const down = Math.max(Math.min(h * 0.42, room?.down ?? h * 0.42), c.inkDown !== undefined ? Math.min(h * 0.75, (c.inkDown + 0.06) * h) : 0);
     const up = Math.max(Math.min(h * 1.05, room?.up ?? h * 1.05), c.inkUp !== undefined ? Math.min(h * 1.4, (c.inkUp + 0.06) * h) : 0);
-    const l = Math.min(0, c.inkX0 * h) - pad, r = Math.max(b.w, c.inkX1 * h) + pad, dy = c.dy * h;
+    const l = Math.min(0, c.inkX0 * h) - pad, r = Math.max(b.w, c.inkX1 * h) + pad, cdy2 = c.dy * h;
     const z = zoom, oy = b.asc; // children are placed from the baseline start
     return (
-      <div className={`run changed cloned${selected ? ' selected' : ''}`} data-key={run.key}
-        style={{ ...style, width: Math.max(b.w, c.w - c.left) * z }}
+      <div className={`run changed cloned${selected ? ' selected' : ''}${moving ? ' moving' : ''}`} data-key={run.key}
+        style={{ ...style, width: Math.max(b.w, c.w - c.left) * z, pointerEvents: moved ? 'none' : undefined }}
         title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
-        <Cover page={page} b={b} bg={bg} fg={color?.fg ?? '#000'} zoom={z} x={l} y={oy + dy - up} w={r - l} h={up + down} />
+        <Cover page={page} b={b} bg={bg} fg={color?.fg ?? '#000'} zoom={z} x={l} y={oy + cdy2 - up} w={r - l} h={up + down} />
         <img className="clone" src={clone.url} alt="" draggable={false}
-          style={{ left: -c.left * z, top: (oy + c.below - c.h) * z, width: c.w * z, height: c.h * z }} />
+          style={{ left: (ldx - c.left) * z, top: (ldy + oy + c.below - c.h) * z, width: c.w * z, height: c.h * z, pointerEvents: 'auto' }} />
+        {moveBox}
       </div>
     );
   }
-  if ((!edit || live) && !editing) {
-    return <div className={`run${selected ? ' selected' : ''}${edit ? ' changed' : ''}`} data-key={run.key} style={style} title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }} />;
+  if ((!edit || live) && !editing && !drag) {
+    return (
+      <div className={`run${selected ? ' selected' : ''}${edit ? ' changed' : ''}${moving ? ' moving' : ''}`} data-key={run.key}
+        style={{ ...style, left: (b.x + dx) * zoom, top: (b.top + dy) * zoom }}
+        title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
+        {moving && moveBox && React.cloneElement(moveBox, { style: { ...moveBox.props.style, left: -6, top: -6 } })}
+      </div>
+    );
   }
-  const lines = (editing ? value : edit!.text).split('\n');
+  const text = editing ? value : edit?.text ?? run.str;
+  const ks = editing ? undefined : edit?.scales;
+  const lines = text.split('\n');
   // letters the embedded font lacks fall back to a system font: give them the line's weight and slant,
   // without faking bold on the embedded font itself
   const textStyle: React.CSSProperties = {
-    fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop,
+    fontSize: size, lineHeight: `${lineH}px`, color: fg, fontFamily: fontCss, top: lineTop + ldy * zoom, left: ldx * zoom,
     fontWeight: font?.fallback.bold ? 700 : 400, fontStyle: font?.fallback.italic && !arText ? 'italic' : 'normal', fontSynthesis: 'none',
-    ...(rtl ? { left: 'auto', right: ((grown?.w ?? b.w) - b.w) * zoom, direction: 'rtl', textAlign: 'right' } as React.CSSProperties : {}),
+    ...(rtl ? { left: 'auto', right: ((grown?.w ?? b.w) - b.w - ldx) * zoom, direction: 'rtl', textAlign: 'right' } as React.CSSProperties : {}),
   };
+  void selVer;
+  let ci = 0;
   return (
-    <div className={`run edited${editing ? ' editing' : ''}${selected ? ' selected' : ''}`} data-key={run.key} style={style} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
+    <div className={`run edited${editing ? ' editing' : ''}${selected ? ' selected' : ''}${moving ? ' moving' : ''}`} data-key={run.key}
+      style={{ ...style, pointerEvents: moved && !editing ? 'none' : undefined }}
+      onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); if (!editing) begin(e); }}>
       {/* hide the original glyphs completely (accents, descenders) but stay clear of the lines around it;
-          only where the original text was: longer text runs on over the page, as it will be saved */}
+          only where the line is drawn now: longer text runs on over the page, as it will be saved */}
       <Cover page={page} b={b} bg={bg} fg={color?.fg ?? '#000'} zoom={zoom}
-        x={-Math.max(2 / zoom, b.h * 0.06)} w={b.w + 2 * Math.max(2 / zoom, b.h * 0.06)}
-        y={b.asc - (room?.up ?? b.h * 0.94) - 1 / zoom} h={(room?.up ?? b.h * 0.94) + (room?.down ?? b.h * 0.3) + 2 / zoom} />
+        x={cl - Math.max(2 / zoom, b.h * 0.06)} w={coverW + 2 * Math.max(2 / zoom, b.h * 0.06)}
+        y={ct + b.asc - (room?.up ?? b.h * 0.94) * (sh?.sizeScale ?? 1) - 1 / zoom}
+        h={((room?.up ?? b.h * 0.94) + (room?.down ?? b.h * 0.3)) * (sh?.sizeScale ?? 1) + (coverTall - (sh?.sizeScale ?? 1)) * b.h * 1.2 + 2 / zoom} />
       {editing ? (
-        <textarea
-          ref={taRef}
+        <div
+          ref={fieldRef}
+          className="lfield"
           dir="auto"
-          value={value}
+          role="textbox"
+          aria-multiline="true"
+          aria-label="Line text"
           spellCheck={false}
           autoCapitalize="off"
-          autoCorrect="off"
-          onChange={(e) => setValue(e.target.value)}
+          {...{ autoCorrect: 'off' } as any}
+          suppressContentEditableWarning
+          onInput={readBack}
+          onPaste={(e) => { e.preventDefault(); insertPlain(e.clipboardData.getData('text/plain')); }}
+          onDrop={(e) => e.preventDefault()}
           onBlur={(e) => { if (!isRefocusing(e.currentTarget) && !editingHeld()) commitOnce(); }}
           onKeyDown={(e) => {
-            const ta = e.target as HTMLTextAreaElement;
+            const el = e.currentTarget;
             e.stopPropagation();
-            if (e.key === 'Escape') { latest.current.cancel = true; ta.blur(); }
-            else if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ta.blur(); }
-            else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); ta.blur(); setTimeout(onNext, 0); }
+            const mod = e.ctrlKey || e.metaKey;
+            if (e.key === 'Escape') { latest.current.cancel = true; el.blur(); }
+            else if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); insertPlain('\n'); }
+            else if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
+            else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); el.blur(); setTimeout(onNext, 0); }
+            // no rich formatting in a rich field
+            else if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
           }}
-          style={{ ...textStyle, background: 'transparent', caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
+          style={{ ...textStyle, caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
         />
       ) : (
-        <div className="txt" style={textStyle} dir={arText ? 'auto' : undefined}>
-          {lines.map((line, li) => (
-            <div key={li} style={{ height: lineH }}>
-              {mapped
-                ? segments(line, font).map((sg, i) => (
-                  <span key={i} style={{ fontFamily: sg.orig ? `"${font!.loadedName}", ${font!.cssFallback}` : font!.cssFallback }}>{sg.text}</span>
-                ))
-                : line || '\u200b'}
-            </div>
-          ))}
+        <div className="txt" style={{ ...textStyle, pointerEvents: moved ? 'auto' : undefined }} dir={arText ? 'auto' : undefined}>
+          {lines.map((line, li) => {
+            // pieces of one size each
+            const parts: { t: string; k: number }[] = [];
+            for (const ch of line) {
+              const k = ks?.[ci++] ?? 1;
+              const last = parts[parts.length - 1];
+              if (last && last.k === k) last.t += ch; else parts.push({ t: ch, k });
+            }
+            ci++; // the newline
+            // the first line keeps its baseline (bigger letters reach up); later lines move down as far
+            // as their biggest letters need, as in the saved file
+            const tallest = Math.max(1, ...parts.map((p) => p.k));
+            return (
+              <div key={li} style={{ height: lineH * (li ? tallest : 1), paddingTop: li ? (tallest - 1) * lineH : 0 }}>
+                {!parts.length ? '​' : parts.map((pt, i) => (
+                  <span key={i} style={pt.k !== 1 ? { fontSize: `${pt.k}em` } : undefined}>
+                    {mapped
+                      ? segments(pt.t, font).map((sg, j) => (
+                        <span key={j} style={{ fontFamily: sg.orig ? `"${font!.loadedName}", ${font!.cssFallback}` : font!.cssFallback }}>{sg.text}</span>
+                      ))
+                      : pt.t}
+                  </span>
+                ))}
+              </div>
+            );
+          })}
         </div>
       )}
+      {moveBox}
     </div>
   );
 }
