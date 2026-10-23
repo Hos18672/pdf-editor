@@ -39,7 +39,9 @@ const stamp = () => {
  * The document scanner: camera (or photos) → automatic crop and straightening → clean-up filters →
  * a PDF at real paper size, optionally searchable. Everything runs on the device.
  */
-export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onSaved }: {
+export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onSaved, incoming }: {
+  /** Android: pages from Google's scanner handed over after the page was started again */
+  incoming?: string[];
   host: HostProps; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
   onClose: () => void; onOpenInEditor: (name: string, bytes: Uint8Array) => void; onSaved?: (name: string, bytes: Uint8Array) => void;
 }) {
@@ -368,8 +370,21 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       setNat(false); setView('camera');
     } finally { natOpen.current = false; setNatBusy(false); }
   }, [host, mode, add]);
-  // opens by itself when the scanner (or Add page) comes to it
-  useEffect(() => { if (view === 'native') scanNative(); }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
+  // pages handed over after a restart of the page; otherwise the scanner opens by itself when the
+  // scan (or Add page) comes to it
+  const took = useRef(false);
+  useEffect(() => {
+    if (incoming?.length && !took.current) {
+      took.current = true;
+      (async () => {
+        const kind = mode === 'receipt' ? 'receipt' : 'doc';
+        for (const u of incoming) { const b = await readImage(u, host.readShared).catch(() => null); if (b) await add(b, kind, undefined, true); }
+        if (pagesRef.current.length) { setView('review'); setCur(0); }
+      })();
+      return;
+    }
+    if (view === 'native') scanNative();
+  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the web app on a phone: a separate Share (the Android app's Save already opens the share sheet)
   const canShare = useMemo(() => !host.isNative && canShareFiles(), [host.isNative]);

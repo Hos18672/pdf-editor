@@ -9,14 +9,30 @@ import * as Sharing from 'expo-sharing';
 import PdfEditorDom from '../components/PdfEditorDom';
 import { PeIntents } from '../../modules/pe-intents';
 
-const takeIntent = async () => PeIntents?.takeIntent() ?? null;
+// Pages from Google's scanner that the page could not take (its renderer was stopped while the
+// scanner had the screen, low memory): handed over as "scanned" when the page has started again
+let pendingScan: string[] | null = null;
+let pageGone = false;
+let notifyPage: () => void = () => {};
+const takeIntent = async () => {
+  if (pendingScan?.length) {
+    const files = pendingScan.map((uri, i) => ({ uri, name: `Scan ${i + 1}.jpg`, mime: 'image/jpeg', size: null }));
+    pendingScan = null;
+    return { mode: 'scanned', files, text: null, subject: null };
+  }
+  return PeIntents?.takeIntent() ?? null;
+};
 const addToCalendar = async (e: { title: string; begin: number; allDay: boolean; note: string }) => {
   if (!PeIntents) return false;
   try { return PeIntents.addCalendarEvent(e.title, e.begin, e.allDay, e.note); } catch { return false; }
 };
 const scanDocs = async (limit: number) => {
   if (!PeIntents?.scanDocuments) throw new Error('Not available');
-  return PeIntents.scanDocuments(limit, true);
+  pageGone = false;
+  const uris = await PeIntents.scanDocuments(limit, true);
+  // the page that asked is gone: keep the pages for the new one
+  if (pageGone && uris?.length) { pendingScan = uris; setTimeout(() => notifyPage(), 1500); }
+  return uris;
 };
 const readShared = (uri: string) => (PeIntents ? PeIntents.readUri(uri) : Promise.reject(new Error('Not available')));
 
@@ -125,6 +141,11 @@ function NativeShell({ dark }: { dark: boolean }) {
     return () => sub?.remove();
   }, []);
   const exitApp = useCallback(() => { BackHandler.exitApp(); }, []);
+  // the WebView's renderer was stopped (low memory, often while another app or the scanner has the
+  // screen): start the page again instead of letting Android close the app
+  const [gen, setGen] = useState(0);
+  useEffect(() => { notifyPage = () => dom.current?.injectJavaScript?.("window.dispatchEvent(new Event('pe-intent'));true;"); }, []);
+  const onGone = useCallback(() => { pageGone = true; setGen((g) => g + 1); }, []);
   const getInsets = useCallback(async () => {
     const i = latest.current;
     // with the keyboard up the page ends at the keyboard: no navigation-bar gap
@@ -135,6 +156,7 @@ function NativeShell({ dark }: { dark: boolean }) {
       <StatusBar style={topDark ? 'light' : 'dark'} />
       <NavigationBar style={bottomDark ? 'light' : 'dark'} />
       <PdfEditorDom
+        key={gen}
         ref={dom}
         exitApp={exitApp}
         isNative
@@ -161,6 +183,8 @@ function NativeShell({ dark }: { dark: boolean }) {
           mediaCapturePermissionGrantType: 'grant',
           injectedJavaScriptBeforeContentLoaded: CATCH_PAGE_ERRORS,
           onMessage: onPageMessage,
+          onRenderProcessGone: onGone,
+          onContentProcessDidTerminate: onGone,
           // only in the CI smoke-test build: lets the test read the page through DevTools
           webviewDebuggingEnabled: process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1',
         } as any}
