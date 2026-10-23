@@ -952,7 +952,7 @@ export function scanKernels(): Kernels {
    * A finger or hand holding the page: a skin-coloured patch, darker than the paper, that comes in from
    * the page's edge. Returns how much each pixel is covered (0…1, with a soft rim), or null.
    */
-  function edgeObjects(img: PixelImage): Float32Array | null {
+  function edgeObjects(img: PixelImage, loose = false): Float32Array | null {
     const w = img.w, h = img.h, d = img.data;
     const s = Math.max(1, Math.round(Math.max(w, h) / 420));
     const gw = Math.ceil(w / s), gh = Math.ceil(h / s), gn = gw * gh;
@@ -961,13 +961,31 @@ export function scanKernels(): Kernels {
       const x = Math.min(w - 1, gx * s + (s >> 1)), y = Math.min(h - 1, gy * s + (s >> 1)), i = (y * w + x) * 4;
       const r = d[i], g = d[i + 1], b = d[i + 2], q = gy * gw + gx;
       Yg[q] = 0.299 * r + 0.587 * g + 0.114 * b;
-      skin[q] = r > 80 && r > g + 10 && r > b + 30 && (r - b) / r > 0.2 && (r - b) / r < 0.58 && g > b * 0.85 ? 1 : 0;
+      // (cards: fingers in shade or tinted by the card's light count too)
+      skin[q] = loose
+        ? (r > 60 && r > g + 8 && r > b + 25 && (r - b) / r > 0.18 && (r - b) / r < 0.62 && g > b * 0.82 ? 1 : 0)
+        : (r > 80 && r > g + 10 && r > b + 30 && (r - b) / r > 0.2 && (r - b) / r < 0.58 && g > b * 0.85 ? 1 : 0);
     }
     // the paper's brightness (a bright tail of the page); skin is clearly darker than it
     const hist = new Uint32Array(256);
     for (let q = 0; q < gn; q++) hist[Yg[q] | 0]++;
     const paperY = percentile(hist, gn, 0.85);
-    for (let q = 0; q < gn; q++) if (skin[q] && Yg[q] > paperY * 0.9) skin[q] = 0;
+    for (let q = 0; q < gn; q++) if (skin[q] && Yg[q] > paperY * (loose ? 0.95 : 0.9)) skin[q] = 0;
+    if (loose) {
+      // a tinted card (pink, beige) is not skin: the finger must be clearly warmer than the card itself
+      const wh = new Uint32Array(101);
+      for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+        const x = Math.min(w - 1, gx * s + (s >> 1)), y = Math.min(h - 1, gy * s + (s >> 1)), i = (y * w + x) * 4;
+        wh[Math.max(0, Math.min(100, Math.round(((d[i] - d[i + 2]) / Math.max(1, d[i])) * 100)))]++;
+      }
+      const cardWarm = percentile(wh, gn, 0.6) / 100;
+      for (let gy = 0; gy < gh; gy++) for (let gx = 0; gx < gw; gx++) {
+        const q = gy * gw + gx;
+        if (!skin[q]) continue;
+        const x = Math.min(w - 1, gx * s + (s >> 1)), y = Math.min(h - 1, gy * s + (s >> 1)), i = (y * w + x) * 4;
+        if ((d[i] - d[i + 2]) / Math.max(1, d[i]) < cardWarm + 0.1) skin[q] = 0;
+      }
+    }
     const keep = new Float32Array(gn), seen = new Uint8Array(gn), stack: number[] = [], comp: number[] = [];
     let any = false;
     const edge = Math.max(1, Math.round(Math.min(gw, gh) * 0.02));
@@ -988,7 +1006,7 @@ export function scanKernels(): Kernels {
       const area = comp.length, box = (x1 - x0 + 1) * (y1 - y0 + 1);
       // a solid patch of a real size, not a coloured logo or a few warm specks; never most of the page
       // (a printed band or block is a near-perfect rectangle; a finger is rounded)
-      if (!touches || area < gn * 0.002 || area > gn * 0.3 || area < box * 0.35 || area > box * 0.92) continue;
+      if (!touches || area < gn * 0.002 || area > gn * (loose ? 0.12 : 0.3) || area < box * 0.35 || area > box * 0.92) continue;
       for (const q of comp) keep[q] = 1;
       any = true;
     }
@@ -1435,8 +1453,7 @@ export function scanKernels(): Kernels {
    */
   function cardFilter(img: PixelImage, mode: 'auto' | 'enhance' | 'lighten' | 'gray'): void {
     const w = img.w, h = img.h, d = img.data, n = w * h;
-    const EO = mode === 'auto' ? edgeObjects(img) : null;
-    if (EO) fillFromAround(img, EO);
+    if (mode !== 'lighten') reduceGlare(img, mode === 'auto' ? 0.85 : 0.65);
     // (1) light: the bright envelope of blocks (most of a card is background), smoothed widely
     const B = Math.max(8, Math.round(Math.max(w, h) / 24)), bw = Math.ceil(w / B), bh = Math.ceil(h / B);
     const env = new Float32Array(bw * bh), hist = new Uint32Array(64);
@@ -1508,6 +1525,74 @@ export function scanKernels(): Kernels {
       let R = r * k, G = g * k, Bc = b * k;
       R = y2 + (R - y2) * sat; G = y2 + (G - y2) * sat; Bc = y2 + (Bc - y2) * sat;
       d[i] = R; d[i + 1] = G; d[i + 2] = Bc;
+    }
+  }
+
+  /**
+   * Shine on a laminated card or passport page: spots much brighter than the card around them and
+   * nearly colourless (a hologram's rainbow is colourful and stays), brought down to the card's own
+   * colour there, with a soft edge. White parts of the card are not touched (nothing is brighter).
+   */
+  function reduceGlare(img: PixelImage, amount: number): void {
+    const w = img.w, h = img.h, d = img.data, n = w * h;
+    // the card's usual colour per block: a low-middle level, then the middle of the blocks around (a
+    // spot of shine can fill a whole block, not most of its neighbours)
+    const B = Math.max(8, Math.round(Math.max(w, h) / 14)), bw = Math.ceil(w / B), bh = Math.ceil(h / B);
+    const mr = new Float32Array(bw * bh), mg = new Float32Array(bw * bh), mb = new Float32Array(bw * bh), my = new Float32Array(bw * bh);
+    const hist = new Uint32Array(256);
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      hist.fill(0); let tot = 0, sr = 0, sg = 0, sb = 0, c = 0;
+      for (let y = by * B; y < Math.min(h, by * B + B); y += 2) for (let x = bx * B; x < Math.min(w, bx * B + B); x += 2) {
+        const i = (y * w + x) * 4; hist[(0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) | 0]++; tot++;
+      }
+      const med = percentile(hist, tot, 0.4);
+      for (let y = by * B; y < Math.min(h, by * B + B); y += 2) for (let x = bx * B; x < Math.min(w, bx * B + B); x += 2) {
+        const i = (y * w + x) * 4, l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        if (Math.abs(l - med) <= 12) { sr += d[i]; sg += d[i + 1]; sb += d[i + 2]; c++; }
+      }
+      const k = by * bw + bx;
+      my[k] = med; mr[k] = c ? sr / c : med; mg[k] = c ? sg / c : med; mb[k] = c ? sb / c : med;
+    }
+    {
+      const y0 = Float32Array.from(my), r0c = Float32Array.from(mr), g0c = Float32Array.from(mg), b0c = Float32Array.from(mb);
+      for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+        // the median block of the 3 × 3 around (neither a dark photo nor a spot of shine is most of them)
+        const around: number[] = [];
+        for (let yy = Math.max(0, by - 1); yy <= Math.min(bh - 1, by + 1); yy++) for (let xx = Math.max(0, bx - 1); xx <= Math.min(bw - 1, bx + 1); xx++) around.push(yy * bw + xx);
+        around.sort((a, b) => y0[a] - y0[b]);
+        const best = around[around.length >> 1];
+        const k = by * bw + bx;
+        my[k] = y0[best]; mr[k] = r0c[best]; mg[k] = g0c[best]; mb[k] = b0c[best];
+      }
+    }
+    // smoothed, then per pixel
+    const sm = (a: Float32Array) => resizePlane(boxSmooth(a, bw, bh, 1), bw, bh, w, h);
+    const MY = sm(my), MR = sm(mr), MG = sm(mg), MB = sm(mb);
+    const M = new Float32Array(n);
+    let any = false;
+    for (let p = 0, i = 0; p < n; p++, i += 4) {
+      const r = d[i], g = d[i + 1], b = d[i + 2], l = 0.299 * r + 0.587 * g + 0.114 * b;
+      const over = l - MY[p], room = 255 - MY[p];
+      if (room < 25 || over < Math.max(22, room * 0.3)) continue;
+      if (Math.max(r, g, b) - Math.min(r, g, b) > 42) continue; // colourful: print or a hologram
+      M[p] = Math.min(1, (over - Math.max(22, room * 0.3)) / Math.max(10, room * 0.25) + 0.35);
+      any = true;
+    }
+    if (!any) return;
+    // a soft rim, and not for tiny specks (print highlights)
+    const r0 = Math.max(1, Math.round(Math.max(w, h) / 600));
+    const opened = runMax(runMax(runMax(runMax(M, w, h, r0, false, false), w, h, r0, false, true), w, h, r0 * 3, true, false), w, h, r0 * 3, true, true);
+    const soft = boxSmooth(opened, w, h, r0 * 2);
+    for (let p = 0, i = 0; p < n; p++, i += 4) {
+      const a = Math.min(1, soft[p]) * amount;
+      if (a < 0.02) continue;
+      // keep the detail (text under the shine) but bring its level down to the card's
+      const l = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2], k = MY[p] / Math.max(1, l);
+      for (const [ch, base] of [[0, MR[p]], [1, MG[p]], [2, MB[p]]] as const) {
+        const keepDetail = d[i + ch] * k;
+        const target = 0.5 * keepDetail + 0.5 * base;
+        d[i + ch] = d[i + ch] + (target - d[i + ch]) * a;
+      }
     }
   }
 
@@ -1669,6 +1754,9 @@ export function scanKernels(): Kernels {
 
   function finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number, card = false): PixelImage {
     if (filter !== 'original') {
+      // cards: a finger holding the card is filled in from the card around it (all looks but the original)
+      const EO = card && filter !== 'bw' ? edgeObjects(img, true) : null;
+      if (EO) fillFromAround(img, EO);
       if (card && filter !== 'color' && filter !== 'bw') {
         // ID cards and passports: the photograph improved, the card kept (see cardFilter)
         // (no local-contrast boost: it rings round the photo's dark hair and edges)

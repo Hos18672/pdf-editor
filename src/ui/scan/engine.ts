@@ -493,7 +493,11 @@ export function gridOf(p: ScanPage, rot: number): Grid | null {
 }
 /** worth trying the model: a sheet whose sides curve or whose printed lines wander */
 export function looksCurved(p: ScanPage, bent: Bentness | null | undefined): boolean {
-  if (!flattens(p) || p.aiOff || p.ai?.key === aiKey(p) || aiBroken) return false;
+  if (p.aiOff || p.ai?.key === aiKey(p) || aiBroken) return false;
+  // ID cards and passport pages: always worth a try (a passport page bows away from the spine, a card
+  // bends in the hand); the model's map is kept only if the printed lines come out straighter
+  if (isCard(p)) return true;
+  if (!flattens(p)) return false;
   const q = p.quad, side = Math.max(dist(q[0], q[1]), dist(q[0], q[3]), 1);
   return bendReach(p.bend) / side > 0.004 || (!!bent && bent.rms > 0.06);
 }
@@ -544,7 +548,7 @@ export async function flattenPage(p: ScanPage): Promise<NonNullable<ScanPage['ai
     const src = await cropSource(p, ow, oh, p.rot);
     const job = { quad: src.quad, bend: src.bend, outW: turned ? oh : ow, outH: turned ? ow : oh, sharpen: 'off' as const, flatten: null };
     const s = await sourceOf(src.bmp, src.region, src.RW, src.RH);
-    const r = await aiPost<{ grid: Grid | null; info: AiInfo }>(w, { type: 'flat', src: s, job }, transferOf(s));
+    const r = await aiPost<{ grid: Grid | null; info: AiInfo }>(w, { type: 'flat', src: s, job, force: isCard(p) }, transferOf(s));
     tlog(`ai ${r.info.used ? 'used' : 'not used'} (${r.info.why}) ${r.info.ms}ms`, t0);
     // kept for the unturned page
     return { key, grid: r.grid ? turnGrid(r.grid, (4 - (p.rot % 4)) % 4) : null, info: r.info };
