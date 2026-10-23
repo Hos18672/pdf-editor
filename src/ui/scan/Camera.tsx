@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons';
-import { FORMATS, quadArea, type Pt, type Quad } from './geom';
+import { quadArea, type Pt, type Quad } from './geom';
 import { liveDetect, stopLive } from './live';
 import { MODE_RATIOS, sharpness, type ScanMode } from './engine';
 
@@ -32,8 +32,6 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
   const video = useRef<HTMLVideoElement>(null);
   const view = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
-  /** where the whole camera frame fits on screen (nothing cropped, like the phone's camera app) */
-  const [fit, setFit] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
   const stream = useRef<MediaStream | null>(null);
   const fileIn = useRef<HTMLInputElement>(null);
   const camIn = useRef<HTMLInputElement>(null);
@@ -42,7 +40,6 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
   const [auto, setAuto] = useState(readAuto);
   const [hint, setHint] = useState('Point the camera at a document');
   const poly = useRef<SVGGElement>(null);
-  const [found, setFound] = useState(false);
   const [hold, setHold] = useState(0); // 0…1 progress of holding still
   const [flash, setFlash] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -155,25 +152,6 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
     setDev(lenses[(i + 1) % lenses.length]);
   };
 
-  // ---- fit the whole camera frame into the space between the top bar and the controls
-  useEffect(() => {
-    if (status !== 'live') return;
-    const v = video.current, el = view.current;
-    if (!v || !el) return;
-    const measure = () => {
-      const vw = v.videoWidth, vh = v.videoHeight, cw = el.clientWidth, ch = el.clientHeight;
-      if (!vw || !vh || !cw || !ch) return;
-      const sc = Math.min(cw / vw, ch / vh);
-      const w = Math.round(vw * sc), h = Math.round(vh * sc);
-      const next = { x: Math.round((cw - w) / 2), y: Math.round((ch - h) / 2), w, h };
-      setFit((o) => (o && o.x === next.x && o.y === next.y && o.w === next.w && o.h === next.h ? o : next));
-    };
-    measure();
-    const ro = new ResizeObserver(measure); ro.observe(el);
-    v.addEventListener('loadedmetadata', measure); v.addEventListener('resize', measure);
-    return () => { ro.disconnect(); v.removeEventListener('loadedmetadata', measure); v.removeEventListener('resize', measure); };
-  }, [status]);
-
   // ---- live outline + auto-capture
   // The page is found in a worker on a small frame; the outline on screen glides towards the latest
   // result every animation frame (no React re-render per frame).
@@ -218,7 +196,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       if (stop) return;
       const k = vw / fw;
       const now = performance.now();
-      // where the video is drawn (object-fit: cover; the box has the frame's shape once measured)
+      // where the video is drawn (object-fit: cover: the whole screen)
       const cw = b.clientWidth, ch = b.clientHeight, sc = Math.max(cw / vw, ch / vh);
       const ox = (cw - vw * sc) / 2, oy = (ch - vh * sc) / 2;
       // a clear outline, or an outline that matches the sheet as a whole (a receipt on a white desk)
@@ -228,7 +206,6 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       const near = (a: Quad, b: Quad, f: number) => Math.max(...a.map((p, i) => Math.hypot(p.x - b[i].x, p.y - b[i].y))) / diag < f;
       const recent = !!kept && now - keptAt < 900;
       const ok = strong || (!!det && recent && det.score > 0.4 && near(raw!, kept!, 0.05));
-      setFound(ok);
       if (det && ok) {
         let q = raw!;
         // small steps are noise: settle on the average, so the outline sits still on a still page
@@ -351,16 +328,14 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
     try { await track.applyConstraints({ advanced: [{ torch: on } as any] }); setTorch({ can: true, on }); } catch { setTorch({ can: false, on: false }); }
   };
 
-  const ratio = mode === 'id' ? FORMATS.id1.ratio : mode === 'passport' ? FORMATS.id3.ratio : null;
   const pickFiles = (l: FileList | null) => { const f = l ? Array.from(l) : []; if (f.length) onImport(f); };
   const ring = 2 * Math.PI * 37;
 
   return (
     <div className="scam" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
       <div className="scam-view" ref={view}>
-        <div className={`scam-frame${fit ? ' fit' : ''}`} ref={box} style={fit ? { left: fit.x, top: fit.y, width: fit.w, height: fit.h } : undefined}>
+        <div className="scam-frame" ref={box}>
           <video ref={video} playsInline muted autoPlay aria-label="Camera preview" />
-          {status === 'live' && ratio && !found && <div className="scam-guide" style={{ aspectRatio: String(ratio) }}><span>{mode === 'id' ? 'Place the card inside the frame' : 'Open the photo page and fit it in the frame'}</span></div>}
           <svg className="scam-svg" aria-hidden="true">
             <g ref={poly} style={{ display: 'none' }}>
               <polygon className={hold >= 1 ? 'go' : ''} />
