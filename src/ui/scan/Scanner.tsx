@@ -8,7 +8,7 @@ import { ConfirmClose } from '../ConfirmClose';
 import { useBack } from '../back';
 import { SortableArea, useSortableItem } from '../sortable';
 import type { Bp } from '../hooks';
-import { fullQuad, type Quad } from './geom';
+import type { Quad } from './geom';
 import type { Filter } from './kernels';
 import { Camera, MODES } from './Camera';
 import { CropEditor } from './CropEditor';
@@ -39,21 +39,15 @@ const stamp = () => {
  * The document scanner: camera (or photos) → automatic crop and straightening → clean-up filters →
  * a PDF at real paper size, optionally searchable. Everything runs on the device.
  */
-export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onSaved, incoming }: {
-  /** Android: pages from Google's scanner handed over after the page was started again */
-  incoming?: string[];
+export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onSaved }: {
   host: HostProps; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
   onClose: () => void; onOpenInEditor: (name: string, bytes: Uint8Array) => void; onSaved?: (name: string, bytes: Uint8Array) => void;
 }) {
   const mobile = bp === 'mobile';
   const [mode, setModeState] = useState<ScanMode>(readMode);
   const [pages, setPages] = useState<ScanPage[]>([]);
-  // Android: Google's document scanner (its own camera, edge finding and clean-up) for documents and
-  // receipts; cards, passports and books use the scanner here (front / back, the book's gutter)
-  const [nat, setNat] = useState(() => !!host.scanDocs);
-  const natFor = (m: ScanMode) => nat && (m === 'doc' || m === 'receipt');
-  const [view, setView] = useState<'camera' | 'review' | 'native'>(() => (host.scanDocs && (mode === 'doc' || mode === 'receipt') ? 'native' : 'camera'));
-  const toCamera = () => setView(natFor(mode) ? 'native' : 'camera');
+  const [view, setView] = useState<'camera' | 'review'>('camera');
+  const toCamera = () => setView('camera');
   const [cur, setCur] = useState(0);
   const [crop, setCrop] = useState<string | null>(null);
   const [renders, setRenders] = useState<Record<string, Render>>({});
@@ -83,15 +77,14 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   }, []);
 
   // ---- adding photos
-  const add = useCallback(async (blob: Blob, kind: ScanMode, side?: 'front' | 'back', cropped = false) => {
+  const add = useCallback(async (blob: Blob, kind: ScanMode, side?: 'front' | 'back') => {
     const id = newId();
     findingRef.current++;
     setFinding((n) => n + 1);
     try {
       const bmp = await decode(blob);
       const w = bmp.width, h = bmp.height;
-      // pages from Google's scanner come cropped and straightened already
-      let found = cropped ? { quad: fullQuad(w, h), bend: null, sure: true, ...shapeOf(fullQuad(w, h), w, h, kind) } : await findDocument(bmp, kind);
+      let found = await findDocument(bmp, kind);
       if (kind === 'book') {
         // an open book: the two pages of the spread, cut at the gutter
         const px = pixelsOf(bmp, 700);
@@ -346,45 +339,6 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     catch (e) { console.warn(e); toast({ msg: 'The PDF couldn’t be made on this device.', kind: 'err' }); }
   };
   const close = () => (pages.length && !saved ? setAskClose(true) : onClose());
-  // ---- Google's document scanner (Android)
-  const [natBusy, setNatBusy] = useState(false);
-  const natOpen = useRef(false);
-  const scanNative = useCallback(async () => {
-    if (!host.scanDocs || natOpen.current) return;
-    natOpen.current = true;
-    setNatBusy(true);
-    const kind = mode === 'receipt' ? 'receipt' : 'doc';
-    try {
-      const uris = await host.scanDocs(0);
-      if (uris?.length) {
-        const start = pagesRef.current.length;
-        for (const u of uris) {
-          const blob = await readImage(u, host.readShared).catch(() => null);
-          if (blob) await add(blob, kind, undefined, true);
-        }
-        setView('review'); setCur(Math.min(start, Math.max(0, pagesRef.current.length - 1)));
-      } else if (pagesRef.current.length) setView('review');
-    } catch (e) {
-      // no Play services, too little memory, an old phone: the scanner here
-      console.warn('scan: Google scanner unavailable', e);
-      setNat(false); setView('camera');
-    } finally { natOpen.current = false; setNatBusy(false); }
-  }, [host, mode, add]);
-  // pages handed over after a restart of the page; otherwise the scanner opens by itself when the
-  // scan (or Add page) comes to it
-  const took = useRef(false);
-  useEffect(() => {
-    if (incoming?.length && !took.current) {
-      took.current = true;
-      (async () => {
-        const kind = mode === 'receipt' ? 'receipt' : 'doc';
-        for (const u of incoming) { const b = await readImage(u, host.readShared).catch(() => null); if (b) await add(b, kind, undefined, true); }
-        if (pagesRef.current.length) { setView('review'); setCur(0); }
-      })();
-      return;
-    }
-    if (view === 'native') scanNative();
-  }, [view]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // the web app on a phone: a separate Share (the Android app's Save already opens the share sheet)
   const canShare = useMemo(() => !host.isNative && canShareFiles(), [host.isNative]);
@@ -392,7 +346,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   // phone / browser back: sheet → camera → leave (asks first when pages aren't saved)
   useBack(() => {
     if (sheetOpen) setSheetOpen(false);
-    else if ((view === 'camera' || view === 'native') && pages.length) setView('review');
+    else if (view === 'camera' && pages.length) setView('review');
     else close();
   });
   // Escape
@@ -424,16 +378,6 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       )}
     </>
   );
-
-  if (view === 'native') {
-    return (
-      <>
-        <NativeScan busy={natBusy} count={pages.length} onScan={scanNative} onOther={() => setView('camera')}
-          onBack={pages.length ? () => setView('review') : close} />
-        {crumbs}
-      </>
-    );
-  }
 
   if (view === 'camera') {
     return (
@@ -583,42 +527,3 @@ function SortThumb({ p, r, i, on, onClick }: { p: ScanPage; r?: Render; i: numbe
 
 export { MODES };
 
-/** a page image from Google's scanner (a file in the app's cache) */
-async function readImage(uri: string, readShared?: (uri: string) => Promise<string>): Promise<Blob> {
-  try {
-    const b = await new Promise<Blob>((ok, fail) => {
-      const x = new XMLHttpRequest();
-      x.open('GET', uri); x.responseType = 'blob';
-      x.onload = () => (x.response && (x.status === 200 || x.status === 0) && x.response.size ? ok(x.response) : fail(new Error('empty')));
-      x.onerror = () => fail(new Error('read'));
-      x.send();
-    });
-    return b.type ? b : new Blob([b], { type: 'image/jpeg' });
-  } catch (e) {
-    if (!readShared) throw e;
-    const s = atob(await readShared(uri));
-    const a = new Uint8Array(s.length);
-    for (let i = 0; i < s.length; i++) a[i] = s.charCodeAt(i);
-    return new Blob([a], { type: 'image/jpeg' });
-  }
-}
-
-/** Android: between Google's scanner and the review (it opens by itself; shown when it's closed) */
-function NativeScan({ busy, count, onScan, onOther, onBack }: { busy: boolean; count: number; onScan: () => void; onOther: () => void; onBack: () => void }) {
-  return (
-    <div className="scr sc-native">
-      <header className="topbar">
-        <button className="ibtn" onClick={onBack} aria-label={count ? 'Back to the pages' : 'Close scanner'}><Icon name="back" /></button>
-        <div className="doc"><div className="names"><div className="fname">Scan</div>{count > 0 && <div className="fmeta">{count} {count === 1 ? 'page' : 'pages'}</div>}</div></div>
-      </header>
-      <div className="sc-native-body">
-        <div className="sc-native-icon"><Icon name="scan" size={40} /></div>
-        <h2>{busy ? 'Opening the camera…' : 'Scan documents and receipts'}</h2>
-        <p>Finds the page, straightens it and cleans it up. Long receipts too.</p>
-        <button className="btn primary lg block" onClick={onScan} disabled={busy}><Icon name="camera" size={18} />{count ? 'Scan more pages' : 'Scan'}</button>
-        <button className="btn lg block" onClick={onOther} disabled={busy}><Icon name="identification-card" size={18} />ID card, passport or book</button>
-        {count > 0 && <button className="btn ghost lg block" onClick={onBack}>Back to the {count === 1 ? 'page' : 'pages'}</button>}
-      </div>
-    </div>
-  );
-}

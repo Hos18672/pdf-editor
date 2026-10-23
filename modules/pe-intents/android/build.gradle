@@ -11,13 +11,10 @@ android {
   defaultConfig {
     versionCode 1
     versionName '1.0.0'
-    consumerProguardFiles 'proguard-rules.pro'
   }
 }
 
 dependencies {
   implementation 'com.facebook.react:react-android'
   implementation 'androidx.core:core:1.13.1'
-  // Google's on-device document scanner (camera, edge finding, clean-up), delivered through Play services
-  implementation 'com.google.android.gms:play-services-mlkit-document-scanner:16.0.0'
 }

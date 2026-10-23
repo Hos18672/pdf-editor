@@ -1102,11 +1102,6 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .sc-pager.zoomed { touch-action: none; cursor: grab; }
 .sc-pager.zoomed .sc-pic > img { border-radius: 0; }
 .sc-pic > img.sc-sharp { box-shadow: none; background: transparent; }
-.sc-native .sc-native-body { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 24px 20px calc(24px + var(--safe-b, 0px)); max-width: 420px; width: 100%; margin: 0 auto; text-align: center; }
-.sc-native-icon { width: 76px; height: 76px; border-radius: 22px; display: grid; place-items: center; background: var(--sel-tint); color: var(--ink); margin-bottom: 4px; }
-.sc-native h2 { margin: 0; font-size: 21px; }
-.sc-native p { margin: 0 0 10px; color: var(--muted); font-size: 14.5px; }
-.sc-native .btn.block { width: 100%; justify-content: center; }
 .sc-zoom { position: absolute; right: 10px; bottom: 10px; z-index: 4; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-lift); }
 .sc-zoom button { width: 34px; height: 34px; display: grid; place-items: center; border: 0; border-radius: 999px; background: transparent; color: var(--text); padding: 0; }
 .sc-zoom button:disabled { opacity: .35; }

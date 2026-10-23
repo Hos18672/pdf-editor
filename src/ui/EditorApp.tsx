@@ -96,7 +96,6 @@ export default function EditorApp(host: HostProps) {
   const [openState, setOpenState] = useState<OpenState>({ kind: 'idle' });
   const [busy, setBusy] = useState<BusyMsg | null>(null);
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
-  const [scanned, setScanned] = useState<string[] | null>(null);
   const [route, setRoute] = useState<{ name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' } | { name: 'scan'; back: 'home' | 'tools' }>({ name: 'home' });
   // a tools card asked for a file first: where to land once it is open
   const startAfterOpen = useRef<EditorStart | undefined>(undefined);
@@ -250,8 +249,6 @@ export default function EditorApp(host: HostProps) {
     try { inc = await host.takeIntent(); } catch { return; }
     if (!inc) return;
     const files = inc.files ?? [];
-    // pages from Google's scanner that arrived while the page was being started again
-    if (inc.mode === 'scanned' && files.length) { setScanned(files.map((f) => f.uri)); setRoute({ name: 'scan', back: 'home' }); return; }
     if (!files.length && !inc.text) {
       // a shortcut or widget button
       if (inc.mode === 'scan') setRoute({ name: 'scan', back: 'home' });
@@ -300,8 +297,8 @@ export default function EditorApp(host: HostProps) {
           onSaved={(bytes, name) => { saveRecent({ id: recentId.current ?? undefined, name, kind: 'edited', bytes }).then((i) => { if (i) recentId.current = i; }); }}
           toast={setToastMsg} setBusy={setBusy} />
       ) : route.name === 'scan' ? (
-        <Scanner key={scanned?.join() ?? 'scan'} host={host} bp={bp} toast={setToastMsg} setBusy={setBusy} incoming={scanned ?? undefined}
-          onClose={() => { setScanned(null); setRoute(route.back === 'tools' ? { name: 'tools', tool: 'hub', back: 'home' } : { name: 'home' }); }}
+        <Scanner host={host} bp={bp} toast={setToastMsg} setBusy={setBusy}
+          onClose={() => setRoute(route.back === 'tools' ? { name: 'tools', tool: 'hub', back: 'home' } : { name: 'home' })}
           onOpenInEditor={(name, bytes) => open(name, bytes, undefined, 'scanned')}
           onSaved={(name, bytes) => { saveRecent({ name, kind: 'scanned', bytes }); }} />
       ) : route.name === 'tools' ? (
