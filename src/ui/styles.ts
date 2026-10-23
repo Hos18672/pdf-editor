@@ -407,7 +407,7 @@ button { cursor: pointer; }
 
 
 .canvasWrap { flex: 1; min-width: 0; position: relative; overflow: auto; touch-action: pan-x pan-y; overscroll-behavior: contain; background: var(--desk-dots); background-attachment: local; scroll-padding: calc(92px + var(--safe-t)) 0 24px; }
-.bp-mobile .canvasWrap { scroll-padding: calc(76px + var(--safe-t)) 0 calc(110px + var(--safe-b)); }
+.bp-mobile .canvasWrap { scroll-padding: calc(132px + var(--safe-t)) 0 calc(110px + var(--safe-b)); }
 /* the page column leaves room for the floating bar (top) and rail (left) */
 .pages { display: flex; flex-direction: column; align-items: center; gap: 28px; padding: calc(100px + var(--safe-t)) calc(40px + var(--safe-r)) calc(96px + var(--safe-b)) calc(132px + var(--safe-l)); min-width: min-content; }
 .bp-large .pages { padding: calc(100px + var(--safe-t)) 40px calc(96px + var(--safe-b)) 40px; }

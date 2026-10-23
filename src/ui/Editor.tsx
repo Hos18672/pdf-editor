@@ -1149,21 +1149,53 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const bar = document.querySelector('.fieldnav')?.getBoundingClientRect();
     if (bar && bar.top > top) bottom = Math.min(bottom, bar.top);
     const r = el.getBoundingClientRect();
-    // about two lines of the form's own text for the label above
-    const room = Math.max(56, Math.min(140, r.height * 2.2));
+    // room above the field for its label: the page's own text just above it (forms print the label at
+    // the top of the field's box), else about two lines
+    const f = fields.find((x) => x.id === el.dataset.field);
+    const lt = f ? labelTop(f) : null;
+    const room = lt !== null ? Math.max(24, Math.min(240, (f!.y - lt) * zoom + 10)) : Math.max(56, Math.min(140, r.height * 2.2));
     let delta = r.top - (top + room);
     // a tall field that wouldn't fit with its label: as much of the field as possible, label first
     if (r.bottom - delta > bottom - 8) delta = Math.max(r.top - (top + 8), Math.min(delta, r.bottom - (bottom - 8)));
     if (Math.abs(delta) > 2) wrap.scrollBy({ top: delta, behavior: smooth ? 'smooth' : 'auto' });
   };
-  /** again once the phone keyboard has opened (the visible area shrinks) */
+  /** where the label printed above a field starts (viewport units at zoom 1), null: none found */
+  const labelTop = (f: FormField): number | null => {
+    const info = infos[f.page], runs = pageData[f.page]?.runs;
+    if (!info || !runs) return null;
+    let best: number | null = null;
+    for (const r of runs) {
+      if (!r.str.trim()) continue;
+      const b = runBox(r, info.vm);
+      if (Math.abs(b.angle) > 0.02) continue;
+      const bottom = b.top + b.height;
+      // above the field (or beside its upper part), not far, and over it or starting just left of it
+      if (bottom > f.y + f.h * 0.4 || b.top < f.y - Math.max(60, f.h * 5)) continue;
+      if (b.x + b.w < f.x - 30 || b.x > f.x + f.w) continue;
+      if (best === null || b.top > best) best = b.top;
+    }
+    return best;
+  };
+  /**
+   * Keep doing so for a moment: the phone keyboard opening and the browser's own scrolling to the
+   * focused field come later and would undo it. A touch on the page stops it.
+   */
+  const revealGen = useRef(0);
   const revealFieldSoon = (el: HTMLElement) => {
-    revealField(el);
+    const gen = ++revealGen.current;
+    const stop = () => { revealGen.current++; off(); };
+    const off = () => { wrapRef.current?.removeEventListener('touchstart', stop); wrapRef.current?.removeEventListener('wheel', stop); };
+    wrapRef.current?.addEventListener('touchstart', stop, { passive: true });
+    wrapRef.current?.addEventListener('wheel', stop, { passive: true });
+    const run = () => { if (revealGen.current === gen && document.activeElement === el) revealField(el); };
+    run();
+    requestAnimationFrame(run);
+    for (const t of [120, 300, 600, 900, 1300]) setTimeout(run, t);
+    setTimeout(() => { if (revealGen.current === gen) off(); }, 1400);
     const vv = window.visualViewport;
-    let done = false;
-    const again = () => { if (done) return; done = true; vv?.removeEventListener('resize', again); if (document.activeElement === el) revealField(el); };
-    vv?.addEventListener('resize', again);
-    setTimeout(again, 650);
+    const onVv = () => run();
+    vv?.addEventListener('resize', onVv);
+    setTimeout(() => vv?.removeEventListener('resize', onVv), 1400);
   };
   const focusField = (f?: FormField) => {
     if (!f) return;
