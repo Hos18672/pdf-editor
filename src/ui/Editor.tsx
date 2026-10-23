@@ -1129,10 +1129,45 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  /**
+   * Bring a form field into view below the floating top bar, with room above it for its label (forms
+   * put the label over the box), and above the field bar and the keyboard.
+   */
+  const revealField = (el: HTMLElement, smooth = false) => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const wr = wrap.getBoundingClientRect();
+    const top = Math.max(wr.top, document.querySelector('.topbar.float')?.getBoundingClientRect().bottom ?? wr.top);
+    const vv = window.visualViewport;
+    let bottom = Math.min(wr.bottom, vv ? vv.offsetTop + vv.height : window.innerHeight);
+    const bar = document.querySelector('.fieldnav')?.getBoundingClientRect();
+    if (bar && bar.top > top) bottom = Math.min(bottom, bar.top);
+    const r = el.getBoundingClientRect();
+    // about two lines of the form's own text for the label above
+    const room = Math.max(56, Math.min(140, r.height * 2.2));
+    let delta = r.top - (top + room);
+    // a tall field that wouldn't fit with its label: as much of the field as possible, label first
+    if (r.bottom - delta > bottom - 8) delta = Math.max(r.top - (top + 8), Math.min(delta, r.bottom - (bottom - 8)));
+    if (Math.abs(delta) > 2) wrap.scrollBy({ top: delta, behavior: smooth ? 'smooth' : 'auto' });
+  };
+  /** again once the phone keyboard has opened (the visible area shrinks) */
+  const revealFieldSoon = (el: HTMLElement) => {
+    revealField(el);
+    const vv = window.visualViewport;
+    let done = false;
+    const again = () => { if (done) return; done = true; vv?.removeEventListener('resize', again); if (document.activeElement === el) revealField(el); };
+    vv?.addEventListener('resize', again);
+    setTimeout(again, 650);
+  };
   const focusField = (f?: FormField) => {
     if (!f) return;
     const el = wrapRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(f.id)}"]`);
-    if (el) { el.focus({ preventScroll: true }); scrollToEl(el, mobile ? 'start' : 'center'); }
+    if (el) {
+      // (focusing it scrolls it into view, see onFieldFocus; a field already focused is scrolled here)
+      const had = document.activeElement === el;
+      el.focus({ preventScroll: true });
+      if (desk) scrollToEl(el, 'center'); else if (had) revealFieldSoon(el);
+    }
     setActiveField(f.id);
   };
   const fieldIndex = fillable.findIndex((f) => f.id === activeField || f.name === fields.find((x) => x.id === activeField)?.name);
@@ -1343,7 +1378,12 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   onDragInfo={setDragInfo}
                   preview={preview && preview.keys[p.src] !== undefined ? { pdf: preview.pdf, key: preview.keys[p.src] } : undefined}
                   fields={fieldsByPage[p.src] ?? []} forms={snap.forms} activeField={activeField} fillMark={tool === 'fill' ? fillMark : null}
-                  mobile={mobile} onFieldValue={setFieldValue} onFieldFocus={(id) => { setActiveField(id); setSelected(null); }}
+                  mobile={mobile} onFieldValue={setFieldValue} onFieldFocus={(id) => {
+                    setActiveField(id); setSelected(null);
+                    // a tapped field: also clear of the top bar, with its label in view
+                    const el = wrapRef.current?.querySelector<HTMLElement>(`[data-field="${CSS.escape(id)}"]`);
+                    if (el && !desk) requestAnimationFrame(() => revealFieldSoon(el));
+                  }}
                   onFieldSign={(f) => setShowSig({ field: f })}
                   onNextRun={nextRun} onMore={(id) => setSheetFor(id)}
                   moving={moving} onRunMove={moveRun} pasting={pasting && !!clip} onPasteAt={pasteAt} />
