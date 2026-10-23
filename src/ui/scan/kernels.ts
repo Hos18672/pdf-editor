@@ -966,6 +966,90 @@ export function scanKernels(): Kernels {
   }
 
   /**
+   * Pixels Magic turns white: (1) marks that never get dark — the remains of crumples, creases and
+   * grain — compared with the print around them (faint print still reaches well towards its own ink
+   * level; a crumple's grey doesn't); (2) large dark areas that come in from the page's edge (desk
+   * left in the crop, a shadow at the edge), not print. Colourful marks are kept.
+   */
+  function whiteMask(img: PixelImage, P: Paper | null, FS: Float32Array, white: number, ink: number, xi: Int32Array, xt: Float32Array): Uint8Array {
+    const w = img.w, h = img.h, d = img.data, n = w * h;
+    const V = new Float32Array(n), Cm = new Uint8Array(n);
+    const ir = new Float32Array(w).fill(1 / 255), ig = new Float32Array(w).fill(1 / 255), ib = new Float32Array(w).fill(1 / 255);
+    for (let y = 0; y < h; y++) {
+      if (P) paperRow(P, y, w, ir, ig, ib, xi, xt);
+      for (let x = 0, i = y * w * 4, p = y * w; x < w; x++, i += 4, p++) {
+        const r = d[i] * ir[x], g = d[i + 1] * ig[x], b = d[i + 2] * ib[x];
+        V[p] = (0.299 * r + 0.587 * g + 0.114 * b) * FS[p];
+        Cm[p] = Math.max(r, g, b) - Math.min(r, g, b) > 0.12 ? 1 : 0;
+      }
+    }
+    // local ink level: the darkest few per cent of each block, spread a block and smoothed
+    const KB = Math.max(16, Math.round(Math.max(w, h) / 30)), kw = Math.ceil(w / KB), kh = Math.ceil(h / KB);
+    const bh = new Uint32Array(kw * kh * 64), tot = new Uint32Array(kw * kh);
+    for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
+      const v = V[y * w + x], k = ((y / KB) | 0) * kw + ((x / KB) | 0);
+      bh[k * 64 + (v >= 1.24 ? 63 : v <= 0 ? 0 : (v * 51) | 0)]++; tot[k]++;
+    }
+    const inkB = new Float32Array(kw * kh);
+    for (let k = 0; k < kw * kh; k++) {
+      let c = 0, v = 63;
+      for (let b = 0; b < 64; b++) { c += bh[k * 64 + b]; if (c >= tot[k] * 0.02) { v = b; break; } }
+      inkB[k] = (v + 0.5) / 51;
+    }
+    const inkS = new Float32Array(kw * kh);
+    for (let y = 0; y < kh; y++) for (let x = 0; x < kw; x++) {
+      let m = inkB[y * kw + x];
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(kh - 1, y + 1); yy++) for (let xx = Math.max(0, x - 1); xx <= Math.min(kw - 1, x + 1); xx++) m = Math.min(m, inkB[yy * kw + xx]);
+      inkS[y * kw + x] = m;
+    }
+    const out = new Uint8Array(n);
+    const refAt = (x: number, y: number) => Math.min(inkS[((y / KB) | 0) * kw + ((x / KB) | 0)], ink + 0.3);
+    // (1) grey that never gets dark and has no dark print right next to it (the soft edge of a letter
+    // does): crumples, crease lines, grain
+    const rr = Math.max(1, Math.round(Math.min(w, h) / 450));
+    const Vmin = runMax(runMax(V, w, h, rr, false, false), w, h, rr, false, true);
+    const cutV = white - 0.02;
+    for (let y = 0; y < h; y++) for (let x = 0, p = y * w; x < w; x++, p++) {
+      const v = V[p];
+      if (v >= cutV || Cm[p]) continue;
+      const ref = refAt(x, y), span = white - ref;
+      if (v > ref + 0.72 * span && Vmin[p] > ref + 0.6 * span) out[p] = 1;
+    }
+    // (2) a large, mostly solid dark area that comes in from the page's edge and stays near it: desk
+    // left in the crop, the shadow of the paper's own edge
+    const lab = new Uint8Array(n), stack: number[] = [], comp: number[] = [];
+    const minEdge = Math.max(3, Math.round(Math.min(w, h) * 0.004));
+    // (desks can be coloured: brightness alone decides here)
+    const dark = (j: number) => V[j] < 0.3;
+    const seedAt = (s0: number) => {
+      if (lab[s0] || !dark(s0)) return;
+      comp.length = 0; stack.length = 0; lab[s0] = 1; stack.push(s0);
+      let x0 = w, x1 = 0, y0 = h, y1 = 0, cT = 0, cB = 0, cL = 0, cR = 0;
+      while (stack.length) {
+        const j = stack.pop()!; comp.push(j);
+        const x = j % w, y = (j / w) | 0;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (y === 0) cT++; if (y === h - 1) cB++; if (x === 0) cL++; if (x === w - 1) cR++;
+        if (x > 0 && !lab[j - 1] && dark(j - 1)) { lab[j - 1] = 1; stack.push(j - 1); }
+        if (x < w - 1 && !lab[j + 1] && dark(j + 1)) { lab[j + 1] = 1; stack.push(j + 1); }
+        if (j >= w && !lab[j - w] && dark(j - w)) { lab[j - w] = 1; stack.push(j - w); }
+        if (j < n - w && !lab[j + w] && dark(j + w)) { lab[j + w] = 1; stack.push(j + w); }
+      }
+      if (comp.length < n * 0.003) return;
+      const fill = comp.length / ((x1 - x0 + 1) * (y1 - y0 + 1));
+      // lying along the edge (a sliver or a corner of the desk), not standing on it like a logo
+      const along = (c: number, depth: number, max: number) => c > 0 && depth < max && c >= 1.2 * depth;
+      const sides = (cT > 0 ? 1 : 0) + (cB > 0 ? 1 : 0) + (cL > 0 ? 1 : 0) + (cR > 0 ? 1 : 0);
+      const sliver = along(cT, y1 + 1, h * 0.15) || along(cB, h - y0, h * 0.15) || along(cL, x1 + 1, w * 0.25) || along(cR, w - x0, w * 0.25) ||
+        (sides >= 2 && (x1 - x0 < w * 0.6 || y1 - y0 < h * 0.25) && Math.max(cT, cB, cL, cR) > Math.min(w, h) * 0.05);
+      if (fill > 0.4 && sliver) for (const j of comp) out[j] = 1;
+    };
+    for (let x = 0; x < w; x++) { seedAt(x); seedAt((h - 1) * w + x); }
+    for (let y = 0; y < h; y++) { seedAt(y * w); seedAt(y * w + w - 1); }
+    return out;
+  }
+
+  /**
    * documents: the paper's own colour and shadows divided out. Magic (auto): white paper, black text,
    * livelier colours. Enhance: cleaner and crisper but closer to the photo. Lighten: just even, bright light.
    */
@@ -1077,6 +1161,10 @@ export function scanKernels(): Kernels {
       }
       return;
     }
+    // Magic: what is left of creases and crumples (light grey specks and streaks that never get as dark
+    // as print) and dark slivers of the desk along the page's edge go white
+    const WM = mode === 'auto' ? whiteMask(img, P, FS, white, ink, xi, xt) : null;
+    if (WM && mode === 'auto') for (let p = 0; p < n; p++) if (WM[p]) FS[p] = 50; // far above the paper: white
     // Colour: the same curve on each channel. A phone camera adds pink and green speckles to dark print
     // (strongest in QR codes and barcodes); real coloured print has one colour across its strokes. So
     // the colour is averaged over the print nearby (at half size, weighted by how dark each pixel is):

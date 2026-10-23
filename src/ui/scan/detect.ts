@@ -565,6 +565,80 @@ export function detectKernels(): Detector {
     return { mask: big.mask, size: big.size, conf };
   }
 
+  /**
+   * The sheet by its colour against a tinted desk (cream, beige, wood): white paper is grey in every
+   * shade, from its brightest part into the shadow of a crease, while the desk keeps its tint however
+   * the light falls. So the hue alone separates them, where brightness can't (a crumpled receipt on a
+   * cream desk is in places darker than the desk).
+   */
+  function tintBlob(img: Rgba, E: EdgeMap): { mask: Uint8Array; size: number; conf: number } | null {
+    const { w, h, L } = E, n = w * h, d = img.data;
+    // warmth of each pixel relative to its brightness ((r+g)/2 - b over the mean), smoothed
+    const T0 = new Float32Array(n);
+    for (let i = 0, p = 0; p < n; i += 4, p++) {
+      const r = d[i], g = d[i + 1], b = d[i + 2], m = (r + g + b) / 3;
+      T0[p] = m > 12 ? ((r + g) / 2 - b) / m : 0;
+    }
+    const T = boxBlur(T0, w, h, Math.max(1, Math.round(Math.min(w, h) / 200)));
+    // the desk's tint: the picture's outer ring
+    const ring: number[] = [];
+    const bw = Math.max(2, Math.round(Math.min(w, h) * 0.04));
+    for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) if (x < bw || y < bw || x >= w - bw || y >= h - bw) ring.push(T[y * w + x]);
+    ring.sort((a, b) => a - b);
+    const desk = ring[(ring.length * 0.5) | 0];
+    if (desk < 0.06) return null; // a grey or white desk: no tint to go by
+    // bright level (dark objects — a keyboard, a phone — are grey too)
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) hist[Math.max(0, Math.min(255, L[i] | 0))]++;
+    let c = 0, p95 = 255;
+    for (let v = 255; v >= 0; v--) { c += hist[v]; if (c >= n * 0.05) { p95 = v; break; } }
+    const cut = desk * 0.45;
+    const m0 = new Float32Array(n);
+    for (let i = 0; i < n; i++) m0[i] = T[i] < cut && T[i] > -desk && L[i] > p95 * 0.4 ? 1 : 0;
+    // closing then opening: print and crease lines inside fill in, thin bridges to grey things break off
+    const r = Math.max(1, Math.round(Math.min(w, h) / 120));
+    const cl = morph(morph(m0, w, h, r, true), w, h, r, false);
+    const op = morph(morph(cl, w, h, r, false), w, h, r, true);
+    const m = new Uint8Array(n);
+    for (let i = 0; i < n; i++) m[i] = op[i] > 0.5 ? 1 : 0;
+    const big = largest(m, w, h);
+    if (!big || big.size < n * 0.03 || big.size > n * 0.9) return null;
+    const q = maskQuad(big.mask, w, h);
+    if (!q) return null;
+    const solid = big.size / Math.max(1, quadArea(q));
+    if (solid < 0.85 || solid > 1.1) return null;
+    // how clearly the tint changes across the outline
+    let inT = 0, outT = 0, k = 0;
+    for (let s = 0; s < 4; s++) {
+      const p0 = q[s], p1 = q[(s + 1) % 4], len = Math.hypot(p1.x - p0.x, p1.y - p0.y) || 1;
+      const nx = -(p1.y - p0.y) / len, ny = (p1.x - p0.x) / len, dd = Math.max(3, Math.min(w, h) * 0.02);
+      for (let t = 0.1; t <= 0.9; t += 0.1) {
+        const x = p0.x + (p1.x - p0.x) * t, y = p0.y + (p1.y - p0.y) * t;
+        const xi = Math.round(x + nx * dd), yi = Math.round(y + ny * dd), xo = Math.round(x - nx * dd), yo = Math.round(y - ny * dd);
+        if (xi < 0 || yi < 0 || xi >= w || yi >= h || xo < 0 || yo < 0 || xo >= w || yo >= h) continue;
+        inT += T[yi * w + xi]; outT += T[yo * w + xo]; k++;
+      }
+    }
+    if (k < 12) return null;
+    const step = (outT - inT) / k / desk; // 1: paper fully grey, desk fully tinted
+    const conf = Math.min(1, Math.max(0, (step - 0.3) / 0.4)) * Math.min(1, (solid > 1 ? 2 - solid : solid) * 1.08);
+    return { mask: big.mask, size: big.size, conf };
+  }
+
+  /** share of print marks around each pixel (dark small marks on bright ground, as for the region) */
+  function printDensity(img: Rgba, E: EdgeMap): Float32Array {
+    const { w, h, L: Lc } = E, n = w * h;
+    const Y = luminance(img);
+    const hist = new Uint32Array(256);
+    for (let i = 0; i < n; i++) hist[Math.max(0, Math.min(255, Lc[i] | 0))]++;
+    let c = 0, p95 = 255;
+    for (let v = 255; v >= 0; v--) { c += hist[v]; if (c >= n * 0.05) { p95 = v; break; } }
+    const mk = new Float32Array(n);
+    for (let i = 0; i < n; i++) if (Lc[i] > p95 * 0.55 && Lc[i] - Y[i] > Math.max(22, Lc[i] * 0.14)) mk[i] = 1;
+    const r = Math.max(2, Math.round(Math.min(w, h) / 45));
+    return boxBlur(boxBlur(mk, w, h, r), w, h, r);
+  }
+
   function paperRegion(img: Rgba, E: EdgeMap): { mask: Uint8Array; size: number; conf: number } | null {
     const { w, h, L: Lc, mag } = E, n = w * h;
     const Y = luminance(img);
@@ -706,6 +780,25 @@ export function detectKernels(): Detector {
       if (v === undefined) { v = support(E, p, q); supCache.set(key, v); }
       return v;
     };
+    // print (small dark marks on bright ground): a side with print just outside it cuts through the
+    // sheet (a crease or a fold across a crumpled receipt taken for its end, on a desk as pale as paper)
+    const PD = printDensity(img, E);
+    const printOut = (p: Pt, q: Pt): number => {
+      const len = Math.hypot(q.x - p.x, q.y - p.y) || 1;
+      const nx = (q.y - p.y) / len, ny = -(q.x - p.x) / len; // outward for a clockwise quad (y down)
+      const dd = Math.max(4, minDim * 0.05);
+      let o = 0, c = 0, ins = 0;
+      for (let t = 0.1; t <= 0.9; t += 0.05) {
+        const x = p.x + (q.x - p.x) * t, y = p.y + (q.y - p.y) * t;
+        const xo = Math.round(x + nx * dd), yo = Math.round(y + ny * dd), xi = Math.round(x - nx * dd), yi = Math.round(y - ny * dd);
+        if (xo < 0 || yo < 0 || xo >= w || yo >= h || xi < 0 || yi < 0 || xi >= w || yi >= h) continue;
+        o += PD[yo * w + xo]; ins += PD[yi * w + xi]; c++;
+      }
+      if (c < 6) return 0;
+      o /= c; ins /= c;
+      // print outside, and about as much as inside: the sheet goes on
+      return Math.max(0, Math.min(1, (o - 0.025) / 0.05)) * Math.min(1, o / Math.max(0.02, ins * 0.6));
+    };
     const xMin = -0.04 * w, xMax = 1.04 * w, yMin = -0.04 * h, yMax = 1.04 * h;
     let best: Detection | null = null;
     const cands: Detection[] = [];
@@ -744,8 +837,10 @@ export function detectKernels(): Detector {
         const f = flips(E, q[s], q[(s + 1) % 4]);
         texture += Math.max(0, f.flip - 0.12);
       }
-      const score = 0.5 * fit + 0.3 * minSup + 0.38 * Math.sqrt(area) - 0.3 * anglePen + pol - 0.05 * borderSides + shape - 0.6 * runOn - 0.9 * texture;
-      if ((globalThis as any).__detDebug) (globalThis as any).__detDebug.push({ score, fit, minSup, area, anglePen, pol, sup, con, q, runOn });
+      let cut = 0;
+      for (let s = 0; s < 4; s++) if (sup[s] !== 0.42) cut += printOut(q[s], q[(s + 1) % 4]);
+      const score = -0.35 * cut + 0.5 * fit + 0.3 * minSup + 0.38 * Math.sqrt(area) - 0.3 * anglePen + pol - 0.05 * borderSides + shape - 0.6 * runOn - 0.9 * texture;
+      if ((globalThis as any).__detDebug) (globalThis as any).__detDebug.push({ score, fit, minSup, area, anglePen, pol, sup, con, q, runOn, cut });
       const det = { quad: q, score, support: sup };
       cands.push(det);
       if (!best || score > best.score) best = det;
@@ -787,6 +882,9 @@ export function detectKernels(): Detector {
     const regOk = !!reg && reg.conf > 0.45 && reg.size > w * h * 0.03 && reg.size < w * h * 0.97;
     const blob = paperBlob(img, E);
     if (blob && (!regOk || blob.conf >= reg!.conf - 0.05)) reg = blob;
+    // on a tinted desk the colour outlines the sheet best (shading can't break it up)
+    const tint = tintBlob(img, E);
+    if (tint && tint.conf > 0.6 && (!reg || reg.conf <= 0.45 || tint.size >= reg.size * 0.9)) reg = { ...tint, conf: Math.max(tint.conf, reg && reg.conf > 0.45 ? reg.conf : 0) };
     let regQ: Detection | null = null, overlap: ((q: Quad) => number) | null = null, regW = 0;
     if (reg && reg.size > w * h * 0.03 && reg.size < w * h * 0.97 && reg.conf > 0.45) {
       const rq = maskQuad(reg.mask, w, h);
