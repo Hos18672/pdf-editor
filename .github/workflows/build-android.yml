@@ -41,6 +41,11 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      # every build is a real update for Android: its version code is the build number (some phones
+      # refuse to install a build over another one with the same version code)
+      - name: Version code from the build number
+        run: node -e "const fs=require('fs');const j=JSON.parse(fs.readFileSync('app.json','utf8'));j.expo.android=j.expo.android||{};j.expo.android.versionCode=${{ github.run_number }};fs.writeFileSync('app.json',JSON.stringify(j,null,2))"
+
       - name: Generate the native Android project
         env:
           CI: '1'
