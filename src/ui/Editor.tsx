@@ -1038,7 +1038,13 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   useEffect(() => {
     if (started.current || !fieldsReady) return;
     started.current = true;
-    if (start === 'fill' || start === 'sign') pickTool(start);
+    if (start === 'fill' || start === 'sign') { pickTool(start); return; }
+    // a form (fields that can be filled in): open in fill mode, unless something else was started already
+    const formFields = fields.filter((f) => !f.readOnly);
+    if (formFields.length && tool === 'edit' && !editing && !selected && !hist.canUndo) {
+      pickTool('fill');
+      toast({ msg: `A form: tap a field to fill it in`, action: { label: 'Edit text', run: () => pickTool('edit') } });
+    }
   }, [fieldsReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const openFlyout = (t: RailT) => {
