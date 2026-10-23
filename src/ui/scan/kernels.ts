@@ -998,13 +998,8 @@ export function scanKernels(): Kernels {
     return resizePlane(soft, gw, gh, w, h);
   }
 
-  /**
-   * Pixels Magic turns white: (1) marks that never get dark — the remains of crumples, creases and
-   * grain — compared with the print around them (faint print still reaches well towards its own ink
-   * level; a crumple's grey doesn't); (2) large dark areas that come in from the page's edge (desk
-   * left in the crop, a shadow at the edge), not print. Colourful marks are kept.
-   */
-  function whiteMask(img: PixelImage, P: Paper | null, FS: Float32Array, white: number, ink: number, xi: Int32Array, xt: Float32Array): Uint8Array {
+  /** brightness relative to the paper, shading divided out (V), and which pixels are colourful (Cm) */
+  function paperValues(img: PixelImage, P: Paper | null, FS: Float32Array, xi: Int32Array, xt: Float32Array): { V: Float32Array; Cm: Uint8Array } {
     const w = img.w, h = img.h, d = img.data, n = w * h;
     const V = new Float32Array(n), Cm = new Uint8Array(n);
     const ir = new Float32Array(w).fill(1 / 255), ig = new Float32Array(w).fill(1 / 255), ib = new Float32Array(w).fill(1 / 255);
@@ -1016,6 +1011,181 @@ export function scanKernels(): Kernels {
         Cm[p] = Math.max(r, g, b) - Math.min(r, g, b) > 0.12 ? 1 : 0;
       }
     }
+    return { V, Cm };
+  }
+
+  /**
+   * Desk left in the crop, to be made paper: (a) dark lines running along a side at or a hair inside
+   * the edge (a sliver of the desk, the shadow of the paper's own edge), followed row by row and kept
+   * where they carry on in the same place for a good stretch of the side; (b) dark areas that come in
+   * from the edge and lie along it or fill a corner. Print is kept: a letter near the edge is short and
+   * doesn't run along it, and print touching a line is cut off it at the line's own width.
+   * (Desks can be coloured: brightness alone decides.)
+   */
+  function deskMask(V: Float32Array, w: number, h: number): Uint8Array | null {
+    const n = w * h, m = Math.min(w, h), out = new Uint8Array(n);
+    const dark = (j: number) => V[j] < 0.55;
+    let any = false;
+    // (a) lines along the sides. Side 0 left, 1 right (scan lines are rows), 2 top, 3 bottom (columns);
+    // t counts pixels in from the edge.
+    const gapMax = Math.max(3, Math.round(m * 0.02)), wideMax = Math.max(6, Math.round(m * 0.04)), tol = Math.max(2, Math.round(m * 0.006));
+    for (let side = 0; side < 4; side++) {
+      const len = side < 2 ? h : w, across = side < 2 ? w : h;
+      const at = side === 0 ? (k: number, t: number) => k * w + t : side === 1 ? (k: number, t: number) => k * w + w - 1 - t
+        : side === 2 ? (k: number, t: number) => t * w + k : (k: number, t: number) => (h - 1 - t) * w + k;
+      // the first dark run near the edge on every scan line: where it starts (A) and how wide it is (Wd)
+      const A = new Int32Array(len).fill(-1), Wd = new Int32Array(len);
+      for (let k = 0; k < len; k++) {
+        let t = 0;
+        while (t <= gapMax && t < across && !dark(at(k, t))) t++;
+        if (t > gapMax || t >= across) continue;
+        let e = t;
+        for (;;) {
+          // (one-pixel holes allowed)
+          while (e - t < across / 2 && e + 1 < across && (dark(at(k, e + 1)) || (e + 2 < across && dark(at(k, e + 2))))) e++;
+          // another dark run that still starts near the edge belongs to it (a pale gap between the paper's
+          // edge and its shadow)
+          let s2 = e + 2;
+          while (s2 <= gapMax && s2 < across && !dark(at(k, s2))) s2++;
+          if (s2 > gapMax || s2 >= across) break;
+          e = s2;
+        }
+        A[k] = t; Wd[k] = e - t + 1;
+      }
+      // a line: the run carries on at the same place (where it starts or where it ends) over most of the
+      // nearby scan lines
+      const L = Math.max(8, Math.round(len * 0.03)), ok = new Uint8Array(len);
+      const same = (k: number, q: number) => A[q] >= 0 && (Math.abs(A[q] - A[k]) <= tol || Math.abs(A[q] + Wd[q] - A[k] - Wd[k]) <= tol);
+      for (let k = 0; k < len; k++) {
+        if (A[k] < 0) continue;
+        const k0 = Math.max(0, k - L), k1 = Math.min(len - 1, k + L);
+        let c = 0;
+        for (let q = k0; q <= k1; q++) if (same(k, q)) c++;
+        if (c >= 0.85 * (k1 - k0 + 1)) ok[k] = 1;
+      }
+      // out to its ends, as long as it carries on
+      for (let k = 1; k < len; k++) if (!ok[k] && ok[k - 1] && same(k - 1, k)) ok[k] = 1;
+      for (let k = len - 2; k >= 0; k--) if (!ok[k] && ok[k + 1] && same(k + 1, k)) ok[k] = 1;
+      // ... for a good stretch of the side (short gaps bridged); a printed rule or a frame isn't this close
+      // to the edge and this long at once
+      for (let k = 0; k < len;) {
+        if (!ok[k]) { k++; continue; }
+        let e = k, last = k;
+        while (e + 1 < len && e + 1 - last <= L) { e++; if (ok[e]) last = e; }
+        if (last - k + 1 < len * 0.08) for (let q = k; q <= last; q++) ok[q] = 0;
+        k = last + 1;
+      }
+      // its width: the narrow end of the widths nearby (print touching the line, or just past it, only
+      // ever makes a scan line's run wider)
+      const R = Math.max(4, Math.round(len * 0.015)), ws: number[] = [];
+      for (let k = 0; k < len; k++) {
+        if (!ok[k]) continue;
+        // (before and after this scan line apart, so where the line starts or changes the width follows it)
+        let endAt = 0;
+        for (const [q0, q1] of [[Math.max(0, k - R), k], [k, Math.min(len - 1, k + R)]]) {
+          ws.length = 0;
+          for (let q = q0; q <= q1; q++) if (ok[q]) ws.push(A[q] + Wd[q]);
+          ws.sort((x, y) => x - y);
+          endAt = Math.max(endAt, ws[(ws.length * 0.25) | 0]);
+        }
+        const med = endAt - A[k];
+        if (med > wideMax) continue; // a broad dark area: left to (b)
+        // walk the scan line again: the pale gap before it and every dark run that starts within the line's
+        // usual reach go, up to a little past it (print a little further in, or touching it, stays)
+        const reach = endAt, cap = endAt + Math.max(2, Math.round(Math.max(1, med) * 0.3));
+        let e = A[k];
+        for (;;) {
+          while (e + 1 < across && (dark(at(k, e + 1)) || (e + 2 < across && dark(at(k, e + 2))))) e++;
+          for (let q = 0; q <= Math.min(e, cap - 1); q++) out[at(k, q)] = 1;
+          let s2 = e + 2;
+          while (s2 <= gapMax && s2 < across && !dark(at(k, s2))) s2++;
+          if (s2 > gapMax || s2 >= across || s2 > reach || e >= cap) break;
+          e = s2;
+        }
+        any = true;
+      }
+    }
+    // (b) dark areas that come in from the edge: lying along it (a sliver or a corner of the desk), not
+    // standing on it like a logo, or filling a corner. Only solid dark counts (what's left after an
+    // opening wider than print strokes), so print touching the desk doesn't make it look like print.
+    // On a coarse grid (cells of s × s pixels, a cell dark only when all of it is): a cell grid is
+    // cheap, and solid dark is what matters here.
+    const ro = Math.max(3, Math.round(m * 0.006)), s = Math.max(1, Math.round(ro / 2)), rc = Math.max(1, Math.round(ro / s));
+    const cw = Math.ceil(w / s), ch = Math.ceil(h / s), cn = cw * ch;
+    const C = new Float32Array(cn);
+    for (let cy = 0; cy < ch; cy++) for (let cx = 0; cx < cw; cx++) {
+      let all = 1;
+      for (let y = cy * s, ye = Math.min(h, y + s); y < ye && all; y++) for (let x = cx * s, xe = Math.min(w, x + s); x < xe; x++) if (!dark(y * w + x)) { all = 0; break; }
+      C[cy * cw + cx] = all;
+    }
+    const e = runMax(runMax(C, cw, ch, rc, false, false), cw, ch, rc, false, true);
+    const Op = runMax(runMax(e, cw, ch, rc, true, false), cw, ch, rc, true, true);
+    const minAlong = Math.max(12, Math.round(m * 0.035)) / s, minArea = Math.max(20, Math.round(m * m * 0.0002)) / (s * s);
+    const sl = new Uint8Array(cn), inB = new Float32Array(cn), stack: number[] = [], comp: number[] = [];
+    let anyB = false;
+    const seedAt = (q0: number) => {
+      if (sl[q0] || !(Op[q0] > 0)) return;
+      comp.length = 0; stack.length = 0; sl[q0] = 1; stack.push(q0);
+      let x0 = cw, x1 = 0, y0 = ch, y1 = 0, cT = 0, cB = 0, cL = 0, cR = 0;
+      const go = (q: number) => { if (!sl[q] && Op[q] > 0) { sl[q] = 1; stack.push(q); } };
+      while (stack.length) {
+        const q = stack.pop()!; comp.push(q);
+        const x = q % cw, y = (q / cw) | 0;
+        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+        if (y === 0) cT++; if (y === ch - 1) cB++; if (x === 0) cL++; if (x === cw - 1) cR++;
+        if (x > 0) go(q - 1); if (x < cw - 1) go(q + 1); if (y > 0) go(q - cw); if (y < ch - 1) go(q + cw);
+      }
+      if (comp.length < minArea) return;
+      const fill = comp.length / ((x1 - x0 + 1) * (y1 - y0 + 1));
+      const along = (c: number, depth: number, max: number) => c >= minAlong && depth < max && c >= 1.2 * depth;
+      const sides = (cT > 0 ? 1 : 0) + (cB > 0 ? 1 : 0) + (cL > 0 ? 1 : 0) + (cR > 0 ? 1 : 0);
+      const sliver = along(cT, y1 + 1, ch * 0.15) || along(cB, ch - y0, ch * 0.15) || along(cL, x1 + 1, cw * 0.25) || along(cR, cw - x0, cw * 0.25) ||
+        (sides >= 2 && (x1 - x0 < cw * 0.6 || y1 - y0 < ch * 0.25) && Math.max(cT, cB, cL, cR) > (m * 0.05) / s);
+      // a wedge in a corner (both of its sides touched, small next to the page)
+      const corner = ((cT && (cL || cR)) || (cB && (cL || cR))) && x1 - x0 < cw * 0.4 && y1 - y0 < ch * 0.4 && fill > 0.2;
+      if ((fill > 0.4 && sliver) || corner) { for (const q of comp) inB[q] = 1; anyB = true; }
+    };
+    for (let x = 0; x < cw; x++) { seedAt(x); seedAt((ch - 1) * cw + x); }
+    for (let y = 0; y < ch; y++) { seedAt(y * cw); seedAt(y * cw + cw - 1); }
+    if (anyB) {
+      // ... with the dark around them that the opening rounded off (their thin tips and edges)
+      const G0 = runMax(runMax(inB, cw, ch, rc + 1, true, false), cw, ch, rc + 1, true, true);
+      for (let y = 0; y < h; y++) for (let x = 0, p = y * w, q = ((y / s) | 0) * cw; x < w; x++, p++) {
+        const c = q + ((x / s) | 0);
+        if (inB[c] || (G0[c] > 0 && dark(p))) out[p] = 1;
+      }
+      any = true;
+    }
+    if (!any) return null;
+    // the soft rim around what goes (within r of it), but not the soft edge of print that stays
+    const r = Math.max(2, Math.round(m * 0.003)), rim = new Uint8Array(n);
+    const nearPrint = (x: number, y: number) => {
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(h - 1, y + 1); yy++) for (let xx = Math.max(0, x - 1); xx <= Math.min(w - 1, x + 1); xx++) {
+        const j = yy * w + xx;
+        if (!out[j] && dark(j)) return true;
+      }
+      return false;
+    };
+    for (let y = 0; y < h; y++) for (let x = 0, p = y * w; x < w; x++, p++) {
+      if (!out[p]) continue;
+      // only from its border
+      if ((x === 0 || out[p - 1]) && (x === w - 1 || out[p + 1]) && (y === 0 || out[p - w]) && (y === h - 1 || out[p + w])) continue;
+      for (let yy = Math.max(0, y - r); yy <= Math.min(h - 1, y + r); yy++) for (let xx = Math.max(0, x - r); xx <= Math.min(w - 1, x + r); xx++) {
+        const j = yy * w + xx;
+        if (!out[j] && !rim[j] && !dark(j) && !nearPrint(xx, yy)) rim[j] = 1;
+      }
+    }
+    for (let p = 0; p < n; p++) if (rim[p]) out[p] = 1;
+    return out;
+  }
+
+  /**
+   * Pixels Magic turns white: marks that never get dark — the remains of crumples, creases and grain —
+   * compared with the print around them (faint print still reaches well towards its own ink level; a
+   * crumple's grey doesn't). Colourful marks are kept.
+   */
+  function crumpleMask(V: Float32Array, Cm: Uint8Array, w: number, h: number, white: number, ink: number): Uint8Array {
+    const n = w * h;
     // local ink level: the darkest few per cent of each block, spread a block and smoothed
     const KB = Math.max(16, Math.round(Math.max(w, h) / 30)), kw = Math.ceil(w / KB), kh = Math.ceil(h / KB);
     const bh = new Uint32Array(kw * kh * 64), tot = new Uint32Array(kw * kh);
@@ -1037,8 +1207,8 @@ export function scanKernels(): Kernels {
     }
     const out = new Uint8Array(n);
     const refAt = (x: number, y: number) => Math.min(inkS[((y / KB) | 0) * kw + ((x / KB) | 0)], ink + 0.3);
-    // (1) grey that never gets dark and has no dark print right next to it (the soft edge of a letter
-    // does): crumples, crease lines, grain
+    // grey that never gets dark and has no dark print right next to it (the soft edge of a letter does):
+    // crumples, crease lines, grain
     const rr = Math.max(1, Math.round(Math.min(w, h) / 450));
     const Vmin = runMax(runMax(V, w, h, rr, false, false), w, h, rr, false, true);
     const cutV = white - 0.02;
@@ -1048,37 +1218,6 @@ export function scanKernels(): Kernels {
       const ref = refAt(x, y), span = white - ref;
       if (v > ref + 0.72 * span && Vmin[p] > ref + 0.6 * span) out[p] = 1;
     }
-    // (2) a large, mostly solid dark area that comes in from the page's edge and stays near it: desk
-    // left in the crop, the shadow of the paper's own edge
-    const lab = new Uint8Array(n), stack: number[] = [], comp: number[] = [];
-    const minEdge = Math.max(3, Math.round(Math.min(w, h) * 0.004));
-    // (desks can be coloured: brightness alone decides here)
-    const dark = (j: number) => V[j] < 0.3;
-    const seedAt = (s0: number) => {
-      if (lab[s0] || !dark(s0)) return;
-      comp.length = 0; stack.length = 0; lab[s0] = 1; stack.push(s0);
-      let x0 = w, x1 = 0, y0 = h, y1 = 0, cT = 0, cB = 0, cL = 0, cR = 0;
-      while (stack.length) {
-        const j = stack.pop()!; comp.push(j);
-        const x = j % w, y = (j / w) | 0;
-        if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
-        if (y === 0) cT++; if (y === h - 1) cB++; if (x === 0) cL++; if (x === w - 1) cR++;
-        if (x > 0 && !lab[j - 1] && dark(j - 1)) { lab[j - 1] = 1; stack.push(j - 1); }
-        if (x < w - 1 && !lab[j + 1] && dark(j + 1)) { lab[j + 1] = 1; stack.push(j + 1); }
-        if (j >= w && !lab[j - w] && dark(j - w)) { lab[j - w] = 1; stack.push(j - w); }
-        if (j < n - w && !lab[j + w] && dark(j + w)) { lab[j + w] = 1; stack.push(j + w); }
-      }
-      if (comp.length < n * 0.003) return;
-      const fill = comp.length / ((x1 - x0 + 1) * (y1 - y0 + 1));
-      // lying along the edge (a sliver or a corner of the desk), not standing on it like a logo
-      const along = (c: number, depth: number, max: number) => c > 0 && depth < max && c >= 1.2 * depth;
-      const sides = (cT > 0 ? 1 : 0) + (cB > 0 ? 1 : 0) + (cL > 0 ? 1 : 0) + (cR > 0 ? 1 : 0);
-      const sliver = along(cT, y1 + 1, h * 0.15) || along(cB, h - y0, h * 0.15) || along(cL, x1 + 1, w * 0.25) || along(cR, w - x0, w * 0.25) ||
-        (sides >= 2 && (x1 - x0 < w * 0.6 || y1 - y0 < h * 0.25) && Math.max(cT, cB, cL, cR) > Math.min(w, h) * 0.05);
-      if (fill > 0.4 && sliver) for (const j of comp) out[j] = 1;
-    };
-    for (let x = 0; x < w; x++) { seedAt(x); seedAt((h - 1) * w + x); }
-    for (let y = 0; y < h; y++) { seedAt(y * w); seedAt(y * w + w - 1); }
     return out;
   }
 
@@ -1100,6 +1239,11 @@ export function scanKernels(): Kernels {
       let fx = (x + 0.5) / P.B - 0.5; if (fx < 0) fx = 0; if (fx > P.gw - 1) fx = P.gw - 1;
       xi[x] = fx | 0; xt[x] = fx - (fx | 0);
     }
+    // desk left in the crop along the edges becomes paper (before the levels are measured, so its black
+    // doesn't count as ink)
+    const PV = paperValues(img, P, FS, xi, xt);
+    const DM = deskMask(PV.V, w, h);
+    if (DM) for (let p = 0; p < n; p++) if (DM[p]) { FS[p] = 50; PV.V[p] = 50; } // far above the paper: white
     // brightness distribution relative to the paper (every 3rd row is plenty); for black & white
     // also per block, to find how dark the ink is locally
     const hist = new Uint32Array(1024);
@@ -1195,9 +1339,11 @@ export function scanKernels(): Kernels {
       return;
     }
     // Magic: what is left of creases and crumples (light grey specks and streaks that never get as dark
-    // as print) and dark slivers of the desk along the page's edge go white
-    const WM = mode === 'auto' ? whiteMask(img, P, FS, white, ink, xi, xt) : null;
-    if (WM && mode === 'auto') for (let p = 0; p < n; p++) if (WM[p]) FS[p] = 50; // far above the paper: white
+    // as print) goes white
+    if (mode === 'auto') {
+      const WM = crumpleMask(PV.V, PV.Cm, w, h, white, ink);
+      for (let p = 0; p < n; p++) if (WM[p]) FS[p] = 50;
+    }
     // Colour: the same curve on each channel. A phone camera adds pink and green speckles to dark print
     // (strongest in QR codes and barcodes); real coloured print has one colour across its strokes. So
     // the colour is averaged over the print nearby (at half size, weighted by how dark each pixel is):

@@ -53,6 +53,16 @@ Use `CASES=a,b` to run some cases only, and `FORCE_AI=1` to run the model on eve
 OCR disagreement is a warning, not proof. A page can read well and still be cropped, so look at the
 pictures too.
 
+## Desk along the edges
+
+`edges.py` draws a straightened receipt with desk left in the crop (dark corner wedges, a dark line
+along each side a few pixels in, print close to the edges) and the same page without it.
+`edges.mts` runs every document look on both and fails if desk stays dark or print is lost:
+
+```bash
+python3 test/scan-bench/edges.py OUT/edges && npx tsx test/scan-bench/edges.mts OUT/edges
+```
+
 ## On the device
 
 `.github/scripts/smoke-ai.sh` (run the `Android smoke test` workflow with suite `ai`) runs the
