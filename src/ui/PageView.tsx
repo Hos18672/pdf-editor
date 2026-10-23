@@ -860,7 +860,9 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
         y={ct + b.asc - (room?.up ?? b.h * 0.94) * (sh?.sizeScale ?? 1) - 1 / zoom}
         h={((room?.up ?? b.h * 0.94) + (room?.down ?? b.h * 0.3)) * (sh?.sizeScale ?? 1) + (coverTall - (sh?.sizeScale ?? 1)) * b.h * 1.2 + 2 / zoom} />
       {editing ? (
+        // own keys: the field's letters are put in by hand, so it must never be reused for the shown text
         <div
+          key="field"
           ref={fieldRef}
           className="lfield"
           dir="auto"
@@ -889,7 +891,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
           style={{ ...textStyle, caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
         />
       ) : (
-        <div className="txt" style={{ ...textStyle, pointerEvents: moved ? 'auto' : undefined }} dir={arText ? 'auto' : undefined}>
+        <div key="txt" className="txt" style={{ ...textStyle, pointerEvents: moved ? 'auto' : undefined }} dir={arText ? 'auto' : undefined}>
           {lines.map((line, li) => {
             // pieces of one size each
             const parts: { t: string; k: number }[] = [];
