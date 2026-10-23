@@ -79,6 +79,8 @@ interface Props {
   onPictureTap?: (x: number, y: number) => void;
   /** a tap on a line of the page's text (viewport point): true when it is handled there */
   onRunTap?: (run: TextRun, x: number, y: number) => boolean;
+  /** a properties sheet is open over the page (phone): no floating toolbars */
+  sheetOpen?: boolean;
   /** the line being moved (drag it), if any */
   moving?: string | null;
   onRunMove?: (key: string, dx: number, dy: number) => void;
@@ -484,7 +486,7 @@ export function PageView(p: Props) {
               onChange={(patch, merge) => p.onChange(o.id, patch, merge)}
               onDelete={() => p.onDelete(o.id)} onDuplicate={() => p.onDuplicate(o.id)}
               onDrag={(d) => p.onDragInfo(d ? { ...d, id: o.id, page: p.src } : null)}
-              snap={snap} page={info} onGuides={setGuides} mobile={p.mobile} onMore={() => p.onMore(o.id)} />
+              snap={snap} page={info} onGuides={setGuides} mobile={p.mobile} onMore={() => p.onMore(o.id)} sheetOpen={p.sheetOpen} />
           ))}
           {draft && <Draft d={draft} zoom={zoom} tool={p.tool} style={p.style} />}
           {guides.v.map((x) => <div key={'v' + x} className="guide v" style={{ left: x * zoom }} />)}
@@ -974,12 +976,14 @@ function segments(line: string, font?: FontInfo) {
 
 type Snap = { xs: number[]; cx: number; cy: number };
 
-function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag, snap, page, onGuides, mobile, onMore }: {
+function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag, snap, page, onGuides, mobile, onMore, sheetOpen }: {
   o: EditorObject; zoom: number; selected: boolean; editing: boolean; rotation: number;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
   onSelect: () => void; onEditing: (v: boolean) => void; onChange: (patch: Partial<EditorObject>, merge: boolean) => void;
   onDelete: () => void; onDuplicate: () => void; onDrag: (d: { x: number; y: number } | null) => void;
   snap: Snap; page: PageInfo; onGuides: (g: { v: number[]; h: number[] }) => void; mobile: boolean; onMore: () => void;
+  /** its properties sheet is open (phone): the toolbar would only sit on top of it */
+  sheetOpen?: boolean;
 }) {
   type Mode = 'move' | 'grip' | 'resize' | 'end' | 'start' | 'rotate' | 'pending';
   const drag = useRef<null | { mode: Mode; sx: number; sy: number; cx: number; cy: number; o: EditorObject; moved: boolean }>(null);
@@ -1269,7 +1273,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     else if (o.type === 'mark') { const w = Math.min(60, Math.max(4, Math.round(o.w) + d)); onChange({ w, h: w, x: o.x - (w - o.w) / 2, y: o.y - (w - o.h) / 2 } as any, false); }
   };
   const sized = o.type === 'text' || o.type === 'mark';
-  const toolbar = selected && typeof document !== 'undefined' ? createPortal(
+  const toolbar = selected && !sheetOpen && typeof document !== 'undefined' ? createPortal(
     <div ref={barRef} className={`objbar${bar?.below ? ' below' : ''}${dragging ? ' moving' : ''}`} role="toolbar" aria-label="Object actions"
       style={{ left: bar?.left ?? -9999, top: bar?.top ?? -9999, visibility: !bar || bar.hidden ? 'hidden' : 'visible', ['--ax' as any]: `${bar?.ax ?? 0}px` }}
       onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>

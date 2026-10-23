@@ -1424,7 +1424,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   }}
                   onFieldSign={(f) => setShowSig({ field: f })}
                   onNextRun={nextRun} onMore={(id) => setSheetFor(id)}
-                  moving={moving} onRunMove={moveRun} pasting={pasting && !!clip} onPasteAt={pasteAt} />
+                  moving={moving} onRunMove={moveRun} pasting={pasting && !!clip} onPasteAt={pasteAt} sheetOpen={mobile && !!sheetObj} />
               ))}
             </div>
           </div>
