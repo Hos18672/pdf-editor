@@ -65,7 +65,7 @@ ctx.onmessage = async (e: MessageEvent) => {
       if (p.sharp) t.push(p.sharp.data.buffer);
       ctx.postMessage({ id: m.id, r: p }, t);
     } else if (m.type === 'look') {
-      const img = K.finish(m.img, m.filter, m.blur, m.radius, m.rot);
+      const img = K.finish(m.img, m.filter, m.blur, m.radius, m.rot, !!m.card);
       const o = m.orient ? O.textOrientation(shrinkFast(img, 1000)) : undefined;
       const r = await out(img, m.jpeg);
       ctx.postMessage({ id: m.id, r: { ...r.r, orient: o } }, r.t);
@@ -75,7 +75,7 @@ ctx.onmessage = async (e: MessageEvent) => {
       const items: any[] = [], t: Transferable[] = [];
       for (const f of m.filters as Filter[]) {
         const copy = { w: small.w, h: small.h, data: new Uint8ClampedArray(small.data) };
-        const r = await out(K.finish(copy, f, m.blur * k, f === 'original' ? 0 : m.radius * k, m.rot), m.jpeg);
+        const r = await out(K.finish(copy, f, m.blur * k, f === 'original' ? 0 : m.radius * k, m.rot, !!m.card), m.jpeg);
         items.push({ filter: f, ...r.r }); t.push(...r.t);
       }
       ctx.postMessage({ id: m.id, r: { items } }, t);

@@ -22,6 +22,8 @@ export interface Job {
   flatten?: 'rows' | 'cols' | null;
   /** curved-page flattening from the AI model (see dewarp.ts): output position → position on the found page */
   grid?: Grid | null;
+  /** an ID card or passport: looks that keep the card (see cardFilter) */
+  card?: boolean;
 }
 /**
  * A smooth map over the output: node (i, j) of a gw × gh lattice (corners on the output's corners)
@@ -37,7 +39,7 @@ export interface Kernels {
   process(job: Job): JobResult;
   prepare(job: Omit<Job, 'filter' | 'radius'>): Prepared;
   /** applies a look to a straightened page (in place unless turned), then `rot` quarter turns and corners */
-  finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number): PixelImage;
+  finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number, card?: boolean): PixelImage;
   shrink(img: PixelImage, max: number): PixelImage;
   estimateBlur(img: PixelImage): number;
   /** the page straightened at any size (`pad`: share of the page added as a margin on every side) */
@@ -1424,6 +1426,136 @@ export function scanKernels(): Kernels {
     }
   }
 
+  /**
+   * ID cards and passports: Lighten, Enhance and Magic keep what is printed — the coloured security
+   * background, the photo, the hologram — and only fix the photograph of it: uneven light (evened at
+   * a large scale, so patterns stay), a colour cast, flat contrast (highlights roll off softly, so a
+   * face or a white background never burns out), and with Magic a finger at the edge is filled in
+   * from the card around it. (The paper looks would whiten the background and blow out the photo.)
+   */
+  function cardFilter(img: PixelImage, mode: 'auto' | 'enhance' | 'lighten' | 'gray'): void {
+    const w = img.w, h = img.h, d = img.data, n = w * h;
+    const EO = mode === 'auto' ? edgeObjects(img) : null;
+    if (EO) fillFromAround(img, EO);
+    // (1) light: the bright envelope of blocks (most of a card is background), smoothed widely
+    const B = Math.max(8, Math.round(Math.max(w, h) / 24)), bw = Math.ceil(w / B), bh = Math.ceil(h / B);
+    const env = new Float32Array(bw * bh), hist = new Uint32Array(64);
+    for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+      hist.fill(0); let tot = 0;
+      for (let y = by * B; y < Math.min(h, by * B + B); y += 2) for (let x = bx * B; x < Math.min(w, bx * B + B); x += 2) {
+        const i = (y * w + x) * 4; hist[((0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]) / 4.05) | 0]++; tot++;
+      }
+      env[by * bw + bx] = (percentile(hist, tot, 0.9) + 0.5) * 4.05;
+    }
+    const envS = boxSmooth(boxSmooth(env, bw, bh, 1.5), bw, bh, 1.5);
+    const sorted = Float32Array.from(envS).sort();
+    const ref = sorted[Math.floor(sorted.length * 0.85)] || 255;
+    const strength = mode === 'auto' ? 0.7 : mode === 'lighten' ? 0.8 : 0.55;
+    const gainB = new Float32Array(bw * bh);
+    for (let k = 0; k < bw * bh; k++) gainB[k] = Math.max(0.75, Math.min(1.6, Math.pow(ref / Math.max(20, envS[k]), strength)));
+    const gain = resizePlane(gainB, bw, bh, w, h);
+    const L = new Float32Array(n);
+    for (let p = 0, i = 0; p < n; p++, i += 4) {
+      const g = gain[p];
+      d[i] = Math.min(255, d[i] * g); d[i + 1] = Math.min(255, d[i + 1] * g); d[i + 2] = Math.min(255, d[i + 2] * g);
+      L[p] = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+    }
+    // (2) colour cast: the brightest, least colourful part is the card's white, pulled towards neutral
+    const lh = new Uint32Array(256);
+    for (let p = 0; p < n; p += 3) lh[L[p] | 0]++;
+    const cut = percentile(lh, Math.ceil(n / 3), 0.85);
+    let sr = 0, sg = 0, sb = 0, c = 0;
+    for (let p = 0, i = 0; p < n; p += 3, i += 12) {
+      if (L[p] < cut) continue;
+      const r = d[i], g = d[i + 1], b = d[i + 2];
+      if (Math.max(r, g, b) - Math.min(r, g, b) > 40) continue;
+      sr += r; sg += g; sb += b; c++;
+    }
+    let kr = 1, kg = 1, kb = 1;
+    if (c > n / 200) {
+      const m = (sr + sg + sb) / 3, pull = mode === 'auto' ? 0.75 : 0.55;
+      kr = Math.max(0.85, Math.min(1.2, 1 + (m / sr - 1) * pull));
+      kg = Math.max(0.85, Math.min(1.2, 1 + (m / sg - 1) * pull));
+      kb = Math.max(0.85, Math.min(1.2, 1 + (m / sb - 1) * pull));
+    }
+    // (3) tone: black and white points from the picture, a soft shoulder instead of clipping
+    lh.fill(0);
+    for (let p = 0; p < n; p += 2) lh[Math.min(255, L[p] * (0.299 * kr + 0.587 * kg + 0.114 * kb)) | 0]++;
+    const tot2 = Math.ceil(n / 2);
+    const lo = mode === 'lighten' ? 0 : Math.min(70, percentile(lh, tot2, 0.004));
+    const hi = Math.max(180, percentile(lh, tot2, mode === 'auto' ? 0.985 : 0.995));
+    const knee = 0.82;
+    const contrast = mode === 'auto' ? 0.24 : mode === 'enhance' ? 0.12 : 0;
+    const lift = mode === 'lighten' ? 0.85 : 1;
+    const tone = new Float32Array(256);
+    for (let v = 0; v < 256; v++) {
+      let t = (v - lo) / Math.max(1, hi - lo);
+      t = t < 0 ? 0 : t;
+      t = Math.pow(Math.min(t, 1.6), lift);
+      // gentle S for the middle tones
+      if (contrast && t < 1) t = t + contrast * t * (1 - t) * (2 * t - 1) * 2;
+      // highlights roll off towards white
+      if (t > knee) t = knee + (1 - knee) * (1 - Math.exp(-(t - knee) / (1 - knee)));
+      tone[v] = Math.max(0, Math.min(1, t)) * 255;
+    }
+    const sat = mode === 'auto' ? 1.18 : mode === 'enhance' ? 1.1 : mode === 'gray' ? 0 : 1.03;
+    for (let i = 0; i < n * 4; i += 4) {
+      const r = d[i] * kr, g = d[i + 1] * kg, b = d[i + 2] * kb;
+      const y = 0.299 * r + 0.587 * g + 0.114 * b;
+      const y2 = tone[Math.min(255, y) | 0];
+      const k = y > 1 ? y2 / y : 1;
+      // colour scaled with the brightness (hue kept), then its strength
+      let R = r * k, G = g * k, Bc = b * k;
+      R = y2 + (R - y2) * sat; G = y2 + (G - y2) * sat; Bc = y2 + (Bc - y2) * sat;
+      d[i] = R; d[i + 1] = G; d[i + 2] = Bc;
+    }
+  }
+
+  /** pixels covered by something in front of the page (a finger): filled from the card on both sides */
+  function fillFromAround(img: PixelImage, M: Float32Array): void {
+    const w = img.w, h = img.h, d = img.data;
+    const src = new Uint8ClampedArray(d);
+    const pick = (x: number, y: number) => { const i = (y * w + x) * 4; return [src[i], src[i + 1], src[i + 2]]; };
+    // rows: each covered stretch between the colours just outside it (or the one side there is)
+    const rowFill = new Float32Array(w * h * 3), rowW = new Float32Array(w * h);
+    const colFill = new Float32Array(w * h * 3), colW = new Float32Array(w * h);
+    const pass = (len: number, lines: number, at: (line: number, k: number) => [number, number], fill: Float32Array, wt: Float32Array) => {
+      for (let l = 0; l < lines; l++) {
+        let k = 0;
+        while (k < len) {
+          const [x0, y0] = at(l, k);
+          if (M[y0 * w + x0] < 0.3) { k++; continue; }
+          let e = k;
+          while (e < len) { const [x, y] = at(l, e); if (M[y * w + x] < 0.3) break; e++; }
+          const a = k > 0 ? pick(...at(l, k - 1)) : null, b = e < len ? pick(...at(l, e)) : null;
+          for (let q = k; q < e; q++) {
+            const t = (q - k + 1) / (e - k + 1);
+            const cA = a ?? b, cB = b ?? a;
+            if (!cA || !cB) continue;
+            const [x, y] = at(l, q), p = y * w + x;
+            // nearer the image edge the stretch comes from, trust the other side more
+            const wgt = a && b ? 1 : 0.5;
+            fill[p * 3] = cA[0] + (cB[0] - cA[0]) * t; fill[p * 3 + 1] = cA[1] + (cB[1] - cA[1]) * t; fill[p * 3 + 2] = cA[2] + (cB[2] - cA[2]) * t;
+            wt[p] = wgt;
+          }
+          k = e;
+        }
+      }
+    };
+    pass(w, h, (l, k) => [k, l], rowFill, rowW);
+    pass(h, w, (l, k) => [l, k], colFill, colW);
+    for (let p = 0, i = 0; p < w * h; p++, i += 4) {
+      const a = M[p] > 0.98 ? 1 : M[p];
+      if (a < 0.01) continue;
+      const wr = rowW[p], wc = colW[p], ws = wr + wc;
+      if (!ws) continue;
+      for (let ch = 0; ch < 3; ch++) {
+        const v = (rowFill[p * 3 + ch] * wr + colFill[p * 3 + ch] * wc) / ws;
+        d[i + ch] = d[i + ch] + (v - d[i + ch]) * a;
+      }
+    }
+  }
+
   function roundCorners(img: PixelImage, r: number): void {
     if (r < 1) return;
     const w = img.w, h = img.h, d = img.data;
@@ -1535,12 +1667,20 @@ export function scanKernels(): Kernels {
     return { warped, sharp, blur, times: T, bent };
   }
 
-  function finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number): PixelImage {
+  function finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number, card = false): PixelImage {
     if (filter !== 'original') {
-      if (filter === 'color') colorFilter(img);
-      else docFilter(img, filter);
-      if (filter === 'enhance') clarity(img, 0.28);
-      if (filter !== 'bw') unsharp(img, 1.0, blur > 1.1 ? (filter === 'auto' ? 0.5 : 0.35) : filter === 'lighten' ? 0.4 : filter === 'auto' ? 0.8 : 0.6);
+      if (card && filter !== 'color' && filter !== 'bw') {
+        // ID cards and passports: the photograph improved, the card kept (see cardFilter)
+        // (no local-contrast boost: it rings round the photo's dark hair and edges)
+        cardFilter(img, filter as 'auto' | 'enhance' | 'lighten' | 'gray');
+        // fine security patterns would turn to grain with the paper looks' sharpening
+        unsharp(img, 1.0, blur > 1.1 ? 0.35 : filter === 'auto' ? 0.4 : filter === 'enhance' ? 0.32 : 0.22);
+      } else {
+        if (filter === 'color') colorFilter(img);
+        else docFilter(img, filter);
+        if (filter === 'enhance') clarity(img, 0.28);
+        if (filter !== 'bw') unsharp(img, 1.0, blur > 1.1 ? (filter === 'auto' ? 0.5 : 0.35) : filter === 'lighten' ? 0.4 : filter === 'auto' ? 0.8 : 0.6);
+      }
     }
     const out = turn(img, rot);
     roundCorners(out, radius);
@@ -1550,7 +1690,7 @@ export function scanKernels(): Kernels {
   function process(job: Job): JobResult {
     const p = prepare({ ...job, sharpen: job.filter === 'original' ? 'off' : job.sharpen });
     const t = Date.now();
-    const img = finish(p.sharp ?? p.warped, job.filter, p.blur, job.radius, 0);
+    const img = finish(p.sharp ?? p.warped, job.filter, p.blur, job.radius, 0, !!job.card);
     return { img, blur: p.blur, times: { ...p.times, look: Date.now() - t } };
   }
 

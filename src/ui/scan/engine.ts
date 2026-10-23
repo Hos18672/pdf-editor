@@ -41,7 +41,7 @@ export interface ScanPage {
   aiOff?: boolean;
 }
 
-export const DEFAULT_FILTER: Record<ScanMode, Filter> = { doc: 'auto', id: 'color', passport: 'color', receipt: 'auto', book: 'auto' };
+export const DEFAULT_FILTER: Record<ScanMode, Filter> = { doc: 'auto', id: 'auto', passport: 'auto', receipt: 'auto', book: 'auto' };
 export const MODE_RATIOS: Record<ScanMode, number[] | undefined> = {
   doc: undefined, id: [FORMATS.id1.ratio], passport: [FORMATS.id3.ratio], receipt: undefined, book: undefined,
 };
@@ -335,7 +335,7 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
   const jpeg = opt.jpeg ?? (card ? 0.9 : filter === 'bw' ? 0.82 : 0.85);
   const src = await cropSource(p, ow, oh, p.rot);
   // turned upright here already: text runs along the rows
-  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh), flatten: flattens(p) ? 'rows' as const : null, grid: gridOf(p, p.rot) };
+  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh), flatten: flattens(p) ? 'rows' as const : null, grid: gridOf(p, p.rot), card: isCard(p) };
   const orient = !!opt.orient && p.rot === 0;
   let res: { blob?: Blob; img?: PixelImage; w?: number; h?: number; blur: number; orient?: Orientation | null; times?: any };
   try {
@@ -353,6 +353,8 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
   return { blob: b.blob, url: URL.createObjectURL(b.blob), w: b.w, h: b.h, blur: res.blur, orient: res.orient };
 }
 
+/** ID cards and passport pages get looks that keep the card (security print, photo) */
+export const isCard = (p: ScanPage) => p.kind === 'id' || p.kind === 'passport' || p.format === 'id1' || p.format === 'id3';
 /** sheets of paper get their printed lines straightened (cards and passports are stiff) */
 export const flattens = (p: ScanPage) => (p.kind === 'doc' || p.kind === 'receipt' || p.kind === 'book') && p.format !== 'id1' && p.format !== 'id3';
 
@@ -409,10 +411,10 @@ export async function renderLook(p: ScanPage, opt: { long: number; filter?: Filt
   const orient = !!opt.orient && p.rot === 0;
   let r: { blob?: Blob; img?: PixelImage; w?: number; h?: number; orient?: Orientation | null };
   try {
-    r = await post({ type: 'look', img, filter, blur: base.blur, radius, rot: p.rot, orient, jpeg }, []);
+    r = await post({ type: 'look', img, filter, blur: base.blur, radius, rot: p.rot, orient, jpeg, card: isCard(p) }, []);
   } catch {
     const { K, O } = localKernels();
-    const out = K.finish({ w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) }, filter, base.blur, radius, p.rot);
+    const out = K.finish({ w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) }, filter, base.blur, radius, p.rot, isCard(p));
     r = { img: out, orient: orient ? O.textOrientation(out) : undefined };
   }
   const b = await blobOf(r, jpeg);
@@ -428,11 +430,11 @@ export async function renderThumbs(p: ScanPage, filters: Filter[], long: number,
   const radius = radiusOf(p, 'auto', base.ow, base.oh);
   let items: { filter: Filter; blob?: Blob; img?: PixelImage; w?: number; h?: number }[];
   try {
-    items = (await post<{ items: typeof items }>({ type: 'thumbs', img, filters, blur: base.blur, radius, rot: p.rot, max, jpeg: 0.8 }, [])).items;
+    items = (await post<{ items: typeof items }>({ type: 'thumbs', img, filters, blur: base.blur, radius, rot: p.rot, max, jpeg: 0.8, card: isCard(p) }, [])).items;
   } catch {
     const { K } = localKernels();
     const small = K.shrink(img, max), k = small.w / img.w;
-    items = filters.map((f) => ({ filter: f, img: K.finish({ w: small.w, h: small.h, data: new Uint8ClampedArray(small.data) }, f, base.blur * k, f === 'original' ? 0 : radius * k, p.rot) }));
+    items = filters.map((f) => ({ filter: f, img: K.finish({ w: small.w, h: small.h, data: new Uint8ClampedArray(small.data) }, f, base.blur * k, f === 'original' ? 0 : radius * k, p.rot, isCard(p)) }));
   }
   const out: Record<string, string> = {};
   for (const it of items) out[it.filter] = URL.createObjectURL((await blobOf(it, 0.8)).blob);
