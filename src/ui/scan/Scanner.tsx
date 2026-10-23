@@ -13,7 +13,7 @@ import type { Filter } from './kernels';
 import { Camera, MODES } from './Camera';
 import { CropEditor } from './CropEditor';
 import { Pager } from './Pager';
-import { DEFAULT_FILTER, decode, findDocument, forget, forgetBases, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
+import { aiKey, stopAi, DEFAULT_FILTER, decode, findDocument, flattenPage, forget, forgetBases, gridOf, looksCurved, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
 import { findGutter, splitSpread } from './book';
 import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
 
@@ -56,6 +56,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   const [sharp, setSharp] = useState<Record<string, { key: string; url: string; long: number }>>({});
   const sharpBusy = useRef('');
   const [finding, setFinding] = useState(0);
+  const [flattening, setFlattening] = useState(0);
   const findingRef = useRef(0);
   // Best by default: the page at the photo's full detail (remembered when changed)
   const [quality, setQualityState] = useState<Quality>(() => { try { const q = localStorage.getItem('pe.scan.quality'); return q === 'small' || q === 'standard' || q === 'high' ? q : 'high'; } catch { return 'high'; } });
@@ -185,8 +186,20 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
         setRenders((rs) => { const old = rs[q.id]; if (old) URL.revokeObjectURL(old.url); return { ...rs, [q.id]: { key, url: r.url, w: r.w, h: r.h } }; });
         const t = orient ? turnsFor(q, r.orient) : null;
         if (t) setPages((ps) => ps.map((x) => (x.id === q.id && x.ver === q.ver ? { ...x, rot: t, ver: x.ver + 1 } : x)));
+        // a curved sheet (once it is upright): the AI flattening is worked out in the background
+        else if (looksCurved(q, r.bent)) flatten(q);
       }));
       return true;
+    };
+    const flatten = (q: ScanPage) => {
+      const k = 'a' + q.id + aiKey(q);
+      if (busy.has(k)) return;
+      busy.add(k);
+      setFlattening((n) => n + 1);
+      flattenPage(q).then((ai) => {
+        // kept when the crop hasn't changed meanwhile; a page that gets the AI map is drawn again
+        setPages((ps) => ps.map((x) => (x.id === q.id && aiKey(x) === ai.key ? { ...x, ai, ver: ai.grid && !x.aiOff ? x.ver + 1 : x.ver } : x)));
+      }).finally(() => { busy.delete(k); setFlattening((n) => n - 1); });
     };
     const quick = (q: ScanPage) => {
       if (renders[q.id] || busy.has('q' + q.id)) return;
@@ -245,6 +258,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     Object.values(l.origs).forEach((u) => u && URL.revokeObjectURL(u));
     pagesRef.current.forEach((p) => forget(p.blob));
     forgetBases();
+    stopAi();
   }, []);
 
   const page = pages[Math.min(cur, pages.length - 1)] as ScanPage | undefined;
@@ -439,6 +453,10 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
           {page && (
             <div className="sc-under">
               <span className="sc-count num">{cur + 1} / {pages.length}{page.format ? ` · ${FORMAT_LABEL[page.format]}` : ''}{page.side ? ` · ${page.side === 'front' ? 'Front' : 'Back'}` : ''}</span>
+              {page.ai?.key === aiKey(page) && page.ai.grid
+                ? <button className={`sc-cmp${page.aiOff ? '' : ' on'}`} onClick={() => patch(page.id, (p) => ({ aiOff: !p.aiOff }))} aria-pressed={!page.aiOff}
+                  title={page.aiOff ? 'Flatten the curved page with AI (on this device)' : 'Curved page flattened with AI (on this device). Tap to undo'}><Icon name="sparkle" size={17} />{page.aiOff ? 'Flatten' : 'Flattened'}</button>
+                : flattening > 0 && !page.ai ? <span className="sc-count" role="status"><span className="spinner" /> Flattening…</span> : null}
               <button className={`sc-cmp${compare ? ' on' : ''}`} onClick={() => setCompare(!compare)} aria-pressed={compare}><Icon name="split-horizontal" size={17} />Compare</button>
             </div>
           )}

@@ -20,10 +20,19 @@ export interface Job {
   bend?: number[][] | null;
   /** follow the printed lines and straighten them (sheets of paper, not cards) */
   flatten?: 'rows' | 'cols' | null;
+  /** curved-page flattening from the AI model (see dewarp.ts): output position → position on the found page */
+  grid?: Grid | null;
 }
+/**
+ * A smooth map over the output: node (i, j) of a gw × gh lattice (corners on the output's corners)
+ * holds the point of the found page (fractions of the outline, 0…1 edge to edge; x, y pairs) shown there.
+ */
+export interface Grid { gw: number; gh: number; g: Float32Array }
+/** how far printed lines wander (null: too few lines to tell) */
+export interface Bentness { rms: number; lines: number }
 export interface JobResult { img: PixelImage; blur: number; times?: Record<string, number> }
 /** a straightened page before its look: as photographed, and with the blur taken out (null: wasn't blurred) */
-export interface Prepared { warped: PixelImage; sharp: PixelImage | null; blur: number; times?: Record<string, number> }
+export interface Prepared { warped: PixelImage; sharp: PixelImage | null; blur: number; times?: Record<string, number>; bent?: Bentness | null }
 export interface Kernels {
   process(job: Job): JobResult;
   prepare(job: Omit<Job, 'filter' | 'radius'>): Prepared;
@@ -31,6 +40,10 @@ export interface Kernels {
   finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number): PixelImage;
   shrink(img: PixelImage, max: number): PixelImage;
   estimateBlur(img: PixelImage): number;
+  /** the page straightened at any size (`pad`: share of the page added as a margin on every side) */
+  warpTo(job: Omit<Job, 'filter' | 'radius'>, W: number, H: number, pad: number, grid?: Grid | null): PixelImage;
+  /** how far the printed lines on a straightened page wander from straight (in line spacings) */
+  bentness(img: PixelImage): Bentness | null;
 }
 
 export function scanKernels(): Kernels {
@@ -188,8 +201,10 @@ export function scanKernels(): Kernels {
    * output rectangle → quad in the source; bilinear sampling, white outside the photo. With a bend, the
    * curved sides are blended across the page (Coons patch) on top of the perspective.
    */
-  function warp(src: PixelImage, quad: number[], W: number, H: number, inset: number, bend?: number[][] | null, field?: LineField | null): PixelImage {
+  function warp(src: PixelImage, quad: number[], W: number, H: number, inset: number, bend?: number[][] | null, field?: LineField | null, grid?: Grid | null): PixelImage {
     const m = -inset;
+    // AI flattening: the output's own lattice of page positions (quad fractions → this warp's pixels)
+    const GW = grid ? grid.gw - 1 : 0, GH = grid ? grid.gh - 1 : 0, GG = grid?.g, FW = W + 2 * inset, FH = H + 2 * inset;
     const Hm = solveH([m, m, W - m, m, W - m, H - m, m, H - m], quad);
     const out = new Uint8ClampedArray(W * H * 4);
     const sw = src.w, sh = src.h, sd = src.data;
@@ -224,7 +239,15 @@ export function scanKernels(): Kernels {
       if (field) { if (field.cols) fieldCols(field, y, W, fdy!); else fieldRow(field, y, W, fdy!); }
       for (let x = 0; x < W; x++) {
         const off = fdy ? fdy[x] : 0;
-        const xc = x + 0.5 + (field?.cols ? off : 0), yc = y + 0.5 + (field?.cols ? 0 : off);
+        let xc = x + 0.5 + (field?.cols ? off : 0), yc = y + 0.5 + (field?.cols ? 0 : off);
+        if (GG) {
+          let gx = ((xc + inset) / FW) * GW, gy = ((yc + inset) / FH) * GH;
+          if (gx < 0) gx = 0; if (gy < 0) gy = 0; if (gx > GW - 1e-6) gx = GW - 1e-6; if (gy > GH - 1e-6) gy = GH - 1e-6;
+          const ix = gx | 0, iy = gy | 0, tx = gx - ix, ty = gy - iy, a = 2 * (iy * (GW + 1) + ix), b = a + 2 * (GW + 1);
+          const qx = (GG[a] * (1 - tx) + GG[a + 2] * tx) * (1 - ty) + (GG[b] * (1 - tx) + GG[b + 2] * tx) * ty;
+          const qy = (GG[a + 1] * (1 - tx) + GG[a + 3] * tx) * (1 - ty) + (GG[b + 1] * (1 - tx) + GG[b + 3] * tx) * ty;
+          xc = qx * FW - inset; yc = qy * FH - inset;
+        }
         const v1 = (yc - m) / spanY, v0 = 1 - v1;
         const z = Hm[6] * xc + Hm[7] * yc + Hm[8];
         let u = (Hm[0] * xc + Hm[1] * yc + Hm[2]) / z - 0.5, v = (Hm[3] * xc + Hm[4] * yc + Hm[5]) / z - 0.5;
@@ -298,7 +321,7 @@ export function scanKernels(): Kernels {
    * between lines are interpolated, so the paper between them moves with them.
    * Returns null when there aren't enough lines to be sure, or nothing to straighten.
    */
-  function lineField(img: PixelImage): LineField | null {
+  function lineField(img: PixelImage, info?: { rms: number; lines: number; few?: boolean }): LineField | null {
     const W = img.w, H = img.h;
     const k = Math.min(1, 640 / W);
     const w = Math.max(32, Math.round(W * k)), h = Math.max(32, Math.round(H * k)), n = w * h;
@@ -391,7 +414,7 @@ export function scanKernels(): Kernels {
     // typical line spacing
     const gaps: number[] = [];
     for (const l of peaks) for (let i = 1; i < l.length; i++) gaps.push(l[i] - l[i - 1]);
-    if (gaps.length < 8) return null;
+    if (gaps.length < 8) { if (info) info.few = true; return null; }
     gaps.sort((a, b) => a - b);
     const sp = gaps[gaps.length >> 1];
     // link band centres from strip to strip (mutually nearest, close enough). Gaps between the columns
@@ -444,7 +467,7 @@ export function scanKernels(): Kernels {
       for (let i = 1; i < ts.length; i++) { ea.push(ts[i - 1]); eb.push(ts[i]); eg.push(g | 0); et.push(g - (g | 0)); er.push(ty[i] - ty[i - 1]); }
     }
     const NE = ea.length;
-    if (NE < 12) return null;
+    if (NE < 12) { if (info) info.few = true; return null; }
     const ew = new Float32Array(NE).fill(1);
     // smoothness: bends across (second differences along the row), and up the page
     const LS2 = 0.35, LG2 = 1.2, LG1 = 0.06, L0 = 0.004, MU = 0.3;
@@ -505,6 +528,16 @@ export function scanKernels(): Kernels {
       const srt = Array.from(res).sort((p, q) => p - q);
       const c = Math.max(2.5, 4 * 1.4826 * srt[NE >> 1]);
       for (let e = 0; e < NE; e++) { const u = res[e] / c; ew[e] = u >= 1 ? 0 : (1 - u * u) ** 2; }
+    }
+    if (info) {
+      // how far the lines wander: offsets around each row's own mean, in line spacings
+      let s2 = 0, c = 0;
+      for (let g = 0; g < G; g++) {
+        let mu = 0; for (let st = 0; st < ns; st++) mu += f[idx(st, g)]; mu /= ns;
+        for (let st = 0; st < ns; st++) { s2 += (f[idx(st, g)] - mu) ** 2; c++; }
+      }
+      info.rms = Math.sqrt(s2 / Math.max(1, c)) / sp;
+      info.lines = tracks.filter((t) => t.s.length >= 3).length;
     }
     // per strip, offsets at every full-size row; tiny ones (the letters' own shapes) left alone
     const dy = new Float32Array(ns * H), sh = 0.5;
@@ -1331,16 +1364,19 @@ export function scanKernels(): Kernels {
     // a hair inside the found outline, so no sliver of the desk shows along the edges
     // (a little more on curved sides: the traced curve is smooth, a real edge has small waves)
     const m = Math.max(1.5, (job.bend ? 0.006 : 0.0035) * Math.max(job.outW, job.outH));
-    let warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend);
+    let warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend, null, job.grid);
+    let bent: Bentness | null | undefined;
     lap('warp');
     if (job.flatten) {
       // text lines run along the rows, or down the columns on a page that will be turned a quarter
       const cols = job.flatten === 'cols';
-      const g = lineField(cols ? transpose(warped) : warped);
+      const info = { rms: 0, lines: 0, few: false };
+      const g = lineField(cols ? transpose(warped) : warped, info);
+      bent = info.few ? null : { rms: info.rms, lines: info.lines };
       lap('lines');
       if (g) {
         g.cols = cols;
-        warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend, g);
+        warped = warp(job.src, job.quad, job.outW, job.outH, m, job.bend, g, job.grid);
         lap('flatten');
       }
     }
@@ -1350,7 +1386,7 @@ export function scanKernels(): Kernels {
       lap('estimate');
       if (blur > 1.1) { sharp = { w: warped.w, h: warped.h, data: new Uint8ClampedArray(warped.data) }; deblur(sharp, Math.min(5, blur)); lap('deblur'); }
     }
-    return { warped, sharp, blur, times: T };
+    return { warped, sharp, blur, times: T, bent };
   }
 
   function finish(img: PixelImage, filter: Filter, blur: number, radius: number, rot: number): PixelImage {
@@ -1372,5 +1408,19 @@ export function scanKernels(): Kernels {
     return { img, blur: p.blur, times: { ...p.times, look: Date.now() - t } };
   }
 
-  return { process, prepare, finish, shrink, estimateBlur };
+  function insetOf(job: Omit<Job, 'filter' | 'radius'>, W: number, H: number) {
+    return Math.max(1.5 * Math.max(W, H) / Math.max(job.outW, job.outH), (job.bend ? 0.006 : 0.0035) * Math.max(W, H));
+  }
+  function warpTo(job: Omit<Job, 'filter' | 'radius'>, W: number, H: number, pad: number, grid?: Grid | null): PixelImage {
+    // a margin: the warp's frame grows by pad·page on each side (pad 0: the same hair inside as prepare)
+    if (pad > 0) return warp(job.src, job.quad, W, H, -(pad * W) / (1 + 2 * pad), job.bend, null, null);
+    return warp(job.src, job.quad, W, H, insetOf(job, W, H), job.bend, null, grid ?? null);
+  }
+  function bentness(img: PixelImage): Bentness | null {
+    const info = { rms: 0, lines: 0, few: false };
+    lineField(img, info);
+    return info.few ? null : { rms: info.rms, lines: info.lines };
+  }
+
+  return { process, prepare, finish, shrink, estimateBlur, warpTo, bentness };
 }

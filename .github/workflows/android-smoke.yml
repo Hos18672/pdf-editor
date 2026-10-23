@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       suite:
-        description: 'smoke (start, open, intents) or scan'
+        description: 'smoke (start, open, intents), scan, or ai (scanner AI flattening)'
         default: smoke
 
 permissions:
@@ -36,6 +36,8 @@ jobs:
 
       - run: npm ci
 
+      - run: node scripts/build-worker.mjs
+
       - name: Generate the native Android project
         env:
           CI: '1'
@@ -63,7 +65,7 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: bash .github/scripts/${{ inputs.suite == 'scan' && 'smoke-scan.sh' || 'smoke.sh' }}
+          script: bash .github/scripts/${{ inputs.suite == 'scan' && 'smoke-scan.sh' || inputs.suite == 'ai' && 'smoke-ai.sh' || 'smoke.sh' }}
 
       - name: Publish results as a pre-release
         if: always()

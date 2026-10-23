@@ -64,12 +64,37 @@ On the web the editor renders directly; on Android it runs in a WebView
 
 Rendering uses pdf.js 3.11; writing uses pdf-lib.
 
+## Scanner
+
+Camera or photos → page found and straightened → cleaned (Magic, Photo, Grey, B/W …) → PDF at real
+paper size, optionally searchable (Tesseract, German + English). Everything runs on the device,
+in Web Workers inside the app's WebView (`src/ui/scan/`):
+
+```
+detect.ts, bend.ts     find the page's corners and follow curved sides
+kernels.ts             perspective + curved-side warp, straightening of printed lines, blur removal, looks
+dewarp.ts, aiWorker.ts AI flattening of curved pages (UVDoc model, onnxruntime-web on WebAssembly)
+engine.ts, Scanner.tsx jobs, caching, the review screen
+```
+
+**AI flattening.** Pages that look bent (curved sides, or printed lines that wander) get a second
+opinion from [UVDoc](https://github.com/tanguymagne/UVDoc) (MIT; 7.9 M parameters, weights stored
+as 16-bit floats in `public/scan/uvdoc.onnx`, 15 MB; WebAssembly runtime `ort.wasm`, 14 MB, copied
+from `onnxruntime-web` by `node scripts/build-worker.mjs`). The model only moves existing pixels
+(never draws), its map is pinned to the page outline, and it is used only if the printed lines come
+out straighter; otherwise the classical result stays. In the review screen a page that got it shows
+**Flattened**, which switches it off and on. Flat pages never load the model. If the model can't run,
+scanning works as before.
+
+The model was trained on the UVDoc dataset and Doc3D. Doc3D's terms of use aren't clearly published,
+so check the licensing before commercial distribution.
+
+Benchmark with synthetic photos, OCR scoring and an emulator test: `test/scan-bench/README.md`.
+
 ## Known limits (next steps)
 
 - Editing works line by line; paragraphs don't reflow yet.
 - Subset fonts only contain the glyphs the document already used, so new
   characters use a standard font (flagged in the UI).
-- Persian/Arabic: existing text renders fine, but typing new right-to-left text
-  needs a shaping step and a Unicode fallback font (planned).
 - Text inside form XObjects is covered and rewritten rather than removed.
 - Password-protected PDFs must be unlocked first.

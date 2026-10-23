@@ -2,9 +2,13 @@
 import { detectKernels, luminance } from './detect';
 import { orientKernels, type Orientation } from './orient';
 import { workerUrl } from './workerUrl';
+import { WORKER_VERSION } from './workerVersion';
 import { aspectOf, dist, FORMATS, fullQuad, snapRatio, type Quad } from './geom';
 import { scanKernels, type Filter, type JobResult, type Kernels, type PixelImage } from './kernels';
 import { bendReach, scaleBend, traceBend, turnBend, type Bend } from './bend';
+import { turnGrid, type AiInfo } from './dewarp';
+import type { Bentness, Grid } from './kernels';
+import { appBase } from '../assets';
 
 export type ScanMode = 'doc' | 'id' | 'passport' | 'receipt' | 'book';
 export type Quality = 'small' | 'standard' | 'high';
@@ -31,6 +35,10 @@ export interface ScanPage {
   ratio: number;
   /** bumps on every change, so stale renders are dropped */
   ver: number;
+  /** AI flattening of a curved page (see dewarp.ts), for the crop it was worked out for */
+  ai?: { key: string; grid: Grid | null; info: AiInfo } | null;
+  /** AI flattening switched off for this page */
+  aiOff?: boolean;
 }
 
 export const DEFAULT_FILTER: Record<ScanMode, Filter> = { doc: 'auto', id: 'color', passport: 'color', receipt: 'auto', book: 'auto' };
@@ -279,7 +287,7 @@ export const turnQuad = (q: Quad, rot: number): Quad => {
   return [0, 1, 2, 3].map((i) => q[(i - r + 4) % 4]) as Quad;
 };
 
-export interface Rendered { blob: Blob; url: string; w: number; h: number; blur: number; orient?: Orientation | null }
+export interface Rendered { blob: Blob; url: string; w: number; h: number; blur: number; orient?: Orientation | null; bent?: Bentness | null }
 export interface RenderOpt { quality: Quality; long?: number; filter?: Filter; jpeg?: number; orient?: boolean; low?: boolean; quick?: boolean }
 
 /** output size before quarter turns, capped by `long` */
@@ -327,7 +335,7 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
   const jpeg = opt.jpeg ?? (card ? 0.9 : filter === 'bw' ? 0.82 : 0.85);
   const src = await cropSource(p, ow, oh, p.rot);
   // turned upright here already: text runs along the rows
-  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh), flatten: flattens(p) ? 'rows' as const : null };
+  const job = { quad: src.quad, bend: src.bend, outW, outH, filter, sharpen: (opt.quick ? 'off' : 'auto') as 'auto' | 'off', radius: radiusOf(p, filter, ow, oh), flatten: flattens(p) ? 'rows' as const : null, grid: gridOf(p, p.rot) };
   const orient = !!opt.orient && p.rot === 0;
   let res: { blob?: Blob; img?: PixelImage; w?: number; h?: number; blur: number; orient?: Orientation | null; times?: any };
   try {
@@ -346,16 +354,16 @@ export async function renderPage(p: ScanPage, opt: RenderOpt): Promise<Rendered>
 }
 
 /** sheets of paper get their printed lines straightened (cards and passports are stiff) */
-const flattens = (p: ScanPage) => (p.kind === 'doc' || p.kind === 'receipt' || p.kind === 'book') && p.format !== 'id1' && p.format !== 'id3';
+export const flattens = (p: ScanPage) => (p.kind === 'doc' || p.kind === 'receipt' || p.kind === 'book') && p.format !== 'id1' && p.format !== 'id3';
 
 // ---------------------------------------------------------------- the page on screen
 // The straightened page (and its sharpened copy) is kept for the pages being looked at, so changing the
 // look, turning the page or comparing only runs the quick last step.
 
-interface Base { warped: PixelImage; sharp: PixelImage | null; blur: number; ow: number; oh: number }
+interface Base { warped: PixelImage; sharp: PixelImage | null; blur: number; ow: number; oh: number; bent?: Bentness | null }
 const bases = new Map<string, Promise<Base>>();
 const baseKey = (p: ScanPage, long: number) =>
-  `${p.id}:${p.rot % 2}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 'b' + bendReach(p.bend).toFixed(1) : ''}:${long}`;
+  `${p.id}:${p.rot % 2}:${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? 'b' + bendReach(p.bend).toFixed(1) : ''}:${long}:${gridOf(p, 0) ? 'ai' : ''}`;
 
 function baseOf(p: ScanPage, long: number, low?: boolean): Promise<Base> {
   const key = baseKey(p, long);
@@ -366,8 +374,8 @@ function baseOf(p: ScanPage, long: number, low?: boolean): Promise<Base> {
     const { ow, oh } = sizeFor(p, 'standard', long);
     const src = await cropSource(p, ow, oh, 0);
     // not turned yet: on a page that will get a quarter turn the text runs down the columns
-    const job = { quad: src.quad, bend: src.bend, outW: ow, outH: oh, sharpen: 'auto' as const, flatten: flattens(p) ? (p.rot % 2 ? 'cols' as const : 'rows' as const) : null };
-    let r: { warped: PixelImage; sharp: PixelImage | null; blur: number; times?: any };
+    const job = { quad: src.quad, bend: src.bend, outW: ow, outH: oh, sharpen: 'auto' as const, flatten: flattens(p) ? (p.rot % 2 ? 'cols' as const : 'rows' as const) : null, grid: gridOf(p, 0) };
+    let r: { warped: PixelImage; sharp: PixelImage | null; blur: number; times?: any; bent?: Bentness | null };
     try {
       const s = await sourceOf(src.bmp, src.region, src.RW, src.RH);
       r = await post({ type: 'prep', src: s, job }, transferOf(s), low);
@@ -378,7 +386,7 @@ function baseOf(p: ScanPage, long: number, low?: boolean): Promise<Base> {
       r = K.prepare({ ...job, src: { w: px.w, h: px.h, data: px.data } });
     }
     tlog(`prep ${ow}x${oh} ${JSON.stringify(r.times ?? {})}`, t0);
-    return { warped: r.warped, sharp: r.sharp, blur: r.blur, ow, oh };
+    return { warped: r.warped, sharp: r.sharp, blur: r.blur, ow, oh, bent: r.bent };
   })();
   bases.set(key, b);
   b.catch(() => bases.delete(key));
@@ -409,7 +417,7 @@ export async function renderLook(p: ScanPage, opt: { long: number; filter?: Filt
   }
   const b = await blobOf(r, jpeg);
   tlog(`look ${filter} ${b.w}x${b.h}`, t0);
-  return { blob: b.blob, url: URL.createObjectURL(b.blob), w: b.w, h: b.h, blur: base.blur, orient: r.orient };
+  return { blob: b.blob, url: URL.createObjectURL(b.blob), w: b.w, h: b.h, blur: base.blur, orient: r.orient, bent: base.bent };
 }
 
 /** Small previews of a page in every look, from the kept straightened page. */
@@ -467,4 +475,79 @@ export function sharpness(src: CanvasImageSource): number {
     s += v; s2 += v * v; n++;
   }
   return n ? s2 / n - (s / n) ** 2 : 0;
+}
+
+// ---------------------------------------------------------------- AI flattening of curved pages
+// The UVDoc model (dewarp.ts) in a worker of its own, started the first time a page looks bent. Its
+// runtime (WebAssembly) and the model ship with the app and are handed over as bytes. If anything is
+// missing or fails, pages simply keep the classical straightening.
+
+/** the crop (and turn) a page's AI map was worked out for */
+export const aiKey = (p: ScanPage) => `${p.quad.map((c) => `${c.x.toFixed(1)},${c.y.toFixed(1)}`).join(';')}:${p.bend ? bendReach(p.bend).toFixed(1) : ''}:${p.rot}`;
+/** the page's AI map for an output turned `rot` quarter turns (null: classical only) */
+export function gridOf(p: ScanPage, rot: number): Grid | null {
+  if (p.aiOff || !p.ai?.grid || p.ai.key !== aiKey(p)) return null;
+  return turnGrid(p.ai.grid, rot);
+}
+/** worth trying the model: a sheet whose sides curve or whose printed lines wander */
+export function looksCurved(p: ScanPage, bent: Bentness | null | undefined): boolean {
+  if (!flattens(p) || p.aiOff || p.ai?.key === aiKey(p) || aiBroken) return false;
+  const q = p.quad, side = Math.max(dist(q[0], q[1]), dist(q[0], q[3]), 1);
+  return bendReach(p.bend) / side > 0.004 || (!!bent && bent.rms > 0.06);
+}
+
+let aiWorker: Promise<Worker> | null = null, aiBroken = false, aiSeq = 0;
+/** frees the model's memory (the scanner closed); started again when needed */
+export function stopAi() { aiWorker?.then((w) => w.terminate()).catch(() => null); aiWorker = null; for (const t of aiWaiting.values()) t.fail(new Error('stopped')); aiWaiting.clear(); }
+const aiWaiting = new Map<number, { ok: (r: any) => void; fail: (e: any) => void }>();
+function loadBytes(url: string): Promise<ArrayBuffer> {
+  return new Promise((resolve, reject) => {
+    const x = new XMLHttpRequest();
+    x.open('GET', url); x.responseType = 'arraybuffer';
+    x.onload = () => (x.status === 200 || (x.status === 0 && x.response) ? resolve(x.response) : reject(new Error(`Could not load ${url}`)));
+    x.onerror = () => reject(new Error(`Could not load ${url}`));
+    x.send();
+  });
+}
+function aiPost<T>(w: Worker, msg: any, transfer: Transferable[] = []): Promise<T> {
+  const id = ++aiSeq;
+  return new Promise<T>((ok, fail) => { aiWaiting.set(id, { ok, fail }); w.postMessage({ ...msg, id }, transfer); });
+}
+function startAi(): Promise<Worker> {
+  aiWorker ??= (async () => {
+    const t0 = performance.now();
+    const base = appBase() + 'scan/';
+    const [js, wasm, model] = await Promise.all([loadBytes(base + `ai.js?v=${WORKER_VERSION}`), loadBytes(base + `ort.wasm?v=${WORKER_VERSION}`), loadBytes(base + `uvdoc.onnx?v=${WORKER_VERSION}`)]);
+    const w = new Worker(URL.createObjectURL(new Blob([js], { type: 'application/javascript' })));
+    w.onmessage = (e) => { const t = aiWaiting.get(e.data.id); aiWaiting.delete(e.data.id); if (t) { if (e.data.err) t.fail(new Error(e.data.err)); else t.ok(e.data.r); } };
+    w.onerror = (e) => { console.warn('scan AI worker failed', e.message); aiBroken = true; for (const t of aiWaiting.values()) t.fail(new Error('AI worker')); aiWaiting.clear(); };
+    await aiPost(w, { type: 'init', wasm, model }, [wasm, model]);
+    tlog('ai ready', t0);
+    return w;
+  })().catch((e) => { aiBroken = true; aiWorker = null; throw e; });
+  return aiWorker;
+}
+
+/**
+ * Works out the AI map for a page (on the page turned upright, as it will be read) and whether to use
+ * it. Resolves with what to keep on the page; never throws (a failure keeps the classical result).
+ */
+export async function flattenPage(p: ScanPage): Promise<NonNullable<ScanPage['ai']>> {
+  const key = aiKey(p);
+  try {
+    const t0 = performance.now();
+    const w = await startAi();
+    const { ow, oh } = sizeFor(p, 'standard', 1600);
+    const turned = p.rot % 2 !== 0;
+    const src = await cropSource(p, ow, oh, p.rot);
+    const job = { quad: src.quad, bend: src.bend, outW: turned ? oh : ow, outH: turned ? ow : oh, sharpen: 'off' as const, flatten: null };
+    const s = await sourceOf(src.bmp, src.region, src.RW, src.RH);
+    const r = await aiPost<{ grid: Grid | null; info: AiInfo }>(w, { type: 'flat', src: s, job }, transferOf(s));
+    tlog(`ai ${r.info.used ? 'used' : 'not used'} (${r.info.why}) ${r.info.ms}ms`, t0);
+    // kept for the unturned page
+    return { key, grid: r.grid ? turnGrid(r.grid, (4 - (p.rot % 4)) % 4) : null, info: r.info };
+  } catch (e) {
+    console.warn('scan AI flattening unavailable', e);
+    return { key, grid: null, info: { ran: false, used: false, why: 'unavailable on this device' } };
+  }
 }
