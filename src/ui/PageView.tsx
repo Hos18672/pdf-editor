@@ -424,7 +424,7 @@ export function PageView(p: Props) {
   const [guides, setGuides] = useState<{ v: number[]; h: number[] }>({ v: [], h: [] });
 
   return (
-    <div ref={outerRef} className="pageOuter" data-src={p.src} style={{ width: swap ? H : W, height: swap ? W : H }}>
+    <div ref={outerRef} className="pageOuter" data-src={p.src} data-rot={rotation} style={{ width: swap ? H : W, height: swap ? W : H }}>
       <div
         ref={pageRef}
         className={`page tool-${p.tool}`}
@@ -901,6 +901,38 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     onDrag(null);
     onGuides({ v: [], h: [] });
     if (d && d.mode === 'move' && !d.moved && o.type === 'text' && selected) onEditing(true);
+    if (d && d.moved && (d.mode === 'move' || d.mode === 'grip' || d.mode === 'resize')) settle();
+  };
+  /**
+   * After a move: a box left between two pages goes onto the page that holds its middle (dragged
+   * across), and it is kept inside its page (nothing cut off at a page's edge).
+   */
+  const settle = () => {
+    if (o.type === 'line') return;
+    const el = objRef.current;
+    const outer = el?.closest('.pageOuter') as HTMLElement | null;
+    if (!el || !outer) return;
+    const r = el.getBoundingClientRect(), cx = r.left + r.width / 2, cy = r.top + r.height / 2;
+    const pages = [...document.querySelectorAll<HTMLElement>('.pageOuter[data-src]')];
+    let target = outer, best = Infinity;
+    for (const pg of pages) {
+      const b = pg.getBoundingClientRect();
+      const dist = Math.max(0, b.top - cy, cy - b.bottom) + Math.max(0, b.left - cx, cx - b.right);
+      if (dist < best) { best = dist; target = pg; }
+    }
+    const w = o.w, h = o.h;
+    const fit = (x: number, y: number, pw: number, ph: number) => ({
+      x: Math.max(0, Math.min(x, pw - w)), y: Math.max(0, Math.min(y, ph - h)),
+    });
+    if (target !== outer && rotation === 0 && Number(target.dataset.rot || 0) === 0) {
+      const b = target.getBoundingClientRect();
+      const pos = fit((cx - b.left) / zoom - w / 2, (cy - b.top) / zoom - h / 2, b.width / zoom, b.height / zoom);
+      onChange({ page: Number(target.dataset.src), ...pos } as any, true);
+      return;
+    }
+    if (rotation !== 0) return;
+    const pos = fit(o.x, o.y, page.w, page.h);
+    if (Math.abs(pos.x - o.x) > 0.01 || Math.abs(pos.y - o.y) > 0.01) onChange(pos, true);
   };
 
   // floating toolbar: fixed to the viewport, kept inside the visible desk

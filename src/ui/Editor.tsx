@@ -388,7 +388,14 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ----- object helpers -----
-  const addObject = (o: EditorObject | EditorObject[]) => commit((s) => ({ ...s, objects: [...s.objects, ...(Array.isArray(o) ? o : [o])] }));
+  // a new box is kept inside its page (a signature placed across two pages would be cut off by both)
+  const inPage = (o: EditorObject): EditorObject => {
+    const pg = infos[o.page];
+    if (!pg || o.type === 'line') return o;
+    const x = Math.max(0, Math.min(o.x, pg.w - o.w)), y = Math.max(0, Math.min(o.y, pg.h - o.h));
+    return x === o.x && y === o.y ? o : ({ ...o, x, y } as EditorObject);
+  };
+  const addObject = (o: EditorObject | EditorObject[]) => commit((s) => ({ ...s, objects: [...s.objects, ...(Array.isArray(o) ? o : [o]).map(inPage)] }));
   const changeObject = (id: string, patch: Partial<EditorObject>, merge: boolean) =>
     commit((s) => ({ ...s, objects: s.objects.map((o) => (o.id === id ? ({ ...o, ...patch } as EditorObject) : o)) }), merge);
   const removeObject = (id: string) => {
