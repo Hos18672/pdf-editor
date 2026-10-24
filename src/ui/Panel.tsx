@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { useLineSelSize, lineEditor } from './lineEdit';
-import type { DocFont, EditorObject, FontFamily } from '../engine/types';
+import { useLineSelSize, useLineSelLook, lineEditor, sharedLook, withLook } from './lineEdit';
+import type { CharLook, DocFont, EditorObject, FontFamily, Looks } from '../engine/types';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { RunEdit, Tool, ToolStyle } from './store';
+import { cleanLooks } from './store';
 import { Icon } from './icons';
 import { ColorPicker } from './ColorPicker';
 
@@ -96,10 +97,104 @@ export const fontLabel = (font?: FontInfo) => {
   return n || 'Embedded font';
 };
 
+const LOOK_BTNS: [keyof CharLook, string, string][] = [['b', 'text-b:bold', 'Bold'], ['i', 'text-italic', 'Italic'], ['u', 'text-underline', 'Underline'], ['s', 'text-strikethrough', 'Strike-through']];
+const ALIGNS: ['left' | 'center' | 'right', string][] = [['left', 'Align left'], ['center', 'Centre'], ['right', 'Align right']];
+
+/**
+ * Bold, italic, underline, strike-through (and, for a text box, alignment). They act on the letters
+ * selected while typing; with nothing selected, on the whole text.
+ */
+export function TextTools({ editKey, whole, onWhole, disabled, align, onAlign }: {
+  /** the line / box whose letters can be selected */
+  editKey: string;
+  /** the look the whole text has now */
+  whole: CharLook;
+  onWhole: (p: CharLook) => void;
+  /** settings that can't be given to the whole text (with why) */
+  disabled?: Partial<Record<keyof CharLook, string>>;
+  align?: 'left' | 'center' | 'right'; onAlign?: (a: 'left' | 'center' | 'right') => void;
+}) {
+  const sel = useLineSelLook(editKey);
+  const ed = lineEditor();
+  const live = ed && ed.key === editKey ? ed : null;
+  const cur = sel ?? live?.selLook(true) ?? whole;
+  const flip = (k: keyof CharLook) => {
+    const v = !cur[k];
+    if (sel && live?.setSelLook({ [k]: v })) return;
+    onWhole({ [k]: v });
+  };
+  return (
+    // the text being typed keeps the focus (and its selected letters)
+    <div className="ttools" role="toolbar" aria-label={sel ? 'Style of the selected letters' : 'Text style'} onMouseDown={(e) => e.preventDefault()}>
+      {LOOK_BTNS.map(([k, icon, label]) => {
+        const off = !sel && disabled?.[k];
+        return (
+          <button key={k} type="button" className={cur[k] ? 'on' : ''} aria-pressed={!!cur[k]} aria-label={label} disabled={!!off}
+            title={off || `${label}${k === 's' ? '' : ` (Ctrl+${k.toUpperCase()})`}${sel ? ' · selected letters' : ''}`} onClick={() => flip(k)}>
+            <Icon name={icon} size={19} />
+          </button>
+        );
+      })}
+      {onAlign && (
+        <>
+          <span className="sep" aria-hidden />
+          {ALIGNS.map(([a, label]) => (
+            <button key={a} type="button" className={(align ?? 'left') === a ? 'on' : ''} aria-pressed={(align ?? 'left') === a} aria-label={label} title={label} onClick={() => onAlign(a)}>
+              <Icon name={`text-align-${a}`} size={19} />
+            </button>
+          ))}
+        </>
+      )}
+    </div>
+  );
+}
+
+/** looks with one setting taken off every letter (the whole text takes it) */
+export const dropLook = (text: string, looks: Looks | undefined, k: keyof CharLook, base: CharLook = {}) =>
+  looks ? cleanLooks(text, looks.map((l) => { if (!l) return null; const n = { ...l }; delete n[k]; return n; }), base) : undefined;
+
+/** text tools of an existing line */
+export function RunTextTools({ run, edit, onEdit }: { run: TextRun; edit?: RunEdit; onEdit: (e: RunEdit) => void }) {
+  const cur: RunEdit = edit ?? { text: run.str, sizeScale: 1, color: null };
+  const n = [...cur.text].length;
+  return (
+    <TextTools editKey={run.key} whole={sharedLook(cur.text, cur.looks, 0, n, {})}
+      onWhole={(p) => {
+        const ed = lineEditor();
+        if (ed && ed.key === run.key && ed.setSelLook(p, true)) return;
+        const looks = cleanLooks(cur.text, withLook(cur.text, cur.looks, 0, n, p));
+        const next: RunEdit = { ...cur, looks };
+        if (!looks) delete next.looks;
+        onEdit(next);
+      }} />
+  );
+}
+
+/** text tools of a text box */
+export function ObjTextTools({ o, docFonts, onChange }: { o: Extract<EditorObject, { type: 'text' }>; docFonts: DocFont[]; onChange: (p: any) => void }) {
+  const base: CharLook = { b: o.bold, i: o.italic, u: !!o.underline, s: !!o.strike, c: o.color };
+  const n = [...o.text].length;
+  return (
+    <TextTools editKey={o.id} whole={sharedLook(o.text, o.looks, 0, n, base)} align={o.align} onAlign={(align) => onChange({ align })}
+      onWhole={(p) => {
+        const k = Object.keys(p)[0] as keyof CharLook, v = !!p[k];
+        if (k === 'u' || k === 's') { onChange({ [k === 'u' ? 'underline' : 'strike']: v, looks: dropLook(o.text, o.looks, k, { ...base, [k]: v }) }); return; }
+        const f = o.font;
+        if (!f) { onChange({ [k === 'b' ? 'bold' : 'italic']: v, looks: dropLook(o.text, o.looks, k, { ...base, [k]: v }) }); return; }
+        // a document font: its bold / italic cut when the document has one, else drawn bold / slanted
+        const cut = cutOf(f, docFonts, k === 'b' ? v : o.bold, k === 'i' ? v : o.italic);
+        if (cut) { const st = styleOf(cut); onChange({ font: cut, ...st, looks: dropLook(o.text, o.looks, k, { ...base, b: st.bold, i: st.italic }) }); return; }
+        if (base[k] && !v) return; // the cut itself is bold / italic
+        onChange({ looks: cleanLooks(o.text, withLook(o.text, o.looks, 0, n, { [k]: v }), base) });
+      }} />
+  );
+}
+
 /** Properties of an existing line of text */
-export function RunProps({ run, font, known, edit, line, origColor, onEdit, onReset, onClose, compact, onCopy, onCut, onMove }: {
+export function RunProps({ run, font, known, edit, line, origColor, onEdit, onReset, onClose, compact, onCopy, onCut, onMove, hideTools }: {
   run: TextRun; font?: FontInfo; known?: (c: string) => boolean; edit?: RunEdit; line: string; origColor: string;
   onEdit: (e: RunEdit) => void; onReset: () => void; onClose?: () => void; compact?: boolean;
+  /** bold / italic / … are shown elsewhere (the phone's bar) */ hideTools?: boolean;
   onCopy?: () => void; onCut?: () => void; onMove?: () => void;
 }) {
   const cur: RunEdit = edit ?? { text: run.str, sizeScale: 1, color: null };
@@ -108,6 +203,17 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
   const selSize = useLineSelSize(run.key);
   const size = selSize ?? run.region.height * cur.sizeScale;
   const setSize = (v: number) => { if (selSize !== null && lineEditor()?.setSelSize(v)) return; onEdit({ ...cur, sizeScale: v / run.region.height }); };
+  const selLook = useLineSelLook(run.key);
+  const pickColor = (c: string | null) => {
+    if (selLook && lineEditor()?.setSelLook({ c: c ?? undefined })) return;
+    // the whole line: letters coloured on their own take it too
+    const ed = lineEditor();
+    if (ed && ed.key === run.key) ed.setSelLook({ c: undefined }, true);
+    const looks = dropLook(cur.text, cur.looks, 'c');
+    const next: RunEdit = { ...cur, color: c, looks };
+    if (!looks) delete next.looks;
+    onEdit(next);
+  };
   return (
     <div className="props">
       {!compact && <Head kicker="Existing text" title={line} onClose={onClose} />}
@@ -123,13 +229,14 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
           <span>The embedded font has no {missing.slice(0, 10).join(' ')}{missing.length > 10 ? '…' : ''}. Those characters use a similar standard font.</span>
         </div>
       )}
+      {!hideTools && <div className="field"><div className="label">{selLook ? 'Style of the selected letters' : 'Style'}</div><RunTextTools run={run} edit={edit} onEdit={onEdit} /></div>}
       <div className="field"><div className="label">{selSize !== null ? 'Size of the selected letters' : 'Size'}</div>
         {/* the line being typed keeps the focus (and its selected letters) */}
         <div onMouseDown={(e) => e.preventDefault()}><Stepper value={size} min={2} max={300} onChange={setSize} label="size" unit="pt" /></div>
-        {selSize === null && !compact && <div className="hint">Select a word or letters while typing to size just them.</div>}
+        {selSize === null && !compact && <div className="hint">Select a word or letters while typing to change just them.</div>}
       </div>
-      <div className="field"><div className="label">Colour</div>
-        <Swatches value={cur.color} original={origColor} title="Text colour" onPick={(c) => onEdit({ ...cur, color: c })} />
+      <div className="field"><div className="label">{selLook ? 'Colour of the selected letters' : 'Colour'}</div>
+        <Swatches value={selLook ? selLook.c ?? cur.color : cur.color} original={origColor} title="Text colour" onPick={pickColor} />
       </div>
       {(onCopy || onCut || onMove) && (
         <div className="lineacts" role="group" aria-label="Line">
@@ -189,14 +296,17 @@ const cutOf = (f: DocFont, docFonts: DocFont[], bold: boolean, italic: boolean) 
   return docFonts.find((d) => root(d.label) === r && styleOf(d).bold === bold && styleOf(d).italic === italic) ?? null;
 };
 
-export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact, order, docFonts = [] }: {
+export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact, order, docFonts = [], hideTools }: {
   o: EditorObject; onChange: (p: Partial<EditorObject>) => void; onDelete: () => void; onDuplicate: () => void; onClose?: () => void; compact?: boolean;
   /** the document's pages in order (original indices), for links to a page */
   order?: number[];
   /** fonts of the document that typed text can use */
   docFonts?: DocFont[];
+  /** bold / italic / … are shown elsewhere (the phone's bar) */ hideTools?: boolean;
 }) {
   const set = (p: any) => onChange(p);
+  const selSize = useLineSelSize(o.id);
+  const selLook = useLineSelLook(o.id);
   return (
     <div className="props">
       {!compact && <Head kicker="Added object" title={objTitle(o)} onClose={onClose} />}
@@ -206,27 +316,20 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact,
           <div className="field"><div className="label">Font</div>
             {docFonts.length || o.font ? <FontPick o={o} docFonts={docFonts} onChange={set} /> : <Family value={o.family} onChange={(family) => set({ family })} />}
           </div>
-          <div className="grid2">
-            <div className="field"><div className="label">Size</div><Stepper value={o.size} min={4} max={200} step={0.5} onChange={(size) => set({ size })} label="size" /></div>
-            <div className="field"><div className="label">Style</div>
-              <div className="bstyle">
-                {(() => {
-                  // a document font switches to its bold / italic cut, when the document has one
-                  const f = o.font;
-                  const b = f ? cutOf(f, docFonts, !o.bold, o.italic) : null, i = f ? cutOf(f, docFonts, o.bold, !o.italic) : null;
-                  return (
-                    <>
-                      <button className={o.bold ? 'on' : ''} disabled={!!f && !b} onClick={() => set(f ? { font: b, ...styleOf(b!) } : { bold: !o.bold })} style={{ fontWeight: 700 }} aria-label="Bold" aria-pressed={o.bold}
-                        title={f && !b ? 'This document has no bold cut of this font' : undefined}>B</button>
-                      <button className={o.italic ? 'on' : ''} disabled={!!f && !i} onClick={() => set(f ? { font: i, ...styleOf(i!) } : { italic: !o.italic })} style={{ fontStyle: 'italic', fontFamily: 'Georgia, serif' }} aria-label="Italic" aria-pressed={o.italic}
-                        title={f && !i ? 'This document has no italic cut of this font' : undefined}>I</button>
-                    </>
-                  );
-                })()}
-              </div>
+          {!hideTools && <div className="field"><div className="label">{selLook ? 'Style of the selected letters' : 'Style'}</div><ObjTextTools o={o} docFonts={docFonts} onChange={set} /></div>}
+          <div className="field"><div className="label">{selSize !== null ? 'Size of the selected letters' : 'Size'}</div>
+            <div onMouseDown={(e) => e.preventDefault()}>
+              <Stepper value={selSize ?? o.size} min={selSize !== null ? 2 : 4} max={200} step={0.5} label="size"
+                onChange={(size) => { if (selSize !== null && lineEditor()?.setSelSize(size)) return; set({ size }); }} />
             </div>
           </div>
-          <div className="field"><div className="label">Colour</div><Swatches value={o.color} onPick={(color) => set({ color: color ?? '#000000' })} /></div>
+          <div className="field"><div className="label">{selLook ? 'Colour of the selected letters' : 'Colour'}</div>
+            <Swatches value={selLook ? selLook.c ?? o.color : o.color} onPick={(color) => {
+              if (selLook && lineEditor()?.setSelLook({ c: color ?? undefined })) return;
+              set({ color: color ?? '#000000', looks: dropLook(o.text, o.looks, 'c', { b: o.bold, i: o.italic, u: !!o.underline, s: !!o.strike }) });
+            }} />
+          </div>
+          {!compact && <div className="hint">Select words while typing to style just them.</div>}
         </>
       )}
       {(o.type === 'rect' || o.type === 'ellipse') && (

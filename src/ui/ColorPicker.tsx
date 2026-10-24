@@ -50,7 +50,7 @@ export function ColorPicker({ value, onApply, onClose, sheet, title = 'Colour' }
       release();
       // give the caret back to the text that was being edited
       const el = back.current as HTMLElement | null;
-      if (el && el.isConnected && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') && document.activeElement !== el) el.focus({ preventScroll: true });
+      if (el && el.isConnected && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable) && document.activeElement !== el) el.focus({ preventScroll: true });
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

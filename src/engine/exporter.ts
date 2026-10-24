@@ -10,7 +10,8 @@ import { addTextLayer } from './textLayer';
 import { BASELINE, MATCH_BASE, matchFile, wholeMatch, textSize, arabicText, MatchFont } from './matchFonts';
 import { ARABIC_BASE, arabicFile, hasArabic, isRtl, visualRuns } from './rtl';
 import * as fontkitNs from '@pdf-lib/fontkit';
-import type { ExportInput, EditorObject, FontFamily, TextEdit } from './types';
+import type { ExportInput, EditorObject, FontFamily, TextEdit, CharLook } from './types';
+import { FAUX_BOLD, FAUX_SLANT, UNDER_Y, STRIKE_Y, DECO_T, perLine, pieces, Piece } from './looks';
 import { decodeImage, writeJpeg } from './images';
 
 type Box = { x0: number; y0: number; x1: number; y1: number };
@@ -240,7 +241,8 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       const key = leaf.newFontDictionary('DocT', ref).asString();
       const map = res === main && Object.keys(F.charMap).length ? F.charMap : sp.toUni(res);
       if (!Object.keys(map).length) continue;
-      out.push({ key, bpc: sp.fonts(res)?.bytesPerCode ?? 1, map, fs: o.size / k });
+      const fm = sp.fonts(res);
+    out.push({ key, bpc: fm?.bytesPerCode ?? 1, map, fs: o.size / k, wd: fm ? (c: number) => fm.width(c) : undefined });
     }
     return out.length ? out : null;
   };
@@ -387,14 +389,18 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
           // same visual size as the line: scale by the ratio of glyph heights
           const fs = g0.style.fontSize * (mainH.height / (g0.height || mainH.height)) * e.sizeScale;
           const map = res === main && Object.keys(e.charMap).length ? e.charMap : toUni(res);
-          sources.push({ key: '/' + res, bpc: fonts(res)?.bytesPerCode ?? 1, map, fs });
+          const fm = fonts(res);
+          sources.push({ key: '/' + res, bpc: fm?.bytesPerCode ?? 1, map, fs, wd: fm ? (c) => fm.width(c) : undefined });
         }
         let s = 'q ' + (e.offset ? `1 0 0 1 ${f(e.offset[0])} ${f(e.offset[1])} cm ` : '') + st.ctm.map(f).join(' ') + ' cm BT ';
-        s += `${f(st.Tc)} Tc ${f(st.Tw)} Tw ${f(st.Tz)} Tz ${f(st.Ts)} Ts ${st.Tr === 3 ? 0 : st.Tr} Tr `;
+        const tr = st.Tr === 3 ? 0 : st.Tr;
+        s += `${f(st.Tc)} Tc ${f(st.Tw)} Tw ${f(st.Tz)} Tz ${f(st.Ts)} Ts ${tr} Tr `;
         const ink = e.color ?? (hidden ? inkOf() : null);
-        s += ink ? rgb(ink, 'rg') + ' ' : (st.fill.join(' ') || '0 g') + ' ';
+        const fill = ink ? rgb(ink, 'rg') : (st.fill.join(' ') || '0 g');
+        s += fill + ' ';
         s += first.tm.map(f).join(' ') + ' Tm ';
-        const lineK = lineScales(e);
+        const lineK = perLine(e.text, e.scales);
+        const lineL = perLine(e.text, e.looks);
         const lead = sources[0].fs * 1.2;
         if (af) {
           // right-to-left lines end where the original line ended (the text matrix measures in its own units)
@@ -409,12 +415,24 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
             s += `${f(dx - prev)} ${f(li > 0 ? -lead : 0)} Td ${w.tj}`;
             prev = dx;
           });
-        } else lines.forEach((line, li) => {
-          // the next line as far down as its largest letters need
-          if (li > 0) s += `0 ${f(-lead * Math.max(1, ...(lineK?.[li] ?? [1])))} Td `;
-          s += encodeMixed(line.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe, true, lineK?.[li]);
-        });
-        s += 'ET Q\n';
+        } else {
+          // each line from its own start (letters with a look of their own can turn the text matrix)
+          const sp = { tc: st.Tc, tw: st.Tw, tz: st.Tz };
+          const vs = Math.hypot(first.tm[2], first.tm[3]) || 1;
+          let down = 0, deco = '';
+          lines.forEach((line, li) => {
+            // the next line as far down as its largest letters need
+            if (li > 0) down += lead * Math.max(1, ...(lineK?.[li] ?? [1]));
+            const lineTm = mulM([1, 0, 0, 1, 0, -down], first.tm);
+            const w = writeLine(pieces(line, lineK?.[li], lineL?.[li]), (p) => ({
+              ...encodeMixed(p.t.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe, true, p.k, sp), fauxB: !!p.l?.b, fauxI: !!p.l?.i,
+            }), { lineTm, fill, tr, fs: sources[0].fs, boldW: (fs) => fs * FAUX_BOLD * vs });
+            s += w.ops;
+            deco += w.deco;
+          });
+          s += 'ET ' + deco + 'Q\n';
+        }
+        if (af) s += 'ET Q\n';
         add += s;
       } else {
         // Text lives somewhere we cannot rewrite (e.g. inside a form) — cover it.
@@ -423,10 +441,15 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         const key = leaf.newFontDictionary('FbE', fb.ref).asString();
         const h = e.region.height * e.sizeScale;
         const [ux, uy] = e.region.u;
-        let s = `q BT ${rgb(e.color ?? (hidden ? inkOf() : '#000000'), 'rg')} ${key} 1 Tf `;
+        const fill = rgb(e.color ?? (hidden ? inkOf() : '#000000'), 'rg');
+        let s = `q BT ${fill} ${key} 1 Tf `;
         const ak = af ? leaf.newFontDictionary('ArE', af.ref).asString() : '';
         const rtl = af ? isRtl(e.text) : false;
-        const lineK = af ? null : lineScales(e);
+        const lineK = af ? null : perLine(e.text, e.scales);
+        const lineL = af ? null : perLine(e.text, e.looks);
+        // the standard font's own bold / italic faces for letters made so
+        const cuts = await stdCuts(stdFont, e.fallback.family, e.fallback.bold, e.fallback.italic, e.looks, leaf, 'FbE');
+        let deco = '';
         const [mx, my] = e.offset ?? [0, 0];
         let down = 0;
         lines.forEach((line, li) => {
@@ -439,12 +462,14 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
             ox += ux * dx; oy += uy * dx;
             s += `${ak} 1 Tf ${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm ${w.tj}`;
           } else {
-            s += `${f(ux * h)} ${f(uy * h)} ${f(-uy * h)} ${f(ux * h)} ${f(ox)} ${f(oy)} Tm `;
-            // letters of other sizes: the same font at their size, one piece per size
-            for (const [part, k] of sizeParts(line, lineK?.[li])) s += `${key} ${f(k)} Tf ${fb.encodeText(safe(fb, part)).toString()} Tj `;
+            // letters of other sizes and looks: one piece each
+            const w = writeLine(pieces(line, lineK?.[li], lineL?.[li]), (p) => stdPiece(cuts, p, 1, safe, e.fallback.bold, e.fallback.italic),
+              { lineTm: [ux * h, uy * h, -uy * h, ux * h, ox, oy], fill, tr: 0, fs: 1, boldW: (fs) => fs * h * FAUX_BOLD });
+            s += w.ops;
+            deco += w.deco;
           }
         });
-        add += s + 'ET Q\n';
+        add += s + 'ET ' + deco + 'Q\n';
       }
     }
 
@@ -653,7 +678,7 @@ function fontFamilies(glyphs: Glyph[], toUni: (res: string) => Record<string, nu
   return { root: find, all: () => [...parent.keys()] };
 }
 
-interface Source { key: string; bpc: number; map: Record<string, number>; fs: number }
+interface Source { key: string; bpc: number; map: Record<string, number>; fs: number; /** advance of a code (text space per unit of size) */ wd?: (code: number) => number }
 
 /** one line of Arabic-script text: its pieces in screen order, shaped by the font, and its width */
 function arabicLine(af: PDFFont, line: string, rtl: boolean, size: number): { tj: string; width: number } {
@@ -672,72 +697,120 @@ function arabicLine(af: PDFFont, line: string, rtl: boolean, size: number): { tj
   };
 }
 
+/** advance of letters: character spacing, word spacing, horizontal scale of the text state */
+interface Spacing { tc: number; tw: number; tz: number }
+
 function encodeMixed(
   line: string, sources: Source[], fbKey: string, fbSize: number, fb: PDFFont, safe: (f: PDFFont, s: string) => string,
   /** a space the fonts lack: a gap in the current font (false: the stand-in font's space) */
   gapSpace = true,
-  /** size of each character (code point) × the line's size */
-  scales?: number[],
-): string {
-  // split into runs per font and size: the line's own fonts first, a standard font for anything else
+  /** size of the letters × the line's size */
+  k = 1,
+  sp: Spacing = { tc: 0, tw: 0, tz: 100 },
+): { ops: string; w: number } {
+  // split into runs per font: the line's own fonts first, a standard font for anything else
   let out = '';
+  let w = 0;
+  const hz = sp.tz / 100;
   let cur = -2; // source index, -1 = fallback
-  let curK = 1;
-  let buf: number[] = [];
+  let buf: [number, string][] = [];
   let fbBuf = '';
   const flush = () => {
     if (cur >= 0 && buf.length) {
       const src = sources[cur];
-      out += `${src.key} ${f(src.fs * curK)} Tf [`;
+      const fs = src.fs * k;
+      out += `${src.key} ${f(fs)} Tf [`;
       let bytes: number[] = [];
       const parts: string[] = [];
-      for (const c of buf) {
+      for (const [c, ch] of buf) {
         if (c < 0) { // a space the font doesn't have
           if (bytes.length) parts.push(toHex(Uint8Array.from(bytes)));
           bytes = [];
           parts.push('-260');
-        } else if (src.bpc === 2) bytes.push(c >> 8, c & 0xff);
+          w += 0.26 * fs * hz;
+          continue;
+        }
+        if (src.bpc === 2) bytes.push(c >> 8, c & 0xff);
         else bytes.push(c & 0xff);
+        w += ((src.wd ? src.wd(c) : 0.5) * fs + sp.tc + (ch === ' ' && src.bpc === 1 ? sp.tw : 0)) * hz;
       }
       if (bytes.length) parts.push(toHex(Uint8Array.from(bytes)));
       out += parts.join(' ') + '] TJ ';
     } else if (cur === -1 && fbBuf) {
-      out += `${fbKey} ${f(fbSize * curK)} Tf ${fb.encodeText(safe(fb, fbBuf)).toString()} Tj `;
+      const t = safe(fb, fbBuf);
+      out += `${fbKey} ${f(fbSize * k)} Tf ${fb.encodeText(t).toString()} Tj `;
+      w += (fb.widthOfTextAtSize(t, fbSize * k) + sp.tc * [...t].length + sp.tw * (t.split(' ').length - 1)) * hz;
     }
     buf = [];
     fbBuf = '';
   };
-  let ci = 0;
   for (const ch of line) {
-    const k = scales?.[ci++] ?? 1;
     let idx = sources.findIndex((s) => s.map[ch] !== undefined);
     if (idx < 0 && ch === ' ' && gapSpace) idx = cur >= 0 ? cur : 0; // keep spaces in the current font (as a gap)
-    if (idx !== cur || k !== curK) { flush(); cur = idx; curK = k; }
-    if (idx >= 0) buf.push(sources[idx].map[ch] ?? -1);
+    if (idx !== cur) { flush(); cur = idx; }
+    if (idx >= 0) buf.push([sources[idx].map[ch] ?? -1, ch]);
     else fbBuf += ch;
   }
   flush();
-  return out;
+  return { ops: out, w };
 }
 
-/** per-character sizes of each line of an edit (null: all the same) */
-function lineScales(e: TextEdit): number[][] | null {
-  const chars = [...e.text];
-  if (!e.scales || e.scales.length !== chars.length) return null;
-  const out: number[][] = [[]];
-  chars.forEach((c, i) => { if (c === '\n') out.push([]); else out[out.length - 1].push(e.scales![i]); });
-  return out;
+/** the stroke colour operators matching fill colour operators (g → G, rg → RG, …) */
+function strokeOf(fill: string): string {
+  const map: Record<string, string> = { g: 'G', rg: 'RG', k: 'K', cs: 'CS', sc: 'SC', scn: 'SCN' };
+  return fill.split(/\s+/).map((t) => map[t] ?? t).join(' ');
 }
-/** a line split into pieces of one size each */
-function sizeParts(line: string, scales?: number[]): [string, number][] {
-  const out: [string, number][] = [];
-  let i = 0;
-  for (const ch of line) {
-    const k = scales?.[i++] ?? 1;
-    const last = out[out.length - 1];
-    if (last && last[1] === k) last[0] += ch; else out.push([ch, k]);
+
+/**
+ * One line of text in pieces of one size and look each: colour, fake bold (outlined letters) and fake
+ * italic (a slanted text matrix) where the font has no such face, and underline / strike-through bars
+ * (drawn after the text object, in `deco`). The line starts at `lineTm`; `enc` writes a piece's letters
+ * and gives their advance (text space).
+ */
+function writeLine(
+  pcs: Piece[], enc: (p: Piece) => { ops: string; w: number; fauxB: boolean; fauxI: boolean },
+  o: { lineTm: M; fill: string; tr: number; fs: number; boldW: (fs: number) => number; x0?: number },
+): { ops: string; w: number; deco: string } {
+  let x = o.x0 ?? 0, slant = false, color: string | null = null, bold = false;
+  const tm = (sl: boolean) => `${mulM([1, 0, sl ? FAUX_SLANT : 0, 1, x, 0], o.lineTm).map(f).join(' ')} Tm `;
+  let ops = tm(false);
+  const bars: string[] = [];
+  for (const p of pcs) {
+    const e = enc(p);
+    const c = p.l?.c ?? null;
+    if (e.fauxI !== slant) { slant = e.fauxI; ops += tm(slant); }
+    if (c !== color) { color = c; ops += (c ? `${rgb(c, 'rg')} ${rgb(c, 'RG')}` : `${o.fill} ${strokeOf(o.fill)}`) + ' '; }
+    if (e.fauxB) { ops += `2 Tr ${f(o.boldW(o.fs * p.k))} w ${c ? '' : strokeOf(o.fill) + ' '}`; bold = true; }
+    else if (bold) { ops += `${o.tr} Tr `; bold = false; }
+    ops += e.ops;
+    const fs = o.fs * p.k;
+    for (const [on, y] of [[p.l?.u, UNDER_Y], [p.l?.s, STRIKE_Y]] as [boolean | undefined, number][]) {
+      if (on && e.w > 0) bars.push(`${c ? rgb(c, 'rg') : o.fill} ${f(x)} ${f(fs * (y - DECO_T / 2))} ${f(e.w)} ${f(fs * DECO_T)} re f `);
+    }
+    x += e.w;
+  }
+  if (bold) ops += `${o.tr} Tr `;
+  if (color !== null) ops += `${o.fill} `;
+  return { ops, w: x - (o.x0 ?? 0), deco: bars.length ? `q ${o.lineTm.map(f).join(' ')} cm ${bars.join('')}Q ` : '' };
+}
+
+/** the faces of a standard font a text needs (its own, and bold / italic for letters made so) */
+async function stdCuts(stdFont: (fam: FontFamily, b: boolean, i: boolean) => Promise<PDFFont>, fam: FontFamily, b: boolean, i: boolean,
+  looks: (CharLook | null)[] | undefined, leaf: any, tag: string) {
+  const out = new Map<string, { font: PDFFont; key: string }>();
+  const want = new Set([`${+b}${+i}`]);
+  for (const l of looks ?? []) if (l) want.add(`${+(l.b ?? b)}${+(l.i ?? i)}`);
+  for (const w of want) {
+    const font = await stdFont(fam, w[0] === '1', w[1] === '1');
+    out.set(w, { font, key: leaf.newFontDictionary(tag, font.ref).asString() });
   }
   return out;
+}
+/** a piece in a standard font: its bold / italic face, real (never faked) */
+function stdPiece(cuts: Map<string, { font: PDFFont; key: string }>, p: Piece, size: number, safe: (f: PDFFont, s: string) => string, b: boolean, i: boolean) {
+  const c = cuts.get(`${+(p.l?.b ?? b)}${+(p.l?.i ?? i)}`) ?? [...cuts.values()][0];
+  const t = safe(c.font, p.t.normalize('NFC'));
+  return { ops: `${c.key} ${f(size * p.k)} Tf ${c.font.encodeText(t).toString()} Tj `, w: c.font.widthOfTextAtSize(t, size * p.k), fauxB: false, fauxI: false };
 }
 /** a moved line's move as distances along and across it (for pictures placed along the line) */
 function moveAlong(e: TextEdit, dx: number, dy: number): [number, number] {
@@ -864,15 +937,46 @@ async function drawObject(
       const fb = mf ?? font;
       const base = whole ? MATCH_BASE[F!.match.family] : sources ? F!.base : BASELINE[o.family];
       const size = whole ? textSize(o) : o.size;
-      s += `BT ${rgb(o.color, 'rg')} 0 Tc 0 Tw 100 Tz 0 Ts 0 Tr ${whole ? mKey : key} ${f(size)} Tf `;
-      o.text.split('\n').forEach((line, i) => {
-        const by = o.y + size * 1.2 * i + size * base;
-        s += `1 0 0 -1 ${f(o.x)} ${f(by)} Tm `;
-        if (sources) s += encodeMixed(line.normalize('NFC'), sources, mKey, o.size, fb, safe, false);
-        else if (whole) s += `${mf!.encodeText(line.normalize('NFC')).toString()} Tj `;
-        else s += `${font.encodeText(safe(font, line)).toString()} Tj `;
+      // the standard fonts have real bold / italic faces; a document's font is outlined / slanted
+      const cuts = !sources && !whole ? await stdCuts(stdFont, o.family, o.bold, o.italic, o.looks, leaf, 'FbT') : null;
+      const fill = rgb(o.color, 'rg');
+      const own: CharLook = { b: o.bold, i: o.italic, u: !!o.underline, s: !!o.strike };
+      const enc = (p: Piece) => {
+        if (cuts) return stdPiece(cuts, p, size, safe, o.bold, o.italic);
+        const fauxB = !!p.l?.b && !o.bold, fauxI = !!p.l?.i && !o.italic;
+        if (sources) return { ...encodeMixed(p.t.normalize('NFC'), sources, mKey, o.size, fb, safe, false, p.k), fauxB, fauxI };
+        const t = p.t.normalize('NFC');
+        return { ops: `${mKey} ${f(size * p.k)} Tf ${mf!.encodeText(t).toString()} Tj `, w: mf!.widthOfTextAtSize(t, size * p.k), fauxB, fauxI };
+      };
+      // the box's own underline / strike-through count for every letter that doesn't say otherwise
+      const looksOf = (ls: (CharLook | null)[] | undefined, n: number) => Array.from({ length: n }, (_, i) => {
+        const l = ls?.[i] ?? null;
+        const u = l?.u ?? own.u, st = l?.s ?? own.s;
+        const out: CharLook = { ...(l ?? {}) };
+        if (u) out.u = true; else delete out.u;
+        if (st) out.s = true; else delete out.s;
+        return Object.keys(out).length ? out : null;
       });
-      s += 'ET ';
+      const lineK = perLine(o.text, o.scales);
+      const lineL = perLine(o.text, looksOf(o.looks, [...o.text].length));
+      const lines = o.text.split('\n').map((line, li) => pieces(line, lineK?.[li], lineL?.[li]));
+      const opts = (lineTm: M) => ({ lineTm, fill, tr: 0, fs: size, boldW: (fs: number) => fs * FAUX_BOLD });
+      // lines set left, centred or right in the width of the longest one
+      const widths = o.align && o.align !== 'left' ? lines.map((pcs) => writeLine(pcs, enc, opts([1, 0, 0, -1, 0, 0])).w) : null;
+      const widest = widths ? Math.max(0, ...widths) : 0;
+      s += `BT ${fill} 0 Tc 0 Tw 100 Tz 0 Ts 0 Tr ${whole ? mKey : key} ${f(size)} Tf `;
+      let top = o.y, deco = '';
+      lines.forEach((pcs, i) => {
+        // a line is as tall as its largest letters
+        const tall = Math.max(1, ...pcs.map((p) => p.k));
+        const by = top + size * tall * base;
+        top += size * tall * 1.2;
+        const dx = widths ? (widest - widths[i]) * (o.align === 'center' ? 0.5 : 1) : 0;
+        const w = writeLine(pcs, enc, opts([1, 0, 0, -1, o.x + dx, by]));
+        s += w.ops;
+        deco += w.deco;
+      });
+      s += 'ET ' + deco;
       break;
     }
     case 'mark': {

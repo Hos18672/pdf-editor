@@ -27,7 +27,17 @@ export interface TextEdit {
   scales?: number[];
   /** the line moved by this much (PDF user space) */
   offset?: [number, number];
+  /** look of each character (code point of `text`, newlines included) where it differs from the line; absent: all plain */
+  looks?: Looks;
 }
+
+/**
+ * Look of a letter where it differs from the rest of its text: bold, italic, underlined, struck through,
+ * colour. A key that is absent takes the text's own setting; false switches it off for that letter.
+ */
+export interface CharLook { b?: boolean; i?: boolean; u?: boolean; s?: boolean; c?: string }
+/** one look per code point of a text (null: as the text) */
+export type Looks = (CharLook | null)[];
 
 export interface ScanStyle {
   family: 'Carlito' | 'Arimo' | 'Tinos' | 'Roboto';
@@ -86,7 +96,12 @@ interface Base {
 
 export type EditorObject =
   /** typed text: a standard font (family), or a font of the document (font) with the family as stand-in for letters it lacks */
-  | (Base & { type: 'text'; text: string; family: FontFamily; size: number; color: string; bold: boolean; italic: boolean; font?: DocFont })
+  | (Base & {
+    type: 'text'; text: string; family: FontFamily; size: number; color: string; bold: boolean; italic: boolean; font?: DocFont;
+    underline?: boolean; strike?: boolean; align?: 'left' | 'center' | 'right';
+    /** per letter (code point of `text`): size × `size`, and look where it differs from the box */
+    scales?: number[]; looks?: Looks;
+  })
   | (Base & { type: 'image' | 'signature'; src: string })
   | (Base & { type: 'rect' | 'ellipse'; stroke: string; fill: string | null; strokeWidth: number })
   | (Base & { type: 'whiteout'; fill: string })

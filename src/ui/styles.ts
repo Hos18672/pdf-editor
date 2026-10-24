@@ -487,9 +487,22 @@ button { cursor: pointer; }
 .obj .dotc { position: absolute; width: 9px; height: 9px; background: #fff; border: 1.5px solid #3446C9; border-radius: 50%; pointer-events: none; }
 .obj .handle { position: absolute; width: 18px; height: 18px; right: -9px; bottom: -9px; background: #3446C9; border: 2px solid #fff; border-radius: 50%; cursor: nwse-resize; touch-action: none; box-shadow: 0 1px 4px rgba(20,23,46,.3); display: grid; place-items: center; color: #fff; }
 .obj .handle::after { content: ""; position: absolute; inset: -13px; }
-.obj textarea, .obj .tview { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: transparent; resize: none; overflow: hidden; white-space: pre; line-height: 1.2; outline: none; }
+.obj textarea, .obj .tview, .obj .tfield { position: absolute; inset: 0; margin: 0; padding: 0; border: 0; background: transparent; resize: none; overflow: hidden; white-space: pre; line-height: 1.2; outline: none; }
 .obj.dragging { cursor: grabbing; }
 .obj.editing { cursor: text; }
+.obj .tfield { cursor: text; -webkit-user-select: text; user-select: text; font-kerning: normal; }
+.obj .tfield[data-empty]::before { content: attr(data-ph); position: absolute; left: 0; top: 0; opacity: .38; pointer-events: none; font-weight: 400; font-style: normal; text-decoration: none; }
+.obj .tfield ::selection, .obj .tfield::selection { background: rgba(52,70,201,.28); }
+.ttools { display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line-2); width: 100%; }
+.ttools button { flex: 1 1 0; min-width: 0; max-width: 44px; padding: 0; height: 38px; border: 0; border-radius: 11px; background: none; color: var(--text); display: grid; place-items: center; }
+.ttools button:hover:not(:disabled):not(.on) { background: var(--hover, rgba(0,0,0,.05)); }
+.ttools button.on { background: var(--ink); color: var(--on-ink); }
+.ttools button:disabled { opacity: .35; }
+.ttools .sep { width: 1px; height: 22px; background: var(--line-2); margin: 0 4px; flex: none; }
+.slimbar .fmtrow { display: flex; align-items: center; gap: 8px; padding: 6px 8px 0; overflow-x: auto; scrollbar-width: none; }
+.slimbar .fmtrow::-webkit-scrollbar { display: none; }
+.slimbar .fmtrow .ttools { box-shadow: none; padding: 0; width: max-content; }
+.slimbar .fmtrow .ttools button { flex: none; width: 40px; max-width: none; height: 40px; }
 .tool-edit .obj { cursor: grab; }
 .obj img { width: 100%; height: 100%; display: block; pointer-events: none; }
 .obj > svg { position: absolute; inset: 0; overflow: visible; pointer-events: none; }

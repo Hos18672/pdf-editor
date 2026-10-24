@@ -13,7 +13,7 @@ import { FindBar, PrivacyCheck } from './FindBar';
 import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
-import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, objTitle, Stepper, toolHasProps, fontLabel, Toggle } from './Panel';
+import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, objTitle, Stepper, toolHasProps, fontLabel, Toggle, RunTextTools, ObjTextTools } from './Panel';
 import { readFields, FormField, isFilled } from './Fields';
 import { exportPdf } from '../engine/exporter';
 import { pageNeedsText, LayerLine } from '../engine/textLayer';
@@ -541,6 +541,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         scan: scanStyles.get(key),
         ocr: run.fontName === 'ocr' || undefined,
         scales: e.scales,
+        looks: e.looks,
         offset: (e.dx || e.dy) && infos[page] ? userDelta(infos[page].vm, e.dx ?? 0, e.dy ?? 0) : undefined,
       });
     }
@@ -808,7 +809,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const near0 = Math.abs(dx) < 0.05 && Math.abs(dy) < 0.05;
     const next: RunEdit = { ...cur, dx: near0 ? undefined : dx, dy: near0 ? undefined : dy };
     if (near0) { delete next.dx; delete next.dy; }
-    const plain = next.text === r.str && next.sizeScale === 1 && next.color === null && !next.scales && near0;
+    const plain = next.text === r.str && next.sizeScale === 1 && next.color === null && !next.scales && !next.looks && near0;
     setRunEdit(key, plain ? null : next);
   };
   /** the copied line as a text box at a point of a page (its top-left there) */
@@ -963,7 +964,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
-      if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT') return;
+      if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable) return;
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
       if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? hist.redo() : hist.undo(); }
@@ -1273,16 +1274,16 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const runs = pageData[src]?.runs ?? [];
     return `Page ${snap.pages.findIndex((p) => p.src === src) + 1} · Line ${runs.findIndex((r) => r.key === key) + 1}`;
   };
-  const runProps = (compact: boolean) => selRun && (
-    <RunProps run={selRun} font={fonts[selRun.fontName]} edit={snap.edits[selRun.key]} line={lineLabel(selRun.key)} compact={compact}
+  const runProps = (compact: boolean, hideTools = false) => selRun && (
+    <RunProps run={selRun} hideTools={hideTools} font={fonts[selRun.fontName]} edit={snap.edits[selRun.key]} line={lineLabel(selRun.key)} compact={compact}
       known={(c) => [selRun.fontName, ...Object.keys(selRun.fontChars ?? {})].some((n) => fonts[n]?.charMap[c] !== undefined)}
       origColor={pageData[+selRun.key.split(':')[0]]?.colors[selRun.key]?.fg ?? '#000000'}
       onEdit={(e) => (e.text === '' ? afterBlur(() => { setRunEdit(selRun.key, e); if (mobile) setSelected(null); }) : setRunEdit(selRun.key, e))}
       onReset={() => afterBlur(() => setRunEdit(selRun.key, null))} onClose={() => setSelected(null)}
       onCopy={() => copyRun(selRun)} onCut={() => copyRun(selRun, true)} onMove={() => startMove(selRun)} />
   );
-  const objProps = (compact: boolean) => selObj && (
-    <ObjProps o={selObj} compact={compact} docFonts={docFonts} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
+  const objProps = (compact: boolean, hideTools = false) => selObj && (
+    <ObjProps o={selObj} hideTools={hideTools} compact={compact} docFonts={docFonts} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
       onDuplicate={() => duplicateObject(selObj.id)} onClose={() => { setSelected(null); setSheetFor(null); }} />
   );
   const fillPanel = (
@@ -1308,7 +1309,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const requestClose = () => (editCount && savedSnap.current !== snap ? setAskClose(true) : onClose());
   useBack(() => {
     const el = document.activeElement as HTMLElement | null;
-    if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT')) { el.blur(); return; }
+    if (el && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable)) { el.blur(); return; }
     if (view === 'pages' || selected || flyout || moreOpen || sheetFor || slimOpen) {
       if (view === 'pages') setView('doc');
       setSelected(null); setFlyout(null); setMoreOpen(false); setSheetFor(null); setSlimOpen(false);
@@ -1529,8 +1530,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             color: snap.edits[selRun.key]?.color ?? pageData[+selRun.key.split(':')[0]]?.colors[selRun.key]?.fg ?? '#000',
             onSize: (v) => { const cur = snap.edits[selRun.key] ?? { text: selRun.str, sizeScale: 1, color: null }; setRunEdit(selRun.key, { ...cur, sizeScale: v / selRun.region.height }); } } : undefined}
           obj={selObj?.type === 'text' ? selObj : undefined} docFonts={docFonts.length > 0}
-          onObj={(p) => selObj && changeObject(selObj.id, p, false)}>
-          {selRun ? runProps(true) : objProps(true)}
+          onObj={(p) => selObj && changeObject(selObj.id, p, false)}
+          tools={selRun && editing === selRun.key
+            ? <RunTextTools run={selRun} edit={snap.edits[selRun.key]} onEdit={(e) => setRunEdit(selRun.key, e)} />
+            : selObj?.type === 'text' ? <ObjTextTools o={selObj} docFonts={docFonts} onChange={(p) => changeObject(selObj.id, p, false)} /> : null}>
+          {selRun ? runProps(true, true) : objProps(true, true)}
         </SlimBar>
       )}
       {mobile && !mobileEditing && !(fieldNav) && (
@@ -1706,8 +1710,9 @@ function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize, onA
 }
 
 // ---------------- phone: slim properties bar above the keyboard ----------------
-function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: {
+function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, tools }: {
   open: boolean; onOpen: (v: boolean) => void; onDone: () => void;
+  /** bold, italic, underline, … (always in view) */ tools?: React.ReactNode;
   run?: { label: string; css?: string; size: number; color: string; onSize: (v: number) => void; key?: string };
   obj?: Extract<EditorObject, { type: 'text' }>; onObj: (p: any) => void; children: React.ReactNode;
   /** the document has fonts new text can use */
@@ -1718,7 +1723,7 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: 
   const famCss: Record<FontFamily, string> = { Helvetica: 'Arial, sans-serif', Times: '"Times New Roman", serif', Courier: '"Courier New", monospace' };
   const onToggle = () => onOpen(!open);
   // letters selected in the line being typed: the size control is theirs
-  const selSize = useLineSelSize(run?.key);
+  const selSize = useLineSelSize(run?.key ?? obj?.id);
   // While the options are open the keyboard stays down (the caret stays), so changing a setting
   // doesn't bring it back each time. Tapping the text, or closing the options, shows it again.
   const latestOpen = useRef(onOpen);
@@ -1739,6 +1744,7 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: 
     // keep the text field focused while using the bar
     <div className="slimbar" onMouseDown={(e) => { if (!(e.target as HTMLElement).closest('input')) e.preventDefault(); }}>
       {open && <div className="more">{children}</div>}
+      {tools && <div className="fmtrow">{tools}</div>}
       <div className="row">
         {run && <button className="chipb" onClick={onToggle} aria-label={`Font ${run.label}`}><span style={{ fontFamily: run.css }}>Aa</span><span className="fn">{run.label}</span></button>}
         {obj && (
@@ -1753,7 +1759,8 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts }: 
         )}
         {run && <Stepper soft value={selSize ?? run.size} min={2} max={300} label={selSize !== null ? 'size of the selected letters' : 'size'}
           onChange={(v) => { if (selSize !== null && lineEditor()?.setSelSize(v)) return; run.onSize(v); }} />}
-        {obj && <Stepper soft value={obj.size} min={4} max={200} onChange={(size) => onObj({ size })} label="size" />}
+        {obj && <Stepper soft value={selSize ?? obj.size} min={selSize !== null ? 2 : 4} max={200} label={selSize !== null ? 'size of the selected letters' : 'size'}
+          onChange={(size) => { if (selSize !== null && lineEditor()?.setSelSize(size)) return; onObj({ size }); }} />}
         <button className="cdot" onClick={onToggle} aria-label="Colour"><i style={{ background: run?.color ?? obj?.color }} /></button>
         <button className="ibtn muted" onClick={onToggle} aria-label={open ? 'Fewer options' : 'More options'} aria-expanded={open}><Icon name={open ? 'down' : 'up'} size={20} /></button>
         <div className="sp" />

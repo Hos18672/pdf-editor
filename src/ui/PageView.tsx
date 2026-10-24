@@ -1,10 +1,10 @@
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import type { ClonedText, EditorObject, FormValues, M } from '../engine/types';
+import type { CharLook, ClonedText, EditorObject, FormValues, M } from '../engine/types';
 import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
-import { uid, cleanScales } from './store';
+import { uid, cleanScales, cleanLooks, sameLooks } from './store';
 import { BASELINE, textSize, arabicText } from '../engine/matchFonts';
 import { hasArabic, isRtl } from '../engine/rtl';
 import { registerEditFont, baselineInLine, docFontOf, objectFontCss, arabicFace, ARABIC_CSS } from './textFonts';
@@ -14,7 +14,7 @@ import { isRefocusing, editingHeld } from './hooks';
 import { FormLayer, FormField } from './Fields';
 import { matchScanStyle, scanStyles } from './scanStyle';
 import { coverPixels } from './rules';
-import { fillField, readField, fieldSelection, setFieldSelection, setLineEditor, lineEditor, lineEditorChanged, type LineEditor } from './lineEdit';
+import { fillField, readField, fieldSelection, setFieldSelection, setLineEditor, lineEditor, lineEditorChanged, fieldEditor, lookCss, type FieldContent, type LookMode } from './lineEdit';
 
 export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
 
@@ -464,14 +464,16 @@ export function PageView(p: Props) {
                 if (at && p.onRunTap?.(r, at.x, at.y)) return;
                 p.onSelect(r.key); p.onEditing(r.key);
               }}
-              onCommit={(raw, ks) => {
+              onCommit={(raw, ks, ls) => {
+                // NFC can join letters: sizes and looks only stay when the letters stay the same
                 const text = raw.normalize('NFC');
                 const prev = p.edits[r.key];
                 const scales = cleanScales(text, ks);
+                const looks = cleanLooks(text, ls);
                 const next: RunEdit = { text, sizeScale: prev?.sizeScale ?? 1, color: prev?.color ?? null,
-                  ...(scales ? { scales } : {}), ...(prev?.dx || prev?.dy ? { dx: prev.dx ?? 0, dy: prev.dy ?? 0 } : {}) };
-                const unchanged = text === r.str && next.sizeScale === 1 && next.color === null && !scales && !next.dx && !next.dy;
-                const same = !!prev && prev.text === text && JSON.stringify(prev.scales ?? null) === JSON.stringify(scales ?? null);
+                  ...(scales ? { scales } : {}), ...(looks ? { looks } : {}), ...(prev?.dx || prev?.dy ? { dx: prev.dx ?? 0, dy: prev.dy ?? 0 } : {}) };
+                const unchanged = text === r.str && next.sizeScale === 1 && next.color === null && !scales && !looks && !next.dx && !next.dy;
+                const same = !!prev && prev.text === text && JSON.stringify(prev.scales ?? null) === JSON.stringify(scales ?? null) && sameLooks(prev.looks, looks);
                 if (unchanged ? prev : !same) p.onRunEdit(r.key, unchanged ? null : next);
                 p.onStopEditing(r.key);
               }} />
@@ -602,7 +604,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
   /** the edit of this line as the page picture already shows it (null: the original line) */
   shown?: RunEdit | null;
   room?: { up: number; down: number };
-  editing: boolean; onStart: () => void; onCommit: (text: string, scales?: number[]) => void;
+  editing: boolean; onStart: () => void; onCommit: (text: string, scales?: number[], looks?: FieldContent['looks']) => void;
   /** being moved: dragging it moves the line (viewport units, from its original place) */
   moving?: boolean; onMove?: (dx: number, dy: number) => void;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
@@ -611,8 +613,9 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
   const fieldRef = useRef<HTMLDivElement>(null);
   const [value, setValue] = useState(edit?.text ?? run.str);
   const scalesRef = useRef<number[] | undefined>(edit?.scales);
+  const looksRef = useRef<FieldContent['looks'] | undefined>(edit?.looks);
   const [selVer, setSelVer] = useState(0);
-  useEffect(() => { if (editing) { setValue(edit?.text ?? run.str); scalesRef.current = edit?.scales; } }, [editing]); // eslint-disable-line
+  useEffect(() => { if (editing) { setValue(edit?.text ?? run.str); scalesRef.current = edit?.scales; looksRef.current = edit?.looks; } }, [editing]); // eslint-disable-line
   // distance along the line (page units) where the user tapped; the caret goes there
   const tapAt = useRef<number | null>(null);
   const begin = (e: React.MouseEvent) => {
@@ -650,7 +653,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
     // plain text only (no bold or pasted formatting); older browsers get a rich field that is kept plain
     try { el.contentEditable = 'plaintext-only'; } catch { /* unsupported */ }
     if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
-    fillField(el, edit?.text ?? run.str, edit?.scales);
+    fillField(el, edit?.text ?? run.str, edit?.scales, edit?.looks);
     // never let the browser scroll the page to the end of the line
     el.focus({ preventScroll: true });
     const text = edit?.text ?? run.str;
@@ -674,28 +677,10 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
   const baseSize = b.h * scale;
   useEffect(() => {
     if (!editing) return;
-    const api: LineEditor = {
-      key: run.key,
-      selSize: () => {
-        const s = lastSel.current;
-        if (!s || s[0] === s[1]) return null;
-        return Math.round(baseSize * (scalesRef.current?.[s[0]] ?? 1) * 10) / 10;
-      },
-      setSelSize: (pt) => {
-        const el = fieldRef.current, s = lastSel.current;
-        if (!el || !s || s[0] === s[1]) return false;
-        const { text, scales } = readField(el);
-        const k = Math.max(0.2, Math.min(8, pt / baseSize));
-        for (let i = s[0]; i < s[1] && i < scales.length; i++) if (text[i] !== '\n') scales[i] = k;
-        scalesRef.current = scales;
-        fillField(el, text, scales);
-        el.focus({ preventScroll: true });
-        setFieldSelection(el, s[0], s[1]);
-        setSelVer((v) => v + 1);
-        lineEditorChanged();
-        return true;
-      },
-    };
+    const api = fieldEditor({
+      key: run.key, el: () => fieldRef.current, sel: () => lastSel.current, baseSize, base: {}, mode: 'faux',
+      after: (c) => { scalesRef.current = c.scales; looksRef.current = c.looks; setValue(c.text); setSelVer((v) => v + 1); },
+    });
     setLineEditor(api);
     return () => { if (lineEditor() === api) setLineEditor(null); };
   }, [editing, baseSize, run.key]);
@@ -706,20 +691,21 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
     if (!editing) return;
     latest.current.committed = false;
     latest.current.cancel = false;
-    return () => { if (!latest.current.committed) { latest.current.committed = true; latest.current.onCommit(latest.current.value, scalesRef.current); } };
+    return () => { if (!latest.current.committed) { latest.current.committed = true; latest.current.onCommit(latest.current.value, scalesRef.current, looksRef.current); } };
   }, [editing]);
   const original = edit?.text ?? run.str;
   const commitOnce = () => {
     if (latest.current.committed) return;
     latest.current.committed = true;
-    if (latest.current.cancel) onCommit(original, edit?.scales);
-    else onCommit(value, scalesRef.current);
+    if (latest.current.cancel) onCommit(original, edit?.scales, edit?.looks);
+    else onCommit(value, scalesRef.current, looksRef.current);
   };
   const readBack = () => {
     const el = fieldRef.current;
     if (!el) return;
-    const { text, scales } = readField(el);
+    const { text, scales, looks } = readField(el);
     scalesRef.current = scales;
+    looksRef.current = looks;
     setValue(text);
   };
   /** put plain text in at the caret (newlines, pasted text) */
@@ -728,15 +714,30 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
     if (!el) return;
     const s = fieldSelection(el) ?? lastSel.current;
     if (!s) return;
-    const { text, scales } = readField(el);
+    const { text, scales, looks } = readField(el);
     const cps = [...text];
-    const k = scales[Math.max(0, s[0] - 1)] ?? 1;
+    const k = scales[Math.max(0, s[0] - 1)] ?? 1, lk = looks[Math.max(0, s[0] - 1)] ?? null;
     const add = [...t.replace(/\r\n?/g, '\n')];
     cps.splice(s[0], s[1] - s[0], ...add);
     scales.splice(s[0], s[1] - s[0], ...add.map(() => k));
-    fillField(el, cps.join(''), scales);
+    looks.splice(s[0], s[1] - s[0], ...add.map(() => lk));
+    fillField(el, cps.join(''), scales, looks);
     setFieldSelection(el, s[0] + add.length);
     readBack();
+  };
+
+  /** Ctrl+B / I / U in the field: the selected letters, else the whole line */
+  const toggleKey = (k: 'b' | 'i' | 'u') => {
+    const ed = lineEditor();
+    if (!ed || ed.key !== run.key) return;
+    const cur = ed.selLook();
+    if (cur) ed.setSelLook({ [k]: !cur[k] });
+    else {
+      const all = fieldRef.current ? readField(fieldRef.current) : null;
+      if (!all) return;
+      const shared = all.looks.every((l, i) => [...all.text][i] === '\n' || !!l?.[k]);
+      ed.setSelLook({ [k]: !shared }, true);
+    }
   };
 
   // ----- where the line is drawn -----
@@ -841,6 +842,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
   }
   const text = editing ? value : edit?.text ?? run.str;
   const ks = editing ? undefined : edit?.scales;
+  const lks = editing ? undefined : edit?.looks;
   const lines = text.split('\n');
   // letters the embedded font lacks fall back to a system font: give them the line's weight and slant,
   // without faking bold on the embedded font itself
@@ -887,20 +889,21 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
             else if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); insertPlain('\n'); }
             else if (e.key === 'Enter') { e.preventDefault(); el.blur(); }
             else if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); el.blur(); setTimeout(onNext, 0); }
-            // no rich formatting in a rich field
-            else if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase())) e.preventDefault();
+            // Ctrl+B / I / U: the selected letters (never the browser's own rich formatting)
+            else if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase())) { e.preventDefault(); toggleKey(e.key.toLowerCase() as 'b' | 'i' | 'u'); }
           }}
           style={{ ...textStyle, caretColor: fg === bg ? '#000' : fg, minWidth: b.w * zoom + 2 }}
         />
       ) : (
         <div key="txt" className="txt" style={{ ...textStyle, pointerEvents: moved ? 'auto' : undefined }} dir={arText ? 'auto' : undefined}>
           {lines.map((line, li) => {
-            // pieces of one size each
-            const parts: { t: string; k: number }[] = [];
+            // pieces of one size and look each
+            const parts: { t: string; k: number; l: string }[] = [];
             for (const ch of line) {
+              const l = JSON.stringify(lks?.[ci] ?? null);
               const k = ks?.[ci++] ?? 1;
               const last = parts[parts.length - 1];
-              if (last && last.k === k) last.t += ch; else parts.push({ t: ch, k });
+              if (last && last.k === k && last.l === l) last.t += ch; else parts.push({ t: ch, k, l });
             }
             ci++; // the newline
             // the first line keeps its baseline (bigger letters reach up); later lines move down as far
@@ -909,7 +912,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
             return (
               <div key={li} style={{ height: lineH * (li ? tallest : 1), paddingTop: li ? (tallest - 1) * lineH : 0 }}>
                 {!parts.length ? '​' : parts.map((pt, i) => (
-                  <span key={i} style={pt.k !== 1 ? { fontSize: `${pt.k}em` } : undefined}>
+                  <span key={i} style={{ ...(pt.k !== 1 ? { fontSize: `${pt.k}em` } : {}), ...lookCss(JSON.parse(pt.l), {}, 'faux') } as React.CSSProperties}>
                     {mapped
                       ? segments(pt.t, font).map((sg, j) => (
                         <span key={j} style={{ fontFamily: sg.orig ? `"${font!.loadedName}", ${font!.cssFallback}` : font!.cssFallback }}>{sg.text}</span>
@@ -974,6 +977,26 @@ function segments(line: string, font?: FontInfo) {
 
 // ---------------- added objects ----------------
 
+/** text with per-letter sizes and looks, as shown in a text box (white-space: pre keeps its new lines) */
+function StyledText({ text, scales, looks, base, mode }: { text: string; scales?: number[]; looks?: (CharLook | null)[]; base: CharLook; mode: LookMode }) {
+  const cps = [...text];
+  if (!cps.length) return <>{' '}</>;
+  const parts: { t: string; k: number; l: CharLook | null; key: string }[] = [];
+  cps.forEach((ch, i) => {
+    const k = scales?.[i] ?? 1, l = looks?.[i] ?? null, key = k + JSON.stringify(l);
+    const last = parts[parts.length - 1];
+    if (last && last.key === key) last.t += ch; else parts.push({ t: ch, k, l, key });
+  });
+  return (
+    <>
+      {parts.map((p, i) => (
+        <span key={i} style={{ ...(p.k !== 1 ? { fontSize: `${p.k}em` } : {}), ...lookCss(p.l, base, mode) } as React.CSSProperties}>{p.t}</span>
+      ))}
+      {text.endsWith('\n') ? ' ' : null}
+    </>
+  );
+}
+
 type Snap = { xs: number[]; cx: number; cy: number };
 
 function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag, snap, page, onGuides, mobile, onMore, sheetOpen }: {
@@ -989,7 +1012,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   const drag = useRef<null | { mode: Mode; sx: number; sy: number; cx: number; cy: number; o: EditorObject; moved: boolean }>(null);
   const [dragging, setDragging] = useState(false);
   const [turning, setTurning] = useState<number | null>(null);
-  const taRef = useRef<HTMLTextAreaElement>(null);
+  const fieldRef = useRef<HTMLDivElement>(null);
   const measureRef = useRef<HTMLDivElement>(null);
   const objRef = useRef<HTMLDivElement>(null);
 
@@ -1174,7 +1197,87 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     const h = el.scrollHeight / zoom;
     if (Math.abs(w - o.w) > 0.5 || Math.abs(h - o.h) > 0.5) onChange({ w, h }, true);
   });
-  useEffect(() => { if (editing) taRef.current?.focus({ preventScroll: true }); }, [editing]);
+  // ----- typing in a text box: an editable field whose letters can have sizes and looks of their own -----
+  const tx = o.type === 'text' ? o : null;
+  const tBase: CharLook = tx ? { b: tx.bold, i: tx.italic, u: !!tx.underline, s: !!tx.strike, c: tx.color } : {};
+  const tMode: LookMode = tx && (tx.font || arabicText(tx)) ? 'faux' : 'real';
+  const baseKey = JSON.stringify([tBase, tMode]);
+  const tLast = useRef<[number, number] | null>(null);
+  const filledWith = useRef('');
+  const tLatest = useRef({ tx, tBase, onChange });
+  tLatest.current = { tx, tBase, onChange };
+  /** what the field holds, kept in the box (sizes and looks only where they differ) */
+  const pushField = (c: FieldContent, merge: boolean) => {
+    const { tBase: base, onChange: change } = tLatest.current;
+    const el = fieldRef.current;
+    if (el) el.toggleAttribute('data-empty', !c.text);
+    change({ text: c.text, scales: cleanScales(c.text, c.scales), looks: cleanLooks(c.text, c.looks, base) } as any, merge);
+  };
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!editing || !el || !tx) return;
+    try { el.contentEditable = 'plaintext-only'; } catch { /* unsupported */ }
+    if (el.contentEditable !== 'plaintext-only') el.contentEditable = 'true';
+    fillField(el, tx.text, tx.scales, tx.looks, tBase, tMode);
+    filledWith.current = baseKey;
+    el.toggleAttribute('data-empty', !tx.text);
+    el.focus({ preventScroll: true });
+    setFieldSelection(el, [...tx.text].length);
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a change from outside the field (the box's style, a look given to all letters): shown in it, selection kept
+  useEffect(() => {
+    const el = fieldRef.current;
+    if (!editing || !el || !tx) return;
+    const now = readField(el);
+    const same = now.text === tx.text && JSON.stringify(cleanScales(now.text, now.scales) ?? null) === JSON.stringify(tx.scales ?? null)
+      && sameLooks(cleanLooks(now.text, now.looks, tBase), tx.looks);
+    if (same && filledWith.current === baseKey) return;
+    const sel = document.activeElement === el ? fieldSelection(el) : tLast.current;
+    fillField(el, tx.text, tx.scales, tx.looks, tBase, tMode);
+    filledWith.current = baseKey;
+    if (sel) setFieldSelection(el, sel[0], sel[1]);
+  });
+  useEffect(() => {
+    if (!editing || !tx) return;
+    const onSel = () => {
+      const el = fieldRef.current;
+      if (!el || document.activeElement !== el) return;
+      const s = fieldSelection(el);
+      if (s) { tLast.current = s; lineEditorChanged(); }
+    };
+    document.addEventListener('selectionchange', onSel);
+    const api = fieldEditor({
+      key: o.id, el: () => fieldRef.current, sel: () => tLast.current, baseSize: tx.size, base: tBase, mode: tMode,
+      after: (c) => pushField(c, false),
+    });
+    setLineEditor(api);
+    return () => { document.removeEventListener('selectionchange', onSel); if (lineEditor() === api) setLineEditor(null); };
+  }, [editing, baseKey, tx?.size, o.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** put plain text in at the caret (new lines, pasted text), with the look of the letter before it */
+  const tInsert = (t: string) => {
+    const el = fieldRef.current;
+    if (!el) return;
+    const s = fieldSelection(el) ?? tLast.current;
+    if (!s) return;
+    const c = readField(el);
+    const cps = [...c.text];
+    const at = Math.max(0, s[0] - 1);
+    const add = [...t.replace(/\r\n?/g, '\n')];
+    cps.splice(s[0], s[1] - s[0], ...add);
+    c.scales.splice(s[0], s[1] - s[0], ...add.map(() => c.scales[at] ?? 1));
+    c.looks.splice(s[0], s[1] - s[0], ...add.map(() => c.looks[at] ?? null));
+    const next = { text: cps.join(''), scales: c.scales, looks: c.looks };
+    fillField(el, next.text, next.scales, next.looks, tBase, tMode);
+    setFieldSelection(el, s[0] + add.length);
+    pushField(next, true);
+  };
+  const tToggle = (k: 'b' | 'i' | 'u') => {
+    const ed = lineEditor();
+    if (!ed || ed.key !== o.id || !tx) return;
+    const cur = ed.selLook();
+    if (cur) ed.setSelLook({ [k]: !cur[k] });
+    else { const all = ed.selLook(true); ed.setSelLook({ [k]: !all?.[k] }, true); }
+  };
 
   const rot = !isLine && o.rot ? o.rot : 0;
   const style: React.CSSProperties = { left: bx * zoom, top: by * zoom, width: Math.max(bw * zoom, 1), height: Math.max(bh * zoom, 1), transform: rot ? `rotate(${rot}deg)` : undefined };
@@ -1192,20 +1295,30 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
     case 'text': {
       const ts: React.CSSProperties = {
         fontSize: textSize(o) * zoom, color: o.color, fontFamily: objectFontCss(o),
-        fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal',
+        fontWeight: o.bold ? 700 : 400, fontStyle: o.italic ? 'italic' : 'normal', textAlign: o.align ?? 'left',
         // a document font is drawn as it is (it is already bold / italic when it should be)
         ...(o.font || arabicText(o) ? { fontSynthesis: 'none' } as any : {}),
       };
       inner = (
         <>
           <div ref={measureRef} className="tview" dir="auto" style={{ ...ts, position: 'absolute', inset: 'auto', left: 0, top: 0, visibility: editing ? 'hidden' : 'visible', pointerEvents: 'none' }}>
-            {(o.text || ' ') + (o.text.endsWith('\n') ? ' ' : '')}
+            <StyledText text={o.text} scales={o.scales} looks={o.looks} base={tBase} mode={tMode} />
           </div>
           {editing && (
-            <textarea ref={taRef} dir="auto" value={o.text} spellCheck={false} style={{ ...ts, touchAction: 'none' }} placeholder="Type here"
-              onChange={(e) => onChange({ text: e.target.value } as any, true)}
+            // own key: its letters are put in by hand, React must never fill it
+            <div key="tfield" ref={fieldRef} className="tfield" dir="auto" role="textbox" aria-multiline="true" aria-label="Text" data-ph="Type here"
+              spellCheck={false} suppressContentEditableWarning style={{ ...ts, touchAction: 'none' }}
+              onInput={(e) => pushField(readField(e.currentTarget), true)}
+              onPaste={(e) => { e.preventDefault(); tInsert(e.clipboardData.getData('text/plain')); }}
+              onDrop={(e) => e.preventDefault()}
               onBlur={(e) => { if (isRefocusing(e.currentTarget) || editingHeld()) return; if (!drag.current || drag.current.mode === 'pending') onEditing(false); }}
-              onKeyDown={(e) => { if (e.key === 'Escape') (e.target as HTMLTextAreaElement).blur(); e.stopPropagation(); }} />
+              onKeyDown={(e) => {
+                e.stopPropagation();
+                const mod = e.ctrlKey || e.metaKey;
+                if (e.key === 'Escape') (e.currentTarget as HTMLElement).blur();
+                else if (e.key === 'Enter' && !e.nativeEvent.isComposing) { e.preventDefault(); tInsert('\n'); }
+                else if (mod && ['b', 'i', 'u'].includes(e.key.toLowerCase())) { e.preventDefault(); tToggle(e.key.toLowerCase() as 'b' | 'i' | 'u'); }
+              }} />
           )}
         </>
       );
@@ -1269,7 +1382,12 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   const resizable = o.type !== 'line' && o.type !== 'draw';
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const step = (d: number) => {
-    if (o.type === 'text') onChange({ size: Math.min(200, Math.max(4, Math.round(o.size) + d)) } as any, false);
+    if (o.type === 'text') {
+      // letters selected while typing: just their size
+      const ed = lineEditor(), ss = ed && ed.key === o.id ? ed.selSize() : null;
+      if (ss !== null && ed!.setSelSize(Math.min(200, Math.max(2, Math.round(ss) + d)))) return;
+      onChange({ size: Math.min(200, Math.max(4, Math.round(o.size) + d)) } as any, false);
+    }
     else if (o.type === 'mark') { const w = Math.min(60, Math.max(4, Math.round(o.w) + d)); onChange({ w, h: w, x: o.x - (w - o.w) / 2, y: o.y - (w - o.h) / 2 } as any, false); }
   };
   const sized = o.type === 'text' || o.type === 'mark';
