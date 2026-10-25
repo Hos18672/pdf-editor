@@ -9,6 +9,7 @@ import { renderLook, turnStrokes, type ScanPage } from './engine';
 const SIZES = [{ id: 's', r: 0.012, label: 'Small' }, { id: 'm', r: 0.025, label: 'Medium' }, { id: 'l', r: 0.05, label: 'Large' }] as const;
 type Z = { k: number; x: number; y: number };
 const NOZ: Z = { k: 1, x: 0, y: 0 };
+const MAXZ = 10;
 
 /**
  * Remove things from a scanned page (a finger, a sticker, a stain, a pen mark): paint over them and they
@@ -125,21 +126,58 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
     }
   });
 
-  // ---- pointers: one finger paints, two pinch and pan
+  // ---- pointers: one finger (or the mouse) paints; two fingers pinch and pan; with the hand tool, the
+  // space bar held, or the middle / right mouse button, a drag moves the page
   const toPage = (cx: number, cy: number) => {
     const r = draw.current!.getBoundingClientRect();
     return { x: (cx - r.left) / r.width, y: (cy - r.top) / r.height };
   };
   const centre = () => { const r = stage.current!.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; };
   const clampZ = (q: Z): Z => {
-    const k = Math.max(1, Math.min(8, q.k));
+    const k = Math.max(1, Math.min(MAXZ, q.k));
     if (k <= 1.001) return NOZ;
-    const mx = Math.max(0, (W * k - size.w) / 2 + 40), my = Math.max(0, (H * k - size.h) / 2 + 40);
+    // the page may move until a quarter of the screen of it is left in view
+    const mx = Math.max(0, (W * k - size.w) / 2 + size.w * 0.35), my = Math.max(0, (H * k - size.h) / 2 + size.h * 0.35);
     return { k, x: Math.max(-mx, Math.min(mx, q.x)), y: Math.max(-my, Math.min(my, q.y)) };
   };
-  const zoomBy = (f: number) => setZ((z0) => clampZ({ k: z0.k * f, x: z0.x * f, y: z0.y * f }));
+  /** zoom by f keeping the point under (cx, cy) in place (default: the middle of the screen) */
+  const zoomAt = (f: number, cx?: number, cy?: number) => setZ((z0) => {
+    const c = centre(), px = cx ?? c.x, py = cy ?? c.y;
+    const k = Math.max(1, Math.min(MAXZ, z0.k * f)), r = k / z0.k;
+    return clampZ({ k, x: px - c.x - r * (px - c.x - z0.x), y: py - c.y - r * (py - c.y - z0.y) });
+  });
+  const zoomBy = (f: number) => zoomAt(f);
+  const [hand, setHand] = useState(false);
+  const [space, setSpace] = useState(false);
+  const panning = useRef<{ x: number; y: number; z0: Z } | null>(null);
+  const [grabbing, setGrabbing] = useState(false);
+  const moving = hand || space;
+  useEffect(() => {
+    const typing = (e: KeyboardEvent) => (e.target as HTMLElement | null)?.closest?.('input, textarea, [contenteditable="true"]');
+    const down = (e: KeyboardEvent) => {
+      if (typing(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.code === 'Space') { e.preventDefault(); setSpace(true); }
+      else if (e.key === '+' || e.key === '=') zoomAt(1.4);
+      else if (e.key === '-') zoomAt(1 / 1.4);
+      else if (e.key === '0') setZ(NOZ);
+      else if (e.key === 'h' || e.key === 'H') setHand(true);
+      else if (e.key === 'b' || e.key === 'B') setHand(false);
+      else if (e.key === '[' || e.key === ']') setBrush((b) => SIZES[Math.max(0, Math.min(SIZES.length - 1, SIZES.findIndex((x) => x.id === b) + (e.key === ']' ? 1 : -1)))].id);
+    };
+    const up = (e: KeyboardEvent) => { if (e.code === 'Space') setSpace(false); };
+    window.addEventListener('keydown', down); window.addEventListener('keyup', up);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); };
+  }); // eslint-disable-line react-hooks/exhaustive-deps
   const down = (e: React.PointerEvent) => {
-    if (!s || (e.pointerType === 'mouse' && e.button !== 0)) return;
+    if (!s) return;
+    if (e.pointerType === 'mouse' && (e.button === 1 || e.button === 2 || (e.button === 0 && moving))) {
+      e.preventDefault();
+      (e.currentTarget as Element).setPointerCapture(e.pointerId);
+      panning.current = { x: e.clientX, y: e.clientY, z0: zRef.current };
+      setGrabbing(true);
+      return;
+    }
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
     pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pts.current.size === 2) {
@@ -150,6 +188,7 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
       return;
     }
     if (pts.current.size > 2) return;
+    if (moving) { panning.current = { x: e.clientX, y: e.clientY, z0: zRef.current }; setGrabbing(true); return; }
     const p = toPage(e.clientX, e.clientY);
     // the brush keeps its size on screen: zoomed in, it paints finer
     live.current = { r: R / zRef.current.k, pts: [p.x, p.y] };
@@ -157,13 +196,15 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
   };
   const move = (e: React.PointerEvent) => {
     if (e.pointerType !== 'touch') setCursor({ x: e.clientX, y: e.clientY });
+    const pn = panning.current;
+    if (pn) { setZ(clampZ({ k: pn.z0.k, x: pn.z0.x + e.clientX - pn.x, y: pn.z0.y + e.clientY - pn.y })); return; }
     if (!pts.current.has(e.pointerId)) return;
     pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const pc = pinch.current;
     if (pc && pts.current.size >= 2) {
       const [a, b] = [...pts.current.values()];
       const m = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
-      const k = Math.max(1, Math.min(8, pc.z0.k * Math.hypot(a.x - b.x, a.y - b.y) / pc.d0));
+      const k = Math.max(1, Math.min(MAXZ, pc.z0.k * Math.hypot(a.x - b.x, a.y - b.y) / pc.d0));
       const c = centre(), r = k / pc.z0.k;
       setZ(clampZ({ k, x: m.x - c.x - r * (pc.m0.x - c.x - pc.z0.x), y: m.y - c.y - r * (pc.m0.y - c.y - pc.z0.y) }));
       return;
@@ -178,50 +219,72 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
     redraw((n) => n + 1);
   };
   const up = (e: React.PointerEvent) => {
+    if (panning.current) { panning.current = null; setGrabbing(false); pts.current.delete(e.pointerId); return; }
     pts.current.delete(e.pointerId);
     if (pinch.current) { if (pts.current.size < 2) pinch.current = null; return; }
     const st = live.current;
     live.current = null;
     if (st) setStrokes((ss) => [...ss, st]);
   };
+  // the wheel: a pinch on a touchpad (sent with Ctrl) or Ctrl + wheel zooms at the pointer; a mouse wheel
+  // zooms at the pointer; a touchpad's two-finger scroll moves the page
+  const wheel = (e: React.WheelEvent) => {
+    const fine = e.deltaMode === 0 && (Math.abs(e.deltaX) > 0.5 || Math.abs(e.deltaY) < 40);
+    if (!e.ctrlKey && !e.metaKey && fine && z.k > 1.001) { setZ((z0) => clampZ({ k: z0.k, x: z0.x - e.deltaX, y: z0.y - e.deltaY })); return; }
+    const d = e.deltaMode === 1 ? e.deltaY * 33 : e.deltaY;
+    zoomAt(Math.exp(-d * (e.ctrlKey || e.metaKey ? 0.01 : 0.0022)), e.clientX, e.clientY);
+  };
+  // the stage also takes the wheel without the page scrolling (React's wheel handlers are passive)
+  useEffect(() => {
+    const el = stage.current;
+    if (!el) return;
+    const stop = (ev: WheelEvent) => ev.preventDefault();
+    el.addEventListener('wheel', stop, { passive: false });
+    return () => el.removeEventListener('wheel', stop);
+  }, []);
 
   const brushPx = R * L;
   const busy = !!strokes.length && (!preview || preview.key !== strokesKey) && failed !== strokesKey;
   const img = fits ? preview!.url : plain?.url;
+  const pct = Math.round(z.k * 100);
 
   return createPortal(
-    <div className="scrop serase" role="dialog" aria-modal="true" aria-label="Remove marks">
+    <div className={`scrop serase${moving ? ' moving' : ''}${grabbing ? ' grabbing' : ''}`} role="dialog" aria-modal="true" aria-label="Remove marks">
       <header className="scrop-top">
         <button className="btn lg on-dark" onClick={onCancel}>Cancel</button>
         <div className="t"><b>Remove</b><span>{hint}</span></div>
         <button className="btn primary lg" onClick={() => onApply(strokes)}><Icon name="check" size={18} />Done</button>
       </header>
       <div className="scrop-stage" ref={stage} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
-        onPointerLeave={() => setCursor(null)}
-        onWheel={(e) => { if (e.ctrlKey || e.deltaY < 0 || z.k > 1) zoomBy(Math.exp(-e.deltaY * (e.ctrlKey ? 0.01 : 0.0025))); }}>
+        onPointerLeave={() => setCursor(null)} onContextMenu={(e) => e.preventDefault()} onWheel={wheel}>
         {s > 0 && (
           <div className="serase-pic" style={{ left: ox, top: oy, width: W, height: H, transform: `translate(${z.x}px, ${z.y}px) scale(${z.k})` }}>
             {img ? <img src={img} alt="" draggable={false} /> : <div className="sc-skel" />}
             <canvas ref={draw} />
           </div>
         )}
-        {cursor && s > 0 && <i className="serase-brush" style={{ left: cursor.x - (stage.current?.getBoundingClientRect().left ?? 0), top: cursor.y - (stage.current?.getBoundingClientRect().top ?? 0), width: brushPx * 2, height: brushPx * 2 }} />}
+        {cursor && s > 0 && !moving && !panning.current && <i className="serase-brush" style={{ left: cursor.x - (stage.current?.getBoundingClientRect().left ?? 0), top: cursor.y - (stage.current?.getBoundingClientRect().top ?? 0), width: brushPx * 2, height: brushPx * 2 }} />}
         {!plain && <div className="scrop-wait"><span className="spinner" /></div>}
         {busy && plain && <div className="serase-busy" role="status"><span className="spinner" />Removing…</div>}
         <div className="serase-zoom">
-          <button onClick={() => zoomBy(1 / 1.6)} disabled={z.k <= 1.001} aria-label="Zoom out"><Icon name="minus" size={16} /></button>
-          <button onClick={() => zoomBy(1.6)} disabled={z.k >= 7.99} aria-label="Zoom in"><Icon name="plus" size={16} /></button>
+          <button onClick={() => zoomBy(1 / 1.4)} disabled={z.k <= 1.001} aria-label="Zoom out" title="Zoom out (−)"><Icon name="minus" size={16} /></button>
+          <button className="pct" onClick={() => setZ(NOZ)} disabled={z.k <= 1.001} title="Fit the page (0)">{pct}%</button>
+          <button onClick={() => zoomBy(1.4)} disabled={z.k >= MAXZ - 0.01} aria-label="Zoom in" title="Zoom in (+)"><Icon name="plus" size={16} /></button>
         </div>
       </div>
       <footer className="scrop-bar serase-bar">
+        <div className="serase-modes" role="radiogroup" aria-label="Tool">
+          <button role="radio" aria-checked={!hand} className={!hand ? 'on' : ''} onClick={() => setHand(false)} title="Paint (B)"><Icon name="paint-brush" size={20} /><span>Paint</span></button>
+          <button role="radio" aria-checked={hand} className={hand ? 'on' : ''} onClick={() => setHand(true)} title="Move the page (H, or hold Space)"><Icon name="hand" size={20} /><span>Move</span></button>
+        </div>
         <div className="serase-sizes" role="radiogroup" aria-label="Brush size">
           {SIZES.map((b) => (
-            <button key={b.id} role="radio" aria-checked={brush === b.id} aria-label={b.label} title={b.label} className={brush === b.id ? 'on' : ''} onClick={() => setBrush(b.id)}>
+            <button key={b.id} role="radio" aria-checked={brush === b.id} aria-label={b.label} title={`${b.label} brush ([ and ])`} className={brush === b.id ? 'on' : ''} onClick={() => { setBrush(b.id); setHand(false); }}>
               <i style={{ width: 6 + SIZES.indexOf(b) * 7, height: 6 + SIZES.indexOf(b) * 7 }} />
             </button>
           ))}
         </div>
-        <button className="scrop-tool" onClick={() => setStrokes((ss) => ss.slice(0, -1))} disabled={!strokes.length}><Icon name="undo" size={22} /><span>Undo</span></button>
+        <button className="scrop-tool" onClick={() => setStrokes((ss) => ss.slice(0, -1))} disabled={!strokes.length} title="Undo (Ctrl+Z)"><Icon name="undo" size={22} /><span>Undo</span></button>
         <button className="scrop-tool" onClick={() => setStrokes([])} disabled={!strokes.length}><Icon name="restore" size={22} /><span>Clear</span></button>
       </footer>
     </div>,

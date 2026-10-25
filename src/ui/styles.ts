@@ -1132,10 +1132,33 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .serase-pic img, .serase-pic canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; user-select: none; -webkit-user-drag: none; }
 .serase-brush { position: absolute; border-radius: 50%; border: 2px solid #fff; box-shadow: 0 0 0 1px rgba(0,0,0,.5); transform: translate(-50%, -50%); pointer-events: none; }
 .serase-busy { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px 14px; border-radius: 999px; background: rgba(20,22,32,.85); font-size: 13px; font-weight: 600; pointer-events: none; }
-.serase-zoom { position: absolute; right: 12px; bottom: 12px; display: flex; gap: 6px; }
-.serase-zoom button { width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(30,32,44,.85); color: #fff; display: grid; place-items: center; }
-.serase-zoom button:disabled { opacity: .4; }
-.serase-bar { align-items: center; }
+.serase-zoom { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 2px; padding: 4px; border-radius: 999px; background: rgba(24,26,36,.9); box-shadow: 0 6px 20px rgba(0,0,0,.35); }
+.serase-zoom button { width: 38px; height: 38px; border-radius: 50%; border: 0; background: transparent; color: #fff; display: grid; place-items: center; }
+.serase-zoom button.pct { width: auto; min-width: 58px; padding: 0 8px; border-radius: 999px; font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.serase-zoom button:hover:not(:disabled) { background: rgba(255,255,255,.1); }
+.serase-zoom button:disabled { opacity: .45; }
+.serase-zoom button.pct:disabled { opacity: .8; }
+.serase.moving .scrop-stage { cursor: grab; }
+.serase.grabbing .scrop-stage { cursor: grabbing; }
+.serase-bar { align-items: center; flex-wrap: nowrap; }
+.serase-modes { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.08); margin-right: 4px; }
+.serase-modes button { height: 48px; padding: 0 14px; border-radius: 999px; border: 0; background: transparent; color: #fff; display: flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 600; }
+.serase-modes button:hover:not(.on) { background: rgba(255,255,255,.08); }
+.serase-modes button.on { background: #FFE14D; color: #1E2559; }
+@media (min-width: 900px) {
+  .serase .scrop-top { padding-left: 24px; padding-right: 24px; }
+  .serase-bar { gap: 10px; }
+}
+@media (max-width: 560px) {
+  .serase-bar { gap: 4px; padding-left: 8px; padding-right: 8px; }
+  .serase-modes button { padding: 0; width: 44px; justify-content: center; }
+  .serase-modes button span { display: none; }
+  .serase-sizes { margin-right: 0; }
+  .serase-modes, .serase-sizes { gap: 2px; padding: 3px; }
+  .serase-sizes button { width: 40px; height: 40px; }
+  .serase-modes button { height: 40px; width: 40px; }
+  .serase .scrop-tool { min-width: 48px; height: 56px; font-size: 11.5px; }
+}
 .serase-sizes { display: flex; gap: 4px; padding: 4px; border-radius: 999px; background: rgba(255,255,255,.08); margin-right: 8px; }
 .serase-sizes button { width: 48px; height: 48px; border-radius: 50%; border: 0; background: transparent; display: grid; place-items: center; }
 .serase-sizes button i { display: block; border-radius: 50%; background: #fff; opacity: .7; }
