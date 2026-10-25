@@ -1629,7 +1629,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           onAdd={(w) => { const at = addAfter; setAddAfter(null); onAddPages(at, w).then((first) => { if (first !== null && view === 'doc') setTimeout(() => goToPage(first), 400); }); }} />
       )}
       {removing !== null && infos[removing] && (
-        <PageRemove pdf={pdf} src={removing} rotation={snap.pages.find((p) => p.src === removing)?.rotation ?? 0} size={infos[removing]}
+        <PageRemove pdf={pdf} bytes={file.bytes} vm={infos[removing].vm} src={removing} rotation={snap.pages.find((p) => p.src === removing)?.rotation ?? 0} size={infos[removing]}
           objects={snap.objects} onCancel={() => setRemoving(null)}
           onApply={(patch) => {
             const src = removing;

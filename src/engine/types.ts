@@ -102,7 +102,14 @@ export type EditorObject =
     /** per letter (code point of `text`): size × `size`, and look where it differs from the box */
     scales?: number[]; looks?: Looks;
   })
-  | (Base & { type: 'image' | 'signature'; src: string })
+  | (Base & {
+    type: 'image' | 'signature'; src: string;
+    /**
+     * Remove: what lies under these strokes (page view units) is taken out of the page's content; with
+     * `vector`, that is the whole change and the picture is only how it looks on screen (not saved)
+     */
+    cut?: import('./cut').CutStroke[]; vector?: boolean;
+  })
   | (Base & { type: 'rect' | 'ellipse'; stroke: string; fill: string | null; strokeWidth: number })
   | (Base & { type: 'whiteout'; fill: string })
   /** black box: what is under it is removed from the file (text, picture pixels) */

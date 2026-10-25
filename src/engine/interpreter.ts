@@ -71,6 +71,9 @@ export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undef
   const shows = new Map<number, ShowOp>();
   /** XObjects drawn (pictures, forms) and where: the unit square through `ctm` */
   const draws: { name: string; ctm: M; opIndex: number }[] = [];
+  /** shapes drawn: the ops that build and paint each path, and its points (user space; control points too) */
+  const paths: PathDraw[] = [];
+  let pStart = -1, pPts: [number, number][] = [], pClip = false;
   let gs: GState = { ctm: IDENT, fontRes: '', fontSize: 0, Tc: 0, Tw: 0, Tz: 100, TL: 0, Ts: 0, Tr: 0, fill: [] };
   const stack: GState[] = [];
   let tm: M = IDENT;
@@ -114,6 +117,20 @@ export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undef
   ops.forEach((op, index) => {
     const a = op.args;
     switch (op.op) {
+      case 'm': case 'l': case 'c': case 'v': case 'y': case 're': case 'h': {
+        if (pStart < 0) { pStart = index; pPts = []; pClip = false; }
+        const v = nums(a);
+        if (op.op === 're') {
+          const [x, y, w, h] = v;
+          for (const [px, py] of [[x, y], [x + w, y], [x + w, y + h], [x, y + h]]) pPts.push(apply(gs.ctm, px, py));
+        } else for (let i = 0; i + 1 < v.length; i += 2) pPts.push(apply(gs.ctm, v[i], v[i + 1]));
+        break;
+      }
+      case 'W': case 'W*': pClip = true; break;
+      case 'S': case 's': case 'f': case 'F': case 'f*': case 'B': case 'B*': case 'b': case 'b*': case 'n':
+        if (pStart >= 0) paths.push({ start: pStart, end: index, pts: pPts, clip: pClip || op.op === 'n' });
+        pStart = -1; pPts = [];
+        break;
       case 'q': stack.push({ ...gs }); break;
       case 'Q': if (stack.length) gs = stack.pop()!; break;
       case 'cm': gs = { ...gs, ctm: mul(nums(a) as M, gs.ctm) }; break;
@@ -171,8 +188,10 @@ export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undef
         break;
     }
   });
-  return { glyphs, shows, draws };
+  return { glyphs, shows, draws, paths };
 }
+
+export interface PathDraw { start: number; end: number; pts: [number, number][]; clip: boolean }
 
 /**
  * Rewrites show-text operators so the given glyphs disappear while every

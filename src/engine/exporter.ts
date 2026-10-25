@@ -4,6 +4,7 @@ import {
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
+import { cutPlan } from './cut';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
 import { addTextLayer } from './textLayer';
@@ -105,7 +106,7 @@ const latin1 = (s: string) => {
   return out;
 };
 
-function readContents(doc: PDFDocument, leaf: PDFDict): Uint8Array {
+export function readContents(doc: PDFDocument, leaf: PDFDict): Uint8Array {
   const contents = leaf.get(PDFName.of('Contents'));
   const refs: unknown[] = [];
   const resolved = contents instanceof PDFRef ? doc.context.lookup(contents) : contents;
@@ -281,7 +282,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
 
     const original = readContents(doc, leaf);
     const ops = tokenize(original);
-    const { glyphs, shows, draws } = interpret(ops, fonts);
+    const { glyphs, shows, draws, paths } = interpret(ops, fonts);
 
     const edits = input.edits.filter((e) => e.page === pi);
     const family = edits.length ? fontFamilies(glyphs, toUni) : null;
@@ -296,6 +297,14 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       const boxes = reds.map((o) => boxOf([[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]].map(([x, y]) => applyM(inv, x, y))));
       for (const g of glyphs) if (boxes.some((b) => coverShare(glyphBox(g), b) > 0.3)) remove.add(g);
       await redactPictures(doc, resources, draws, boxes).catch((err) => console.warn('redact pictures', err));
+    }
+    // Remove: letters, shapes and pictures wholly under the painted strokes are taken out
+    let cutBlank: Map<number, string> | null = null;
+    const cutStrokes = vm ? input.objects.flatMap((o) => (o.page === pi && o.type === 'image' && o.cut?.length ? o.cut : [])) : [];
+    if (cutStrokes.length) {
+      const plan = cutPlan(ops, { glyphs, draws, paths }, cutStrokes, vm);
+      plan.glyphs.forEach((g) => remove.add(g));
+      cutBlank = plan.blank;
     }
     // invisible lines read again from the picture: their new text is written with the layer below
     for (const region of input.dropText?.[pi] ?? []) {
@@ -474,10 +483,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     }
 
     const replacements = removeGlyphs(glyphs, shows, remove, fonts);
+    if (cutBlank) for (const [i, v] of cutBlank) if (!replacements.has(i)) replacements.set(i, v);
     const body = rebuild(original, ops, replacements);
 
     // Objects drawn in viewport space
-    const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link');
+    // (a Remove done in the page's content is not drawn again as a picture)
+    const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link' && !(o.type === 'image' && o.vector));
     if (objs.length) {
       add += 'q ' + invert(vm).map(f).join(' ') + ' cm\n';
       for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe, { docSources, matchPdf, arabicPdf });

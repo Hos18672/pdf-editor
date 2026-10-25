@@ -2,12 +2,55 @@ import React, { useEffect, useRef, useState } from 'react';
 import { RemovePainter, type Pic } from './scan/EraseEditor';
 import type { PixelImage, Stroke } from './scan/kernels';
 import { eraseImage, turnStrokes } from './scan/engine';
-import type { EditorObject } from '../engine/types';
+import type { EditorObject, M } from '../engine/types';
+import { PDFDocument, PDFName } from 'pdf-lib';
+import { cutContent, pageFonts, type CutStroke } from '../engine/cut';
+import { readContents } from '../engine/exporter';
+import { openPdf } from './pdfjs';
 
 /** longest side of the page picture painted on (pixels) */
 const LONG = 2400;
 
-type Patch = { src: string; x: number; y: number; w: number; h: number };
+type Patch = { src: string; x: number; y: number; w: number; h: number; cut?: CutStroke[]; vector?: boolean };
+
+/** the page drawn at scale s, with what is already put on it (pictures, signatures, whiteouts) */
+async function drawPage(page: any, s: number, objects: EditorObject[], src: number): Promise<PixelImage> {
+  const vp = page.getViewport({ scale: s });
+  const c = document.createElement('canvas');
+  c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  const x = c.getContext('2d', { willReadFrequently: true })!;
+  x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+  await page.render({ canvasContext: x, viewport: vp }).promise;
+  for (const o of objects) {
+    if (o.page !== src) continue;
+    x.save();
+    x.globalAlpha = o.opacity ?? 1;
+    if (o.rot) { x.translate((o.x + o.w / 2) * s, (o.y + o.h / 2) * s); x.rotate(o.rot * Math.PI / 180); x.translate(-(o.x + o.w / 2) * s, -(o.y + o.h / 2) * s); }
+    if (o.type === 'image' || o.type === 'signature') { try { x.drawImage(await loadImg(o.src), o.x * s, o.y * s, o.w * s, o.h * s); } catch { /* unreadable */ } }
+    else if (o.type === 'whiteout') { x.fillStyle = o.fill; x.fillRect(o.x * s, o.y * s, o.w * s, o.h * s); }
+    x.restore();
+  }
+  const d = x.getImageData(0, 0, c.width, c.height);
+  c.width = 0;
+  return { w: d.width, h: d.height, data: d.data };
+}
+
+/** the page alone in a small document whose content can be cut and drawn again */
+async function cutter(bytes: Uint8Array, src: number) {
+  const doc = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
+  const one = await PDFDocument.create();
+  const [pg] = await one.copyPages(doc, [src]);
+  one.addPage(pg);
+  const original = readContents(one, pg.node);
+  const fonts = pageFonts(one, pg.node);
+  return async (strokes: CutStroke[], vm: M): Promise<any | null> => {
+    const body = cutContent(original, fonts, strokes, vm);
+    if (!body) return null;
+    pg.node.set(PDFName.of('Contents'), one.context.register(one.context.flateStream(body)));
+    const pdf = await openPdf(await one.save());
+    return pdf;
+  };
+}
 
 async function toUrl(img: PixelImage, rot: number): Promise<string> {
   const a = document.createElement('canvas');
@@ -24,6 +67,16 @@ async function toUrl(img: PixelImage, rot: number): Promise<string> {
   return URL.createObjectURL(blob!);
 }
 
+/** a mask grown by a pixel (the soft edges of what was taken out) */
+function grow(D: Float32Array, w: number, h: number): Float32Array {
+  const o = new Float32Array(D.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const p = y * w + x;
+    if (D[p] || (x > 0 && D[p - 1]) || (x < w - 1 && D[p + 1]) || (y > 0 && D[p - w]) || (y < h - 1 && D[p + w])) o[p] = 1;
+  }
+  return o;
+}
+
 const loadImg = (src: string) => new Promise<HTMLImageElement>((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
 
 /**
@@ -31,8 +84,8 @@ const loadImg = (src: string) => new Promise<HTMLImageElement>((ok, no) => { con
  * whiteouts already put on it), the painted parts are filled in from around them, and the result goes on
  * the page as a picture of just those parts (see-through elsewhere), so it can be moved or deleted later.
  */
-export function PageRemove({ pdf, src, rotation, size, objects, onApply, onCancel }: {
-  pdf: any; src: number; rotation: number; size: { w: number; h: number }; objects: EditorObject[];
+export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApply, onCancel }: {
+  pdf: any; bytes: Uint8Array; vm: M; src: number; rotation: number; size: { w: number; h: number }; objects: EditorObject[];
   onApply: (patch: Patch | null) => void; onCancel: () => void;
 }) {
   const rot = (((rotation / 90) % 4) + 4) % 4;
@@ -44,28 +97,13 @@ export function PageRemove({ pdf, src, rotation, size, objects, onApply, onCance
     (async () => {
       const page = await pdf.getPage(src + 1);
       const s = Math.min(3, LONG / Math.max(size.w, size.h));
-      const vp = page.getViewport({ scale: s });
-      const c = document.createElement('canvas');
-      c.width = Math.round(vp.width); c.height = Math.round(vp.height);
-      const x = c.getContext('2d', { willReadFrequently: true })!;
-      x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-      await page.render({ canvasContext: x, viewport: vp }).promise;
-      // what is already on the page and covers it
-      for (const o of objects) {
-        if (o.page !== src) continue;
-        x.save();
-        x.globalAlpha = o.opacity ?? 1;
-        if (o.rot) { x.translate((o.x + o.w / 2) * s, (o.y + o.h / 2) * s); x.rotate(o.rot * Math.PI / 180); x.translate(-(o.x + o.w / 2) * s, -(o.y + o.h / 2) * s); }
-        if (o.type === 'image' || o.type === 'signature') { try { x.drawImage(await loadImg(o.src), o.x * s, o.y * s, o.w * s, o.h * s); } catch { /* unreadable */ } }
-        else if (o.type === 'whiteout') { x.fillStyle = o.fill; x.fillRect(o.x * s, o.y * s, o.w * s, o.h * s); }
-        x.restore();
-      }
+      const img = await drawPage(page, s, objects, src);
       if (gone) return;
-      const d = x.getImageData(0, 0, c.width, c.height);
-      base.current = { img: { w: c.width, h: c.height, data: d.data }, s };
-      url = await toUrl(base.current.img, rot);
+      base.current = { img, s };
+      url = await toUrl(img, rot);
       if (gone) URL.revokeObjectURL(url);
-      else setPlain({ url, w: rot % 2 ? c.height : c.width, h: rot % 2 ? c.width : c.height });
+      else setPlain({ url, w: rot % 2 ? img.h : img.w, h: rot % 2 ? img.w : img.h });
+      cut.current = cutter(bytes, src).catch(() => null);
     })().catch(() => onCancel());
     return () => { gone = true; if (url) URL.revokeObjectURL(url); };
   }, [pdf, src]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -73,11 +111,40 @@ export function PageRemove({ pdf, src, rotation, size, objects, onApply, onCance
   /** the strokes on the page as it is in the file (they are painted on it as shown, turned) */
   const unturn = (st: Stroke[]) => turnStrokes(st, (4 - rot) % 4) ?? [];
   // the page's own texture (a printed pattern, paper grain) is copied in, not a smooth blend
-  const last = useRef<{ key: string; img: PixelImage; M: Float32Array | null } | null>(null);
-  const filled = async (st: Stroke[]) => {
+  const cut = useRef<Promise<((s: CutStroke[], vm: M) => Promise<any | null>) | null> | null>(null);
+  type Result = { key: string; img: PixelImage; M: Float32Array | null; cut?: CutStroke[] };
+  const last = useRef<Result | null>(null);
+  /**
+   * Letters, shapes and pictures of the PDF under the paint are taken out of the page itself (its own
+   * background shows exactly, at any zoom); when nothing there can be (a scan, a photo), the page's own
+   * texture is copied in instead.
+   */
+  const filled = async (st: Stroke[]): Promise<Result> => {
     const key = JSON.stringify(st);
     if (last.current?.key === key) return last.current;
-    const r = await eraseImage(base.current!.img, unturn(st), true);
+    const b = base.current!, un = unturn(st), L = Math.max(size.w, size.h);
+    const strokes: CutStroke[] = un.map((k) => ({ r: k.r * L, pts: k.pts.map((v, i) => v * (i % 2 ? size.h : size.w)) }));
+    const fn = await cut.current;
+    const doc = fn ? await fn(strokes, vm).catch(() => null) : null;
+    if (doc) {
+      try {
+        const img = await drawPage(await doc.getPage(1), b.s, objects, src);
+        // what changed: the taken-out things
+        const n = img.w * img.h, D = new Float32Array(n);
+        let changed = 0;
+        if (img.w === b.img.w && img.h === b.img.h) {
+          for (let p = 0, i = 0; p < n; p++, i += 4) {
+            const dd = Math.abs(img.data[i] - b.img.data[i]) + Math.abs(img.data[i + 1] - b.img.data[i + 1]) + Math.abs(img.data[i + 2] - b.img.data[i + 2]);
+            if (dd > 24) { D[p] = 1; changed++; }
+          }
+        }
+        if (changed > 20) {
+          last.current = { key, img, M: grow(D, img.w, img.h), cut: strokes };
+          return last.current;
+        }
+      } finally { doc.destroy?.(); }
+    }
+    const r = await eraseImage(b.img, un, true);
     last.current = { key, img: r.img, M: r.mask };
     return last.current;
   };
@@ -87,7 +154,7 @@ export function PageRemove({ pdf, src, rotation, size, objects, onApply, onCance
     const b = base.current;
     if (!b || !st.length) { onApply(null); return; }
     setSaving(true);
-    const { img, M } = await filled(st);
+    const { img, M, cut: cutStrokes } = await filled(st);
     if (!M) { onApply(null); return; }
     const w = img.w, h = img.h;
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
@@ -104,7 +171,7 @@ export function PageRemove({ pdf, src, rotation, size, objects, onApply, onCance
     const c = document.createElement('canvas');
     c.width = cw; c.height = ch;
     c.getContext('2d')!.putImageData(out, 0, 0);
-    onApply({ src: c.toDataURL('image/png'), x: x0 / b.s, y: y0 / b.s, w: cw / b.s, h: ch / b.s });
+    onApply({ src: c.toDataURL('image/png'), x: x0 / b.s, y: y0 / b.s, w: cw / b.s, h: ch / b.s, ...(cutStrokes ? { cut: cutStrokes, vector: true } : {}) });
   };
 
   return (
