@@ -406,6 +406,15 @@ button { cursor: pointer; }
 .flyout2.m { left: 12px; right: 12px; width: auto; top: auto; bottom: calc(92px + var(--safe-b)); }
 
 
+/* thin, quiet scrollbars where the app scrolls (Windows drew wide grey bars next to each other) */
+.canvasWrap, .ps-list, .panel, .props, .sheet-body { scrollbar-width: thin; scrollbar-color: rgba(30,37,89,.22) transparent; }
+:root[data-theme="dark"] :is(.canvasWrap, .ps-list, .panel, .props, .sheet-body) { scrollbar-color: rgba(255,255,255,.22) transparent; }
+:is(.canvasWrap, .ps-list, .panel, .props, .sheet-body)::-webkit-scrollbar { width: 8px; height: 8px; }
+:is(.canvasWrap, .ps-list, .panel, .props, .sheet-body)::-webkit-scrollbar-track { background: transparent; }
+:is(.canvasWrap, .ps-list, .panel, .props, .sheet-body)::-webkit-scrollbar-thumb { background: rgba(30,37,89,.22); border-radius: 8px; border: 2px solid transparent; background-clip: padding-box; }
+:root[data-theme="dark"] :is(.canvasWrap, .ps-list, .panel, .props, .sheet-body)::-webkit-scrollbar-thumb { background-color: rgba(255,255,255,.22); }
+:is(.canvasWrap, .ps-list, .panel, .props, .sheet-body)::-webkit-scrollbar-thumb:hover { background-color: rgba(30,37,89,.4); }
+.canvasWrap::-webkit-scrollbar-corner { background: transparent; }
 .canvasWrap { flex: 1; min-width: 0; position: relative; overflow: auto; touch-action: pan-x pan-y; overscroll-behavior: contain; background: var(--desk-dots); background-attachment: local; scroll-padding: calc(92px + var(--safe-t)) 0 24px; }
 .bp-mobile .canvasWrap { scroll-padding: calc(132px + var(--safe-t)) 0 calc(110px + var(--safe-b)); }
 /* the page column leaves room for the floating bar (top) and rail (left) */
@@ -587,7 +596,7 @@ button { cursor: pointer; }
 .pgtab svg { color: var(--ink); margin-right: 4px; }
 .pgtab b { color: var(--text); }
 .bp-tablet .pgtab { bottom: calc(20px + var(--safe-b)); }
-.pstrip { width: 150px; flex: none; margin: calc(92px + var(--safe-t)) 12px calc(16px + var(--safe-b)) 0; border-radius: 22px; background: var(--surface); box-shadow: var(--shadow-lift); display: flex; flex-direction: column; overflow: hidden; z-index: 4; animation: ps-in .3s var(--ease) both; }
+.pstrip { width: 164px; flex: none; margin: calc(92px + var(--safe-t)) 12px calc(16px + var(--safe-b)) 0; border-radius: 22px; background: var(--surface); box-shadow: var(--shadow-lift); display: flex; flex-direction: column; overflow: hidden; z-index: 4; animation: ps-in .3s var(--ease) both; }
 .pstrip.ov { position: absolute; right: calc(10px + var(--safe-r)); top: calc(84px + var(--safe-t)); bottom: calc(92px + var(--safe-b)); width: 138px; margin: 0; z-index: 14; }
 .pstrip.ov .ps-c { display: none; }
 .pstrip.ov .ps-h { padding-left: 12px; }
@@ -596,10 +605,11 @@ button { cursor: pointer; }
 .bp-tablet .pstrip.ov { bottom: calc(16px + var(--safe-b)); width: 150px; }
 .ps-scrim { position: absolute; inset: 0; z-index: 13; background: transparent; }
 @keyframes ps-in { from { opacity: 0; transform: translateX(16px); } }
-.ps-h { display: flex; align-items: center; gap: 2px; padding: 8px 4px 4px 14px; }
-.ps-h b { font-size: 14px; font-weight: 700; }
-.ps-h .ps-c { margin-left: 6px; font-size: 11.5px; font-weight: 700; color: var(--muted); background: var(--chip); border-radius: 999px; padding: 1px 7px; font-variant-numeric: tabular-nums; }
-.ps-h .ibtn { width: 34px; height: 34px; }
+.ps-h { display: flex; align-items: center; gap: 0; padding: 8px 6px 4px 14px; min-width: 0; }
+.ps-h b { font-size: 14px; font-weight: 700; white-space: nowrap; }
+.ps-h .ibtn { flex: none; }
+.ps-h .ps-c { flex: none; margin-left: 6px; font-size: 11.5px; font-weight: 700; color: var(--muted); background: var(--chip); border-radius: 999px; padding: 1px 7px; font-variant-numeric: tabular-nums; }
+.ps-h .ibtn { width: 32px; height: 32px; }
 .ps-list { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 16px 16px; display: flex; flex-direction: column; gap: 12px; scrollbar-width: thin; }
 .ps-it { display: flex; flex-direction: column; align-items: center; gap: 5px; border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-size: 12px; font-weight: 600; color: var(--muted); -webkit-tap-highlight-color: transparent; }
 .ps-th { width: 100%; display: block; border-radius: 6px; overflow: hidden; background: #fff; box-shadow: 0 1px 2px rgba(20,23,46,.08), 0 0 0 1px rgba(20,23,46,.08); outline: 2.5px solid transparent; outline-offset: 2px; transition: outline-color .15s, transform .15s var(--ease); }
