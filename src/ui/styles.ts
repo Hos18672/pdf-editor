@@ -181,7 +181,8 @@ button { cursor: pointer; }
 
 /* ---------- start (v2) ---------- */
 .start { position: relative; height: 100%; overflow-x: hidden; overflow-y: auto; background: var(--desk-dots), var(--desk); color: var(--text); display: flex; flex-direction: column; container-type: inline-size; isolation: isolate; }
-.s2-glow { position: absolute; width: 720px; height: 720px; right: -12%; top: -18%; border-radius: 50%; background: #FFE14D; opacity: .35; filter: blur(90px); pointer-events: none; z-index: -1; }
+/* the yellow glow behind the page stack: drawn inside the page (a blurred circle past the edge let the page scroll sideways) */
+.s2-glow { position: absolute; left: 0; right: 0; top: 0; height: min(1100px, 100%); background: radial-gradient(ellipse 42% 60% at 88% 12%, rgba(255,225,77,.42), rgba(255,225,77,.16) 45%, transparent 72%); pointer-events: none; z-index: -1; }
 :root[data-theme="dark"] .s2-glow { opacity: .10; }
 .s2-nav { position: relative; z-index: 5; flex: none; display: flex; align-items: center; gap: 12px; padding: calc(24px + var(--safe-t)) calc(40px + var(--safe-r)) 24px calc(40px + var(--safe-l)); }
 .s2-nav .sp { flex: 1; }
@@ -195,7 +196,7 @@ button { cursor: pointer; }
 .s2-navbtn:hover { background: var(--surface); }
 .s2-round { width: 44px; height: 44px; flex: none; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--surface) 80%, transparent); box-shadow: 0 1px 2px rgba(20,23,46,.08); display: grid; place-items: center; color: var(--text); padding: 0; transition: background .18s; }
 .s2-round:hover { background: var(--surface); }
-.s2-hero { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 64px; align-items: center; align-content: center; padding: 0 72px 40px; max-width: 1560px; width: 100%; margin: 0 auto; }
+.s2-hero { position: relative; flex: 1 0 auto; display: grid; overflow-x: clip; overflow-y: visible; overflow-clip-margin: 0; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 64px; align-items: center; align-content: center; padding: 0 72px 40px; max-width: 1560px; width: 100%; margin: 0 auto; }
 .s2-copy { display: flex; flex-direction: column; gap: 26px; min-width: 0; animation: s2-up .6s var(--ease) both; }
 .s2-pill { display: inline-flex; align-self: flex-start; align-items: center; gap: 8px; height: 34px; padding: 0 14px 0 6px; border-radius: 999px; background: var(--surface); box-shadow: var(--shadow-rest); font-size: 13px; font-weight: 600; }
 .s2-pill .lk { width: 24px; height: 24px; border-radius: 50%; background: var(--success-bg); color: var(--success); display: grid; place-items: center; }
