@@ -14,13 +14,16 @@ const LONG = 2400;
 type Patch = { src: string; x: number; y: number; w: number; h: number; cut?: CutStroke[]; vector?: boolean };
 
 /** the page drawn at scale s, with what is already put on it (pictures, signatures, whiteouts) */
-async function drawPage(page: any, s: number, objects: EditorObject[], src: number): Promise<PixelImage> {
+async function drawPage(page: any, s: number, objects: EditorObject[], src: number, area?: { x: number; y: number; w: number; h: number }): Promise<PixelImage> {
   const vp = page.getViewport({ scale: s });
   const c = document.createElement('canvas');
-  c.width = Math.round(vp.width); c.height = Math.round(vp.height);
+  // only an area of it (pixels at scale s): the rest is not needed
+  const ax = area?.x ?? 0, ay = area?.y ?? 0;
+  c.width = area?.w ?? Math.round(vp.width); c.height = area?.h ?? Math.round(vp.height);
   const x = c.getContext('2d', { willReadFrequently: true })!;
   x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
-  await page.render({ canvasContext: x, viewport: vp }).promise;
+  await page.render({ canvasContext: x, viewport: vp, ...(area ? { transform: [1, 0, 0, 1, -ax, -ay] } : {}) }).promise;
+  if (area) x.translate(-ax, -ay);
   for (const o of objects) {
     if (o.page !== src) continue;
     x.save();
@@ -43,12 +46,17 @@ async function cutter(bytes: Uint8Array, src: number) {
   one.addPage(pg);
   const original = readContents(one, pg.node);
   const fonts = pageFonts(one, pg.node);
-  return async (strokes: CutStroke[], vm: M): Promise<any | null> => {
-    const body = cutContent(original, fonts, strokes, vm);
-    if (!body) return null;
-    pg.node.set(PDFName.of('Contents'), one.context.register(one.context.flateStream(body)));
-    const pdf = await openPdf(await one.save());
-    return pdf;
+  // one at a time: the page's content is swapped for each cut
+  let chain: Promise<unknown> = Promise.resolve();
+  return (strokes: CutStroke[], vm: M): Promise<any | null> => {
+    const run = chain.then(async () => {
+      const body = cutContent(original, fonts, strokes, vm);
+      if (!body) return null;
+      pg.node.set(PDFName.of('Contents'), one.context.register(one.context.flateStream(body)));
+      return openPdf(await one.save());
+    });
+    chain = run.catch(() => null);
+    return run;
   };
 }
 
@@ -119,30 +127,54 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
    * background shows exactly, at any zoom); when nothing there can be (a scan, a photo), the page's own
    * texture is copied in instead.
    */
-  const filled = async (st: Stroke[]): Promise<Result> => {
+  // previews one at a time, newest first: a preview asked for while one runs waits, and only the
+  // latest of those waiting is made (phones are slow; overlapping full-page renders ran out of memory)
+  const busy = useRef<Promise<unknown>>(Promise.resolve());
+  const want = useRef('');
+  const filled = (st: Stroke[], force = false): Promise<Result> => {
     const key = JSON.stringify(st);
-    if (last.current?.key === key) return last.current;
+    if (last.current?.key === key) return Promise.resolve(last.current);
+    want.current = key;
+    const run = busy.current.then(() => {
+      if (last.current?.key === key) return last.current;
+      if (want.current !== key && !force) throw new Error('outdated');
+      return make(st, key);
+    });
+    busy.current = run.catch(() => null);
+    return run;
+  };
+  const make = async (st: Stroke[], key: string): Promise<Result> => {
     const b = base.current!, un = unturn(st), L = Math.max(size.w, size.h);
     const strokes: CutStroke[] = un.map((k) => ({ r: k.r * L, pts: k.pts.map((v, i) => v * (i % 2 ? size.h : size.w)) }));
     const fn = await cut.current;
     const doc = fn ? await fn(strokes, vm).catch(() => null) : null;
     if (doc) {
       try {
-        const img = await drawPage(await doc.getPage(1), b.s, objects, src);
-        // what changed: the taken-out things
-        const n = img.w * img.h, D = new Float32Array(n);
+        // the area round the strokes (what is taken out lies wholly under them), drawn again
+        let X0 = Infinity, Y0 = Infinity, X1 = -Infinity, Y1 = -Infinity;
+        for (const k of strokes) for (let i = 0; i + 1 < k.pts.length; i += 2) {
+          X0 = Math.min(X0, k.pts[i] - k.r); X1 = Math.max(X1, k.pts[i] + k.r); Y0 = Math.min(Y0, k.pts[i + 1] - k.r); Y1 = Math.max(Y1, k.pts[i + 1] + k.r);
+        }
+        const W = b.img.w, H = b.img.h, pad = 6;
+        const ax = Math.max(0, Math.floor(X0 * b.s) - pad), ay = Math.max(0, Math.floor(Y0 * b.s) - pad);
+        const aw = Math.min(W, Math.ceil(X1 * b.s) + pad) - ax, ah = Math.min(H, Math.ceil(Y1 * b.s) + pad) - ay;
+        if (aw <= 0 || ah <= 0) throw new Error('outside');
+        const part = await drawPage(await doc.getPage(1), b.s, objects, src, { x: ax, y: ay, w: aw, h: ah });
+        // the whole page with that area put in, and what changed there: the taken-out things
+        const img = { w: W, h: H, data: new Uint8ClampedArray(b.img.data) };
+        const D = new Float32Array(W * H);
         let changed = 0;
-        if (img.w === b.img.w && img.h === b.img.h) {
-          for (let p = 0, i = 0; p < n; p++, i += 4) {
-            const dd = Math.abs(img.data[i] - b.img.data[i]) + Math.abs(img.data[i + 1] - b.img.data[i + 1]) + Math.abs(img.data[i + 2] - b.img.data[i + 2]);
-            if (dd > 24) { D[p] = 1; changed++; }
-          }
+        for (let y = 0; y < ah; y++) for (let x = 0; x < aw; x++) {
+          const i = (y * aw + x) * 4, p = (y + ay) * W + x + ax, j = p * 4;
+          const dd = Math.abs(part.data[i] - b.img.data[j]) + Math.abs(part.data[i + 1] - b.img.data[j + 1]) + Math.abs(part.data[i + 2] - b.img.data[j + 2]);
+          img.data[j] = part.data[i]; img.data[j + 1] = part.data[i + 1]; img.data[j + 2] = part.data[i + 2];
+          if (dd > 24) { D[p] = 1; changed++; }
         }
         if (changed > 20) {
-          last.current = { key, img, M: grow(D, img.w, img.h), cut: strokes };
+          last.current = { key, img, M: grow(D, W, H), cut: strokes };
           return last.current;
         }
-      } finally { doc.destroy?.(); }
+      } catch { /* drawn below as before */ } finally { doc.destroy?.(); }
     }
     const r = await eraseImage(b.img, un, true);
     last.current = { key, img: r.img, M: r.mask };
@@ -154,7 +186,7 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
     const b = base.current;
     if (!b || !st.length) { onApply(null); return; }
     setSaving(true);
-    const { img, M, cut: cutStrokes } = await filled(st);
+    const { img, M, cut: cutStrokes } = await filled(st, true);
     if (!M) { onApply(null); return; }
     const w = img.w, h = img.h;
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
