@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
+import { isPdf, useFileDrop } from './drop';
 import { appBase } from './assets';
 import type { Theme } from './hooks';
 import { ago, listRecent, onRecentChange, removeRecent, type RecentDoc } from './recent';
@@ -36,8 +37,10 @@ const QUICK: [QuickAction, string, string, string][] = [
   ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
 ];
 
-export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative }: {
-  state: OpenState; onFile: (f: File) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
+export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative }: {
+  state: OpenState; onFile: (f: File) => void;
+  /** files that aren't PDFs (pictures, Office files, text): turned into one PDF and opened */
+  onImport?: (files: File[]) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
   onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; onShareRecent?: (d: RecentDoc) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
 }) {
   const [recent, setRecent] = useState<RecentDoc[]>([]);
@@ -48,21 +51,14 @@ export function Start({ state, onFile, onPick, onPassword, onTools, onQuick, onR
     const off = onRecentChange(load);
     return () => { alive = false; off(); };
   }, []);
-  const [over, setOver] = useState(false);
   const [pw, setPw] = useState('');
-  const depth = useRef(0);
-  const isFile = (e: React.DragEvent) => [...(e.dataTransfer?.types ?? [])].includes('Files');
-  const drop = {
-    onDragEnter: (e: React.DragEvent) => { if (!isFile(e)) return; e.preventDefault(); depth.current++; setOver(true); },
-    onDragOver: (e: React.DragEvent) => { if (isFile(e)) e.preventDefault(); },
-    onDragLeave: () => { depth.current = Math.max(0, depth.current - 1); if (!depth.current) setOver(false); },
-    onDrop: (e: React.DragEvent) => { e.preventDefault(); depth.current = 0; setOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); },
-  };
+  // a PDF opens; other files (pictures, Office files) are turned into one first
+  const { over, bind: drop } = useFileDrop((f) => { const pdf = f.find(isPdf); if (pdf || !onImport) onFile(pdf ?? f[0]); else onImport(f); });
 
   // paste a PDF (Ctrl+V) anywhere on the start screen
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
-      const f = [...(e.clipboardData?.files ?? [])].find((x) => x.type === 'application/pdf' || /\.pdf$/i.test(x.name));
+      const f = [...(e.clipboardData?.files ?? [])].find(isPdf);
       if (f) { e.preventDefault(); onFile(f); }
     };
     window.addEventListener('paste', onPaste);

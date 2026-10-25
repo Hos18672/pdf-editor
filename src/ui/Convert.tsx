@@ -6,6 +6,7 @@ import { saveFile, HostProps, ToastMsg } from './Editor';
 import { convertFile, ConvertOptions, kindOf, KINDS, ALL_ACCEPT } from './convert';
 import { baseName, loadDoc, save } from './pdfops';
 import { SortableArea, useSortableItem } from './sortable';
+import { DropBox } from './drop';
 
 interface Item { id: string; file: File; status: 'waiting' | 'busy' | 'ok' | 'err' | 'unsupported'; progress: number; bytes?: Uint8Array; pages?: number; error?: string }
 
@@ -26,9 +27,7 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
   const [items, setItems] = useState<Item[]>([]);
   const [opt, setOpt] = useState<ConvertOptions>({ size: 'fit', orient: 'auto', margin: 'small' });
   const [combine, setCombine] = useState(false);
-  const [over, setOver] = useState(false);
   const [optsOpen, setOptsOpen] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   const running = useRef(false);
   const optRef = useRef(opt);
   optRef.current = opt;
@@ -123,13 +122,10 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
     <div className="tbody" style={{ flexDirection: desk ? 'row' : 'column' }}>
       <div className="tmain">
         <div className="flist" style={{ maxWidth: 820, gap: 16 }}>
-          <div className={`dz${over ? ' over' : ''}`} onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
-            onDrop={(e) => { e.preventDefault(); setOver(false); if (e.dataTransfer.files?.length) add(e.dataTransfer.files); }}>
-            <div className="dzi"><Icon name="file-arrow-up" size={24} /></div>
-            <div className="dzt"><b>{mobile ? 'Turn files into PDFs' : 'Drop files to turn them into PDFs'}</b>
-              <div className="types">{TYPES.map(([t, bg, fg]) => <span key={t} style={{ background: bg, color: fg }}>{t}</span>)}</div></div>
-            <button className="btn secondary" style={{ height: 44, color: 'var(--ink)' }} onClick={() => input.current?.click()}><Icon name="open" size={17} />Choose files</button>
-          </div>
+          <DropBox row={!mobile} icon="file-arrow-up" title={mobile ? 'Turn files into PDFs' : 'Drop files to turn them into PDFs'} accept={accept} multiple
+            onFiles={add} button="Choose files">
+            <div className="types">{TYPES.map(([t, bg, fg]) => <span key={t} style={{ background: bg, color: fg }}>{t}</span>)}</div>
+          </DropBox>
           {items.length > 0 && (
             <SortableArea items={items} idOf={(it) => it.id} onReorder={setItems} layout="list"
               overlay={(it) => <div className="qrow"><QueueRowBody it={it} /></div>}>
@@ -144,7 +140,6 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
           )}
           {!desk && optsOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: 'var(--surface)', borderRadius: 14, boxShadow: 'var(--shadow-card)' }}>{options}</div>}
         </div>
-        <input ref={input} type="file" multiple accept={accept} hidden onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ''; }} />
       </div>
       {desk && <aside className="tside"><div className="sb"><h3>Options</h3>{options}</div><div className="sf">{cta}</div></aside>}
       {!desk && (

@@ -7,6 +7,7 @@ import { Seg, Stepper, Toggle } from './Panel';
 import { saveFile, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { parseRange, formatRange, loadDoc, pickPages, imageBytes, addImagePage, addOutline, save, baseName, fmtSize } from './pdfops';
 import { Convert } from './Convert';
+import { ACCEPT, DropBox, DropOverlay, isImage, isPdf, useFileDrop } from './drop';
 import { Compress, Password, PageNumbers, Watermark, Split, ToImages, ExtractText, Deadlines, SafeCopy } from './MoreTools';
 import { SortableArea, useSortableItem } from './sortable';
 import type { Bp } from './hooks';
@@ -162,21 +163,14 @@ export function useSource(current: Current | null) {
 }
 
 export function PickPdf({ onFile, err, title }: { onFile: (f: File) => void; err: string | null; title: string }) {
-  const ref = useRef<HTMLInputElement>(null);
-  const [over, setOver] = useState(false);
+  const [wrong, setWrong] = useState(false);
   return (
     <div className="tmain">
       <div className="flist" style={{ maxWidth: 560, marginTop: '6vh' }}>
-        <div className={`dz${over ? ' over' : ''}`} style={{ flexDirection: 'column', textAlign: 'center', padding: '40px 24px' }}
-          onDragOver={(e) => { e.preventDefault(); setOver(true); }} onDragLeave={() => setOver(false)}
-          onDrop={(e) => { e.preventDefault(); setOver(false); const f = e.dataTransfer.files?.[0]; if (f) onFile(f); }}>
-          <div className="dzi"><Icon name="file-pdf:duotone" size={26} /></div>
-          <div className="dzt" style={{ alignItems: 'center' }}><b>{title}</b><span className="label">Drop a PDF here or choose one</span></div>
-          <button className="btn primary lg" onClick={() => ref.current?.click()}><Icon name="open" size={18} />Choose PDF</button>
-          {err && <div style={{ color: 'var(--danger)', fontWeight: 600 }}>{err}</div>}
-        </div>
+        <DropBox icon="file-pdf:duotone" title={title} sub="Drop a PDF here or choose one" accept={ACCEPT.pdf} filter={isPdf}
+          onFiles={(f) => { setWrong(false); onFile(f[0]); }} onReject={() => setWrong(true)} button="Choose PDF"
+          err={wrong ? 'That isn’t a PDF. Convert it to PDF first.' : err} />
       </div>
-      <input ref={ref} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
     </div>
   );
 }
@@ -202,17 +196,18 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const started = useRef(false);
 
+  const drop = useFileDrop((f) => add(f), { accept: (f) => isPdf(f) || isImage(f) });
   const add = async (list: FileList | File[]) => {
     const added: CFile[] = [];
     for (const f of Array.from(list)) {
       const id = Math.random().toString(36).slice(2);
-      if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+      if (isPdf(f)) {
         try {
           const bytes = new Uint8Array(await f.arrayBuffer());
           const pdf = await openPdf(bytes);
           added.push({ id, name: f.name, kind: 'pdf', file: f, pages: pdf.numPages, size: f.size, range: '', pdf });
         } catch { p.toast({ msg: `Couldn’t read ${f.name}`, kind: 'err' }); }
-      } else if (f.type.startsWith('image/') || /\.(heic|heif)$/i.test(f.name)) {
+      } else if (isImage(f)) {
         added.push({ id, name: f.name, kind: 'image', file: f, pages: 1, size: f.size, range: '', thumb: URL.createObjectURL(f) });
       }
     }
@@ -269,7 +264,8 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
     </>
   );
   return (
-    <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column' }}>
+    <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column' }} {...drop.bind}>
+      <DropOverlay show={drop.over} title="Drop to add" sub="PDFs and images join the list at the end" />
       <div className="tmain">
         <div className="flist">
           <div className="label" style={{ padding: '0 4px 4px' }}>{p.mobile ? 'Hold a file to drag it into place.' : 'Drag to set the order.'} Type a range like “1–3” to use only some pages.</div>
@@ -445,6 +441,9 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
   const imgIn = useRef<HTMLInputElement>(null);
   const camIn = useRef<HTMLInputElement>(null);
   const at = after ?? (src ? src.pages.length - 1 : 0);
+  // PDFs and images dropped on the pages go in at the chosen place
+  const dropTo = useRef<(f: File[]) => void>(() => {});
+  const drop = useFileDrop((f) => dropTo.current(f), { accept: (f) => isPdf(f) || isImage(f) });
   if (!src) return <PickPdf onFile={load} err={err} title="Choose a PDF to add pages to" />;
 
   const build = async (fill: (doc: PDFDocument, index: number) => Promise<number>) => {
@@ -482,6 +481,10 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
     for (const f of files) { await addImagePage(doc, await imageBytes(f), size === 'match' ? 'fit' : size, 0, i + k); k++; }
     return k;
   });
+  dropTo.current = (files) => {
+    const pdfs = files.filter(isPdf), imgs = files.filter((f) => !isPdf(f));
+    if (pdfs.length) insertPdf(pdfs[0]); else if (imgs.length) insertImages(imgs);
+  };
   const run = (k: InsertKind = kind) => {
     if (k === 'blank') insertBlank();
     else if (k === 'pdf') pdfIn.current?.click();
@@ -526,7 +529,8 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
     </>
   );
   return (
-    <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column', position: 'relative' }}>
+    <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column', position: 'relative' }} {...drop.bind}>
+      <DropOverlay show={drop.over} title={`Drop to insert after page ${at + 1}`} sub="All pages of a PDF, or one page per image" />
       <div className="tmain">
         <div className="pgrid">
           <div className="bar"><div className="label" style={{ fontWeight: 400, color: 'var(--muted-2)' }}>Tap a <b style={{ display: 'inline-flex', width: 20, height: 20, borderRadius: '50%', background: '#1E2559', color: '#fff', alignItems: 'center', justifyContent: 'center', verticalAlign: -4 }}><Icon name="plus:bold" size={11} /></b> between pages to choose where new pages go.</div></div>

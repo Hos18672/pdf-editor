@@ -13,6 +13,7 @@ import type { Filter } from './kernels';
 import { Camera, MODES, type ShotHint } from './Camera';
 import { CropEditor } from './CropEditor';
 import { EraseEditor } from './EraseEditor';
+import { DropOverlay, isImage, useFileDrop } from '../drop';
 import { Pager } from './Pager';
 import { aiKey, eraseTag, stopAi, DEFAULT_FILTER, decode, findDocument, flattenPage, forget, forgetBases, gridOf, looksCurved, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
 import { findGutter, splitSpread } from './book';
@@ -159,6 +160,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     setView('review');
     setCur(start);
   }, [add, mode]);
+  // photos dragged in from the computer: more pages
+  const photoDrop = useFileDrop((f) => onImport(f), { accept: isImage, onReject: () => toast({ msg: 'Drop photos (JPG, PNG, HEIC) to add pages', kind: 'err' }) });
 
   // ---- rendering. The page on screen first: a quick look within a moment, then the cleaned page. The
   // straightened page is kept, so changing the look or turning only redoes the last step. Then the
@@ -430,7 +433,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   );
 
   return (
-    <div className="scr">
+    <div className="scr" {...photoDrop.bind}>
+      <DropOverlay show={photoDrop.over} title="Drop photos to add pages" sub="Each photo is straightened and cleaned like a scan" icon="image" />
       <header className="topbar">
         <button className="ibtn" onClick={close} aria-label="Close scanner"><Icon name="back" /></button>
         <div className="doc"><div className="names">

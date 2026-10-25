@@ -6,6 +6,7 @@ import { Thumb } from './Thumb';
 import { Seg, Stepper, Toggle } from './Panel';
 import { saveFile } from './Editor';
 import { useSource, PickPdf, Side, Bar, type Props, type Src } from './Tools';
+import { ACCEPT, DropBox, isImage, isPdf } from './drop';
 import { baseName, fmtSize, parseRange, formatRange } from './pdfops';
 import { openPdf } from './pdfjs';
 
@@ -644,7 +645,7 @@ export function SafeCopy(p: TP) {
   const pick = async (files: File[]) => {
     const list: NonNullable<typeof items> = [];
     for (const f of files) {
-      if (f.type === 'application/pdf' || /\.pdf$/i.test(f.name)) {
+      if (isPdf(f)) {
         const pdf = await openPdf(new Uint8Array(await f.arrayBuffer()));
         for (let i = 1; i <= pdf.numPages; i++) list.push({ name: f.name, draw: async (max) => {
           const page = await pdf.getPage(i);
@@ -686,11 +687,9 @@ export function SafeCopy(p: TP) {
     return (
       <div className="tmain">
         <div className="flist" style={{ maxWidth: 560, marginTop: '6vh' }}>
-          <div className="dz" style={{ flexDirection: 'column', textAlign: 'center', padding: '40px 24px' }}>
-            <div className="dzi"><Icon name="identification-badge:duotone" size={26} /></div>
-            <div className="dzt" style={{ alignItems: 'center' }}><b>Choose an ID, passport or other document</b><span className="label">A PDF or photos. The copy gets “COPY – only for …” written across it, burned into the picture.</span></div>
-            <label className="btn primary lg"><Icon name="open" size={18} />Choose files<input type="file" accept="application/pdf,.pdf,image/*,.heic,.heif" multiple hidden onChange={(e) => { const f = e.target.files; if (f?.length) pick([...f]); e.target.value = ''; }} /></label>
-          </div>
+          <DropBox icon="identification-badge:duotone" title="Choose an ID, passport or other document" button="Choose files"
+            sub="A PDF or photos. The copy gets “COPY – only for …” written across it, burned into the picture."
+            accept={ACCEPT.pdfOrImage} multiple filter={(f) => isPdf(f) || isImage(f)} onFiles={pick} />
         </div>
       </div>
     );

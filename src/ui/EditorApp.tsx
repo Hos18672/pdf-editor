@@ -1,6 +1,7 @@
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { css } from './styles';
 import { Icon } from './icons';
+import { useNoStrayDrops } from './drop';
 import { openPdf, loadPdfjs } from './pdfjs';
 import { useHistory } from './store';
 import type { PageInfo } from './PageView';
@@ -90,6 +91,8 @@ function registerServiceWorker() {
 }
 
 export default function EditorApp(host: HostProps) {
+  // a file dropped where nothing takes it must not replace the app (and the work) in the browser
+  useNoStrayDrops();
   const [file, setFile] = useState<{ name: string; bytes: Uint8Array } | null>(null);
   const [pdf, setPdf] = useState<any>(null);
   const [infos, setInfos] = useState<PageInfo[]>([]);
@@ -224,6 +227,29 @@ export default function EditorApp(host: HostProps) {
     if (!f) return;
     f.arrayBuffer().then((b) => open(f.name, new Uint8Array(b)));
   };
+  /** pictures, Office files or text dropped on the start screen: turned into one PDF and opened */
+  const importFiles = async (files: File[]) => {
+    const name = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '') + '.pdf' : 'Combined.pdf';
+    setOpenState({ kind: 'loading', name, progress: 0.05, detail: `Turning ${files.length === 1 ? 'the file' : `${files.length} files`} into a PDF…` });
+    try {
+      const { convertFile } = await import('./convert');
+      const { PDFDocument } = await import('pdf-lib');
+      const opt = { size: 'a4', orient: 'auto', margin: 'small' } as const;
+      const parts: Uint8Array[] = [];
+      for (let i = 0; i < files.length; i++) {
+        parts.push((await convertFile(files[i], opt as any, (f) => setOpenState({ kind: 'loading', name, progress: 0.05 + 0.6 * (i + f) / files.length, detail: `Turning ${files[i].name} into a PDF…` }))).bytes);
+      }
+      let bytes = parts[0];
+      if (parts.length > 1) {
+        const out = await PDFDocument.create();
+        for (const b of parts) { const d = await PDFDocument.load(b); (await out.copyPages(d, d.getPageIndices())).forEach((p) => out.addPage(p)); }
+        bytes = await out.save();
+      }
+      open(name, bytes);
+    } catch (e: any) {
+      setOpenState({ kind: 'error', message: `That file couldn’t be turned into a PDF${e?.message ? ` (${e.message})` : ''}.` } as any);
+    }
+  };
   const pick = async () => {
     if (host.isNative && host.pickPdf) {
       const r = await host.pickPdf();
@@ -310,7 +336,7 @@ export default function EditorApp(host: HostProps) {
           onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }}
           onScan={() => setRoute({ name: 'scan', back: 'tools' })} />
       ) : (
-        <Start state={openState} onFile={(f) => readFile(f)} onPick={pick} mobile={bp === 'mobile'}
+        <Start state={openState} onFile={(f) => readFile(f)} onImport={importFiles} onPick={pick} mobile={bp === 'mobile'}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
           onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme}
           onRecent={async (d) => {

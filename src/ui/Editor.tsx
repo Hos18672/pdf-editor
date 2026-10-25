@@ -14,6 +14,7 @@ import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
 import { PageRemove } from './PageRemove';
+import { DropOverlay, isImage, isPdf, useFileDrop } from './drop';
 import { underStrokes } from '../engine/cut';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, objTitle, Stepper, toolHasProps, fontLabel, Toggle, RunTextTools, ObjTextTools } from './Panel';
 import { readFields, FormField, isFilled } from './Fields';
@@ -482,11 +483,16 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.pages, zoom]);
 
-  const placeStamp = (st: Stamp, type: 'signature' | 'image', field?: FormField) => {
-    const page = field ? field.page : currentPage();
+  const placeStamp = (st: Stamp, type: 'signature' | 'image', field?: FormField, at?: { page: number; x: number; y: number }) => {
+    const page = field ? field.page : at ? at.page : currentPage();
     const info = infos[page];
     let w: number, h: number, x: number, y: number;
-    if (field) {
+    if (at && !field) {
+      // centred where it was dropped
+      const maxW = Math.min(260, info.w * 0.6);
+      w = Math.min(maxW, st.w); h = (w * st.h) / st.w;
+      x = Math.max(0, Math.min(info.w - w, at.x - w / 2)); y = Math.max(0, Math.min(info.h - h, at.y - h / 2));
+    } else if (field) {
       const k = Math.min(field.w / st.w, field.h / st.h) * 0.92;
       w = st.w * k; h = st.h * k; x = field.x + (field.w - w) / 2; y = field.y + (field.h - h) / 2;
     } else {
@@ -508,7 +514,35 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (!field) setTool('edit');
   };
 
-  const onImage = (f?: File) => {
+  // files dragged in from the computer: pictures go on the page under the pointer (in the page list or
+  // the pages view they become pages, like PDFs, which are added after the current page)
+  const fileDrop = useFileDrop((files, e) => {
+    const pdfs = files.filter(isPdf), imgs = files.filter((f) => !isPdf(f));
+    const target = e.target as Element;
+    const asPages = view === 'pages' || !!target.closest?.('.pstrip, .addpg');
+    const after = Math.max(0, snap.pages.findIndex((p) => p.src === curPage)) + 1;
+    if ((pdfs.length || (asPages && imgs.length)) && !onAddPages) { toast({ msg: 'Pages can’t be added to this document here', kind: 'err' }); return; }
+    (async () => {
+      // the last one first, so they end up in the order they were dropped
+      if (asPages && imgs.length) await onAddPages!(after, { kind: 'images', files: imgs });
+      for (const f of [...pdfs].reverse()) await onAddPages!(after, { kind: 'pdf', file: f });
+      if (pdfs.length || (asPages && imgs.length)) toast({ msg: 'Pages added after page ' + after, kind: 'ok' });
+      if (!asPages && imgs.length) {
+        const el = target.closest?.('.pageOuter') as HTMLElement | null;
+        const pg = el?.querySelector<HTMLElement>('.page');
+        const src = el ? +(el.dataset.src ?? NaN) : NaN;
+        const rot = snap.pages.find((p) => p.src === src)?.rotation ?? 0;
+        let at: { page: number; x: number; y: number } | undefined;
+        if (pg && !Number.isNaN(src) && rot % 360 === 0) {
+          const r = pg.getBoundingClientRect();
+          at = { page: src, x: (e.clientX - r.left) / zoom, y: (e.clientY - r.top) / zoom };
+        }
+        imgs.forEach((f, k) => onImage(f, at && { ...at, x: at.x + k * 16, y: at.y + k * 16 }));
+      }
+    })().catch(() => toast({ msg: 'Those files couldn’t be added', kind: 'err' }));
+  }, { accept: (f) => isPdf(f) || isImage(f), onReject: () => toast({ msg: 'Drop PDFs or images here. Other files can be turned into PDFs with Convert.', kind: 'err' }), disabled: removing !== null || !!showSig });
+
+  const onImage = (f?: File, at?: { page: number; x: number; y: number }) => {
     if (!f) return;
     const r = new FileReader();
     r.onload = () => {
@@ -521,7 +555,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           c.getContext('2d')!.drawImage(im, 0, 0);
           src = c.toDataURL('image/png');
         }
-        placeStamp({ src, w: im.naturalWidth, h: im.naturalHeight }, 'image');
+        placeStamp({ src, w: im.naturalWidth, h: im.naturalHeight }, 'image', undefined, at);
       };
       im.onerror = () => toast({ msg: 'Couldn’t place image', kind: 'err' });
       im.src = r.result as string;
@@ -1370,7 +1404,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           onAct={(a, n) => { setFileMenu(false); if (a === 'find') { setPrivOpen(false); setView('doc'); setFindOpen(true); } else download(a, n); }} />
       )}
 
-      <div className="body">
+      <div className="body" {...fileDrop.bind}>
+        <DropOverlay show={fileDrop.over} title={view === 'pages' ? 'Drop to add pages' : 'Drop to add'}
+          sub={view === 'pages' ? 'PDFs and images become new pages after the current page' : 'Images go on the page where you drop them; PDFs are added as pages after the current page'} />
         {!mobile && (
           <nav className="rail" aria-label="Tools">
             {GROUPS.map((g) => (

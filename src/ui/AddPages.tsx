@@ -3,6 +3,7 @@
 import React, { useRef, useState } from 'react';
 import { Icon } from './icons';
 import { Stepper } from './Panel';
+import { ACCEPT, DropOverlay, isImage, isPdf, useFileDrop } from './drop';
 
 export type AddWhat = { kind: 'blank'; count: number } | { kind: 'pdf'; file: File } | { kind: 'images'; files: File[] };
 
@@ -14,10 +15,16 @@ export function AddPagesSheet({ after, total, mobile, onClose, onAdd }: {
   const pdfIn = useRef<HTMLInputElement>(null);
   const imgIn = useRef<HTMLInputElement>(null);
   const where = after >= total ? 'at the end' : after <= 0 ? 'at the start' : `after page ${after}`;
+  // a PDF or pictures dropped on the sheet are added the same as chosen ones
+  const drop = useFileDrop((f) => {
+    const pdf = f.find(isPdf);
+    if (pdf) onAdd({ kind: 'pdf', file: pdf }); else onAdd({ kind: 'images', files: f });
+  }, { accept: (f) => isPdf(f) || isImage(f) });
   return (
     <>
       <div className="sheet-scrim" style={{ zIndex: 30 }} onClick={onClose} />
-      <div className={`bsheet addpg${mobile ? '' : ' center'}`} role="dialog" aria-label="Add pages">
+      <div className={`bsheet addpg${mobile ? '' : ' center'}`} role="dialog" aria-label="Add pages" {...drop.bind}>
+        <DropOverlay show={drop.over} title={`Drop to add ${where}`} sub="All pages of a PDF, or one page per image" />
         {mobile && <div className="grab" />}
         <div className="props">
           <div className="ap-h">
@@ -44,8 +51,9 @@ export function AddPagesSheet({ after, total, mobile, onClose, onAdd }: {
             <Icon name="right" size={16} style={{ color: 'var(--faint)' }} />
           </button>
         </div>
-        <input ref={pdfIn} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onAdd({ kind: 'pdf', file: f }); }} />
-        <input ref={imgIn} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => { const f = e.target.files; const list = f ? [...f] : []; e.target.value = ''; if (list.length) onAdd({ kind: 'images', files: list }); }} />
+        {!mobile && <div className="ap-drop label"><Icon name="file-arrow-up" size={15} />You can also drop a PDF or images here</div>}
+        <input ref={pdfIn} type="file" accept={ACCEPT.pdf} hidden onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) onAdd({ kind: 'pdf', file: f }); }} />
+        <input ref={imgIn} type="file" accept={ACCEPT.image} multiple hidden onChange={(e) => { const f = e.target.files; const list = f ? [...f] : []; e.target.value = ''; if (list.length) onAdd({ kind: 'images', files: list }); }} />
       </div>
     </>
   );
