@@ -2,7 +2,7 @@ import { useCallback, useReducer } from 'react';
 import type { EditorObject, PageState, FontFamily, FormValues, Looks, CharLook } from '../engine/types';
 
 export type Tool =
-  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'redact' | 'highlight' | 'underline' | 'strike' | 'rect' | 'ellipse' | 'line' | 'arrow' | 'draw' | 'link';
+  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'redact' | 'highlight' | 'underline' | 'strike' | 'rect' | 'ellipse' | 'line' | 'arrow' | 'draw' | 'link' | 'remove';
 
 export interface RunEdit {
   text: string;
@@ -62,6 +62,8 @@ export interface ToolStyle {
   ink: string;
   /** new text takes the font, size and colour of the page's text next to it */
   match: boolean;
+  /** Remove: the brush's radius (pt) */
+  removeSize: number;
 }
 
 interface State {

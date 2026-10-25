@@ -13,7 +13,9 @@ import { FindBar, PrivacyCheck } from './FindBar';
 import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
-import { PageRemove } from './PageRemove';
+import { contentReader, cutsSomething, textureFill } from './removeTool';
+import { ShortcutsSheet } from './Shortcuts';
+import type { CutStroke } from '../engine/cut';
 import { DropOverlay, isImage, isPdf, useFileDrop } from './drop';
 import { underStrokes } from '../engine/cut';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, objTitle, Stepper, toolHasProps, fontLabel, Toggle, RunTextTools, ObjTextTools } from './Panel';
@@ -77,7 +79,7 @@ const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const MIN_Z = 0.25, MAX_Z = 4;
 const clampZ = (z: number) => Math.max(MIN_Z, Math.min(MAX_Z, z));
 
-type RailT = Tool | 'shapes' | 'markup' | 'pages' | 'remove';
+type RailT = Tool | 'shapes' | 'markup' | 'pages';
 type RailItem = { t: RailT; label: string; icon: string; key: string; opts?: boolean };
 /** Tools grouped by intent (rail, mobile "All tools" sheet). `opts`: the tool has a flyout with options. */
 const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
@@ -92,7 +94,7 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
   { name: 'Mark up', tint: 'var(--tint-markup)', items: [
     { t: 'whiteout', label: 'Whiteout', icon: 'eraser', key: 'W' },
     { t: 'redact', label: 'Redact', icon: 'eye-slash', key: 'X' },
-    { t: 'remove', label: 'Remove', icon: 'bandaids', key: 'M' },
+    { t: 'remove', label: 'Remove', icon: 'bandaids', key: 'M', opts: true },
     { t: 'markup', label: 'Highlight', icon: 'highlighter', key: 'H', opts: true },
     { t: 'shapes', label: 'Shapes', icon: 'shapes', key: 'R', opts: true },
     { t: 'draw', label: 'Draw', icon: 'scribble', key: 'D', opts: true }] },
@@ -150,7 +152,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const mobile = bp === 'mobile', tablet = bp === 'tablet', large = bp === 'large', desk = bp === 'desktop' || large;
   const [tool, setTool] = useState<Tool>('edit');
   const [style, setStyle] = useState<ToolStyle>({
-    color: '#000000', stroke: '#1E2559', fill: null, strokeWidth: 2, fontSize: 14, family: 'Helvetica', highlight: '#FFE14D', ink: '#D93025', match: true,
+    color: '#000000', stroke: '#1E2559', fill: null, strokeWidth: 2, fontSize: 14, family: 'Helvetica', highlight: '#FFE14D', ink: '#D93025', match: true, removeSize: 9,
   });
   const [selected, setSelected] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
@@ -158,6 +160,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [addAfter, setAddAfter] = useState<number | null>(null); // the Add pages sheet: new pages after this many
   // find in document / privacy check: matches drawn over the pages
   const [findOpen, setFindOpen] = useState(false);
+  /** the keyboard shortcuts sheet */
+  const [keysOpen, setKeysOpen] = useState(false);
+  /** an added object copied with Ctrl+C (pasted with Ctrl+V on the page in view) */
+  const objClip = useRef<EditorObject | null>(null);
+  const lastCopy = useRef<'run' | 'obj' | null>(null);
   const [privOpen, setPrivOpen] = useState(start === 'privacy');
   const [found, setFound] = useState<{ list: Hit[]; cur: number; priv: boolean }>({ list: [], cur: -1, priv: false });
   const [strip, setStripRaw] = useState<boolean>(() => {
@@ -175,8 +182,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [pageData, setPageData] = useState<Record<number, PageData>>({});
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
   const [showSig, setShowSig] = useState<null | { field?: FormField }>(null);
-  /** Remove (paint over marks) open on this page (original index) */
-  const [removing, setRemoving] = useState<number | null>(null);
+  /** Remove strokes being worked out (shown as paint until the page shows them taken out) */
+  const [removingBusy, setRemovingBusy] = useState(0);
   const [view, setView] = useState<'doc' | 'pages'>(start === 'pages' ? 'pages' : 'doc');
   // tool flyout beside the rail (tablet / desktop) or above the dock (phone, shapes only)
   const [flyout, setFlyout] = useState<{ t: RailT; top: number } | null>(null);
@@ -403,6 +410,60 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ----- moving the view with the mouse: hold Space or Ctrl (⌘) and drag, or drag with the middle button
+  const [panReady, setPanReady] = useState(false);
+  const [panning, setPanning] = useState(false);
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    let space = false, held = false, pan: { x: number; y: number; sl: number; st: number; id: number } | null = null;
+    const typing = (t: EventTarget | null) => { const h = t as HTMLElement | null; return !!h && (h.tagName === 'INPUT' || h.tagName === 'TEXTAREA' || h.tagName === 'SELECT' || h.isContentEditable); };
+    const ready = () => setPanReady(space || held);
+    const kd = (e: KeyboardEvent) => {
+      if (typing(e.target)) return;
+      if (e.code === 'Space') { if (!space) { space = true; ready(); } e.preventDefault(); }
+      if (e.key === 'Control' || e.key === 'Meta') { held = true; ready(); }
+    };
+    const ku = (e: KeyboardEvent) => {
+      if (e.code === 'Space') { space = false; ready(); }
+      if (e.key === 'Control' || e.key === 'Meta') { held = false; ready(); }
+    };
+    const blur = () => { space = false; held = false; ready(); };
+    const down = (e: PointerEvent) => {
+      if (e.pointerType !== 'mouse') return;
+      const want = e.button === 1 || (e.button === 0 && (space || e.ctrlKey || e.metaKey));
+      if (!want) return;
+      e.preventDefault(); e.stopPropagation();
+      pan = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop, id: e.pointerId };
+      try { el.setPointerCapture(e.pointerId); } catch { /* fine */ }
+      setPanning(true);
+    };
+    const move = (e: PointerEvent) => {
+      if (!pan || e.pointerId !== pan.id) return;
+      e.preventDefault(); e.stopPropagation();
+      el.scrollLeft = pan.sl - (e.clientX - pan.x);
+      el.scrollTop = pan.st - (e.clientY - pan.y);
+    };
+    const up = (e: PointerEvent) => {
+      if (!pan || e.pointerId !== pan.id) return;
+      e.stopPropagation();
+      pan = null; setPanning(false);
+    };
+    // the middle button's own autoscroll and Ctrl+click menus stay out of the way
+    const aux = (e: MouseEvent) => { if (e.button === 1) e.preventDefault(); };
+    const click = (e: MouseEvent) => { if (e.ctrlKey || e.metaKey) { e.stopPropagation(); e.preventDefault(); } };
+    window.addEventListener('keydown', kd); window.addEventListener('keyup', ku); window.addEventListener('blur', blur);
+    el.addEventListener('pointerdown', down, true); el.addEventListener('pointermove', move, true);
+    el.addEventListener('pointerup', up, true); el.addEventListener('pointercancel', up, true);
+    el.addEventListener('mousedown', aux, true); el.addEventListener('click', click, true);
+    return () => {
+      window.removeEventListener('keydown', kd); window.removeEventListener('keyup', ku); window.removeEventListener('blur', blur);
+      el.removeEventListener('pointerdown', down, true); el.removeEventListener('pointermove', move, true);
+      el.removeEventListener('pointerup', up, true); el.removeEventListener('pointercancel', up, true);
+      el.removeEventListener('mousedown', aux, true); el.removeEventListener('click', click, true);
+    };
+  }, []);
+
   // ----- object helpers -----
   // a new box is kept inside its page (a signature placed across two pages would be cut off by both)
   const inPage = (o: EditorObject): EditorObject => {
@@ -540,7 +601,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         imgs.forEach((f, k) => onImage(f, at && { ...at, x: at.x + k * 16, y: at.y + k * 16 }));
       }
     })().catch(() => toast({ msg: 'Those files couldn’t be added', kind: 'err' }));
-  }, { accept: (f) => isPdf(f) || isImage(f), onReject: () => toast({ msg: 'Drop PDFs or images here. Other files can be turned into PDFs with Convert.', kind: 'err' }), disabled: removing !== null || !!showSig });
+  }, { accept: (f) => isPdf(f) || isImage(f), onReject: () => toast({ msg: 'Drop PDFs or images here. Other files can be turned into PDFs with Convert.', kind: 'err' }), disabled: !!showSig });
 
   const onImage = (f?: File, at?: { page: number; x: number; y: number }) => {
     if (!f) return;
@@ -683,22 +744,28 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   // ----- live preview: re-write edited pages with the real fonts and show that -----
   // (scan lines are drawn over the page instead, see above)
+  const erases = snap.objects.filter((o) => o.type === 'erase');
+  const eraseSig = JSON.stringify(erases.map((o) => [o.id, o.page]));
   const editKeyOf = (src: number) => {
     const list = Object.entries(snap.edits).filter(([k]) => k.startsWith(src + ':') && !isScanKey(k)).sort(([a], [b]) => (a < b ? -1 : 1));
-    return list.length ? JSON.stringify(list) : '';
+    const cuts = erases.filter((o) => o.page === src).map((o) => o.id);
+    return list.length || cuts.length ? JSON.stringify([list, cuts]) : '';
   };
   const [preview, setPreview] = useState<{ pdf: any; keys: Record<number, string> } | null>(null);
   const previewSeq = useRef(0);
   useEffect(() => {
     const seq = ++previewSeq.current;
     const edits = textEdits(snap.edits).filter((e) => !isScanKey(e.key));
-    if (!edits.length) { setPreview(null); return; }
+    // Remove: what was painted over is taken out of these pages
+    const cuts = snap.objects.filter((o) => o.type === 'erase');
+    if (!edits.length && !cuts.length) { setPreview(null); return; }
     const keys: Record<number, string> = {};
     for (const e of edits) keys[e.page] = editKeyOf(e.page);
+    for (const o of cuts) keys[o.page] = editKeyOf(o.page);
     const t = setTimeout(async () => {
       try {
         const bytes = await exportPdf({
-          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: [], edits, scanImage, rules: rulesOf, coverImage: coverOf, matchFont: matchFontBytes,
+          bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: cuts, edits, scanImage, rules: rulesOf, coverImage: coverOf, matchFont: matchFontBytes,
           viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
         });
         if (seq !== previewSeq.current) return;
@@ -711,7 +778,58 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     }, 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [snap.edits, hiddenPages]);
+  }, [snap.edits, hiddenPages, eraseSig]);
+
+  // ----- Remove: paint over what should go -----
+  const readContent = useMemo(() => contentReader(file.bytes), [file.bytes]);
+  const [pendingCuts, setPendingCuts] = useState<Record<number, CutStroke[]>>({});
+  /** strokes painted on a page that the page on screen doesn't show taken out yet */
+  const erasingOn = (src: number): CutStroke[] => {
+    const shown = preview?.keys[src] === editKeyOf(src);
+    return [...(shown ? [] : erases.filter((o) => o.page === src).flatMap((o) => o.strokes)), ...(pendingCuts[src] ?? [])];
+  };
+  const removeStroke = async (src: number, stroke: CutStroke) => {
+    const vm = infos[src].vm;
+    setPendingCuts((m) => ({ ...m, [src]: [...(m[src] ?? []), stroke] }));
+    setRemovingBusy((n) => n + 1);
+    try {
+      const content = await readContent(src);
+      const inFile = cutsSomething(content, stroke, vm);
+      // lines under the paint: changed ones lose their new text, untouched ones are taken out with the cut
+      const gone = (pageData[src]?.runs ?? []).filter((r) => {
+        if (isScanKey(r.key)) return false;
+        const e = snap.edits[r.key];
+        if (e && !e.text) return false;
+        if (!e && !inFile) return false;
+        const b = runBox(r, vm), c = Math.cos(b.angle), sn = Math.sin(b.angle), up = b.h * 0.3;
+        return [0.2, 0.5, 0.8].filter((t) => underStrokes([stroke], b.x + c * b.w * t + sn * up + (e?.dx ?? 0), b.y + sn * b.w * t - c * up + (e?.dy ?? 0))).length >= 2;
+      });
+      if (inFile || gone.length) {
+        const P = stroke.pts;
+        let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+        for (let i = 0; i + 1 < P.length; i += 2) { x0 = Math.min(x0, P[i]); x1 = Math.max(x1, P[i]); y0 = Math.min(y0, P[i + 1]); y1 = Math.max(y1, P[i + 1]); }
+        commit((s) => {
+          const edits = { ...s.edits };
+          for (const r of gone) edits[r.key] = { ...(edits[r.key] ?? { sizeScale: 1, color: null }), text: '' };
+          const o: EditorObject = { id: uid(), page: src, type: 'erase', strokes: [stroke], x: x0 - stroke.r, y: y0 - stroke.r, w: x1 - x0 + stroke.r * 2, h: y1 - y0 + stroke.r * 2 };
+          return { ...s, edits, objects: inFile ? [...s.objects, o] : s.objects };
+        });
+        return;
+      }
+      if (content) { toast({ msg: 'Nothing to remove there' }); return; }
+      // the page's content couldn't be read: the page's own texture is copied over it instead
+      const src0 = preview && preview.keys[src] !== undefined ? preview.pdf : pdf;
+      const patch = await textureFill(await src0.getPage(src + 1), stroke, infos[src]);
+      if (!patch) { toast({ msg: 'Nothing to remove there' }); return; }
+      addObject({ id: uid(), page: src, type: 'image', ...patch });
+    } catch (err) {
+      console.warn('remove failed', err);
+      toast({ msg: 'That couldn’t be removed', kind: 'err' });
+    } finally {
+      setPendingCuts((m) => ({ ...m, [src]: (m[src] ?? []).filter((k) => k !== stroke) }));
+      setRemovingBusy((n) => n - 1);
+    }
+  };
 
   // ----- export -----
   const editCount = Object.keys(snap.edits).length + snap.objects.length + Object.keys(snap.forms).length;
@@ -829,6 +947,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     try { navigator.clipboard?.writeText(text).catch(legacy) ?? legacy(); } catch { legacy(); }
   };
   const copyRun = (r: TextRun, cut = false) => afterBlur(() => {
+    lastCopy.current = 'run';
     const c = clipOf(r);
     toClipboard(c.text);
     setClip(c);
@@ -1012,8 +1131,38 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       else if (mod && (k === '=' || k === '+')) { e.preventDefault(); zoomStep(1); }
       else if (mod && k === '-') { e.preventDefault(); zoomStep(-1); }
       else if (mod && k === 'd' && selObj) { e.preventDefault(); duplicateObject(selObj.id); }
+      else if (mod && k === 's') { e.preventDefault(); download('save'); }
+      else if (mod && k === 'p') { e.preventDefault(); download('print'); }
       else if (mod && (k === 'c' || k === 'x') && selRun) { e.preventDefault(); copyRun(selRun, k === 'x'); }
+      else if (mod && (k === 'c' || k === 'x') && selObj && selObj.type !== 'erase') {
+        // an added object: copied (or cut) to paste on any page
+        e.preventDefault(); objClip.current = selObj; lastCopy.current = 'obj';
+        if (k === 'x') { removeObject(selObj.id); setSelected(null); }
+        toast({ msg: k === 'x' ? 'Cut. Ctrl+V pastes it' : 'Copied. Ctrl+V pastes it' });
+      }
+      else if (mod && k === 'v' && objClip.current && !(clip && !selObj && lastCopy.current === 'run')) {
+        e.preventDefault();
+        const o = objClip.current, page = curRef.current, info = infos[page];
+        const same = o.page === page;
+        const nid = uid();
+        const dx = same ? 12 : 0, dy = same ? 12 : 0;
+        addObject({ ...o, id: nid, page, x: Math.min(o.x + dx, Math.max(0, info.w - o.w)), y: Math.min(o.y + dy, Math.max(0, info.h - o.h)), ...(o.type === 'line' ? { x2: o.x2 + dx, y2: o.y2 + dy } : {}) } as EditorObject);
+        objClip.current = { ...o, page, x: o.x + dx, y: o.y + dy } as EditorObject;
+        setSelected(nid);
+      }
       else if (mod && k === 'v' && clip && !selObj) { e.preventDefault(); pasteHere(); }
+      else if (!mod && !selected && (e.key === 'PageDown' || e.key === 'PageUp' || e.key === 'Home' || e.key === 'End')) {
+        // pages: next / previous / first / last
+        e.preventDefault();
+        const i = snap.pages.findIndex((q) => q.src === curRef.current);
+        const n = e.key === 'Home' ? 0 : e.key === 'End' ? snap.pages.length - 1 : Math.max(0, Math.min(snap.pages.length - 1, i + (e.key === 'PageDown' ? 1 : -1)));
+        if (snap.pages[n]) goToPage(snap.pages[n].src);
+      }
+      else if (!mod && (e.key === '[' || e.key === ']') && tool === 'remove') {
+        const sizes = [4, 9, 18], i = Math.max(0, sizes.indexOf(style.removeSize));
+        setStyle((st) => ({ ...st, removeSize: sizes[Math.max(0, Math.min(2, i + (e.key === ']' ? 1 : -1)))] }));
+      }
+      else if (!mod && e.key === '?') { e.preventDefault(); setSelected(null); setKeysOpen((v) => !v); }
       else if ((e.key === 'Delete' || e.key === 'Backspace') && selected) {
         e.preventDefault();
         if (selRun) setRunEdit(selRun.key, { text: '', sizeScale: 1, color: null });
@@ -1095,7 +1244,6 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const railClick = (r: RailItem) => {
     setMoreOpen(false);
     if (mobile) setRecent((v) => useRecent(v, r.t));
-    if (r.t === 'remove') { setFlyout(null); setSelected(null); setEditing(null); if (view === 'pages') setView('doc'); setRemoving(curRef.current); return; }
     if (r.t === 'pages') { setFlyout(null); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }
     const same = railActive(r);
     if (r.t === 'shapes' || r.t === 'markup') {
@@ -1109,7 +1257,6 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (r.opts && !mobile) openFlyout(r.t);
   };
   const railActive = (r: RailItem) => r.t === 'pages' ? view === 'pages'
-    : r.t === 'remove' ? removing !== null
     : view === 'pages' ? false
     : r.t === 'shapes' ? SHAPE_TOOLS.includes(tool)
     : r.t === 'markup' ? MARK_TOOLS.includes(tool)
@@ -1301,7 +1448,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       out.push({ id: key, icon: e.text.trim() ? 'edit' : 'trash', label: e.text.trim() ? `Edited “${e.text.trim().slice(0, 28)}”` : 'Deleted a line', page: pageNo(src) });
     }
     for (const o of snap.objects) {
-      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check', link: 'link' };
+      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check', link: 'link', erase: 'bandaids' };
       out.push({ id: o.id, icon: ic[o.type], label: o.type === 'text' ? `Text “${o.text.trim().slice(0, 24) || '…'}”` : objTitle(o), page: pageNo(o.page) });
     }
     const nf = Object.keys(snap.forms).length;
@@ -1376,6 +1523,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           </div>
         </div>
         <div className="group">
+          {desk && <button className={`ibtn${keysOpen ? ' on' : ''}`} onClick={() => { setSelected(null); setKeysOpen((v) => !v); }} aria-label="Keyboard shortcuts" title="Keyboard and mouse shortcuts (?)"><Icon name="keyboard" size={19} /></button>}
           {!mobile && view === 'doc' && <button className={`ibtn${findOpen ? ' on' : ''}`} onClick={() => { setPrivOpen(false); setFindOpen((v) => !v); }} aria-label="Find in document" title="Find (Ctrl+F)"><Icon name="magnifying-glass" size={19} /></button>}
           {!mobile && view === 'doc' && <button className={`ibtn${privOpen ? ' on' : ''}`} onClick={() => { setFindOpen(false); setPrivOpen((v) => !v); }} aria-label="Privacy check" title="Privacy check: find and black out personal data"><Icon name="shield-check" size={20} /></button>}
           <button className="ibtn" onClick={hist.undo} disabled={!hist.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)"><Icon name="undo" /></button>
@@ -1426,7 +1574,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           </nav>
         )}
         <div className="deskWrap">
-          <div className="canvasWrap" ref={wrapRef}>
+          <div className={`canvasWrap${panReady ? ' pan-ready' : ''}${panning ? ' panning' : ''}`} ref={wrapRef}>
             <div className="pages">
               {snap.pages.map((p, i) => (
                 <PageView key={p.src} src={p.src} index={i} rotation={p.rotation} info={infos[p.src]} zoom={zoom} pdf={pdf}
@@ -1445,6 +1593,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   onSelect={(id) => { setSelected(id); if (id === null) setSheetFor(null); }} onEditing={setEditing} onStopEditing={stopEditing}
                   hits={hitsByPage[p.src]}
                   onRunEdit={setRunEdit} onAdd={addObject} onChange={changeObject}
+                  onRemove={removeStroke} erasing={erasingOn(p.src)}
                   onPlace={() => false}
                   onDelete={removeObject} onDuplicate={duplicateObject}
                   onTextPlaced={() => setTool('edit')}
@@ -1665,32 +1814,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         <AddPagesSheet after={addAfter} total={snap.pages.length} mobile={mobile} onClose={() => setAddAfter(null)}
           onAdd={(w) => { const at = addAfter; setAddAfter(null); onAddPages(at, w).then((first) => { if (first !== null && view === 'doc') setTimeout(() => goToPage(first), 400); }); }} />
       )}
-      {removing !== null && infos[removing] && (
-        <PageRemove pdf={pdf} bytes={file.bytes} vm={infos[removing].vm} src={removing} rotation={snap.pages.find((p) => p.src === removing)?.rotation ?? 0} size={infos[removing]}
-          objects={snap.objects} onCancel={() => setRemoving(null)}
-          onApply={(patch, area) => {
-            const src = removing;
-            setRemoving(null);
-            // lines changed in the editor that lie under the paint: their new text goes too (the cut only
-            // reaches what is in the file)
-            const vm = infos[src].vm;
-            const gone = (pageData[src]?.runs ?? []).filter((r) => {
-              const e = snap.edits[r.key];
-              if (!e || !e.text || !area.length) return false;
-              const b = runBox(r, vm), c = Math.cos(b.angle), sn = Math.sin(b.angle), up = b.h * 0.3;
-              return [0.2, 0.5, 0.8].filter((t) => underStrokes(area, b.x + c * b.w * t + sn * up + (e.dx ?? 0), b.y + sn * b.w * t - c * up + (e.dy ?? 0))).length >= 2;
-            });
-            if (!patch && !gone.length) { toast({ msg: 'Nothing to remove there' }); return; }
-            const id = uid();
-            commit((s) => {
-              const edits = { ...s.edits };
-              for (const r of gone) edits[r.key] = { ...edits[r.key], text: '' };
-              return { ...s, edits, objects: patch ? [...s.objects, inPage({ id, page: src, type: 'image', ...patch } as EditorObject)] : s.objects };
-            });
-            if (patch) setSelected(id);
-            toast({ msg: patch ? 'Removed. Tap the patch and delete it to undo' : 'Removed', kind: 'ok' });
-          }} />
-      )}
+      {keysOpen && <ShortcutsSheet onClose={() => setKeysOpen(false)} />}
       {showSig && <SignatureModal sheet={mobile} onClose={() => setShowSig(null)} onPick={(s) => { const f = showSig.field; setShowSig(null); placeStamp(s, 'signature', f); }} />}
       {dragInfo && (() => {
         const obj = snap.objects.find((o) => o.id === dragInfo.id);

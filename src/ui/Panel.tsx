@@ -256,7 +256,7 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
 
 export const OBJ_TITLE: Record<EditorObject['type'], string> = {
   text: 'Text', image: 'Image', signature: 'Signature', rect: 'Box', ellipse: 'Circle',
-  whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark', link: 'Link',
+  whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark', link: 'Link', erase: 'Removed area',
 };
 /** the name of an object as shown (an underline is a "highlight" with a style) */
 export const objTitle = (o: EditorObject) => o.type === 'highlight' && o.style ? (o.style === 'underline' ? 'Underline' : 'Strike-through')
@@ -412,8 +412,9 @@ function LinkProps({ o, order, onChange }: { o: Extract<EditorObject, { type: 'l
   );
 }
 
-const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', arrow: 'Arrow', draw: 'Draw', highlight: 'Highlight', underline: 'Underline', strike: 'Strike-through', whiteout: 'Whiteout', redact: 'Redact', link: 'Link' };
+const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', arrow: 'Arrow', draw: 'Draw', highlight: 'Highlight', underline: 'Underline', strike: 'Strike-through', whiteout: 'Whiteout', redact: 'Redact', link: 'Link', remove: 'Remove' };
 const TOOL_HINTS: Partial<Record<Tool, string>> = {
+  remove: 'Paint over a logo, stamp, note or text: it is taken out of the page, the background stays.',
   text: 'Click anywhere on a page to start typing.', rect: 'Drag on the page to draw a box.', ellipse: 'Drag on the page to draw a circle.',
   line: 'Drag on the page to draw a line.', arrow: 'Drag from where the arrow starts to where it points.', draw: 'Draw freely with mouse, finger or pen.',
   highlight: 'Drag across the text to highlight it, or tap a word.', underline: 'Drag across the text to underline it, or tap a word.', strike: 'Drag across the text to strike it through, or tap a word.',
@@ -446,6 +447,10 @@ export function ToolProps({ tool, style, onChange, compact }: { tool: Tool; styl
           {(tool === 'rect' || tool === 'ellipse') && <div className="field"><div className="label">Fill</div><Swatches value={style.fill} allowNone onPick={(fill) => onChange({ fill })} /></div>}
           <div className="field"><div className="label">Width</div><Stepper value={style.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => onChange({ strokeWidth })} label="width" unit="pt" /></div>
         </>
+      )}
+      {tool === 'remove' && (
+        <div className="field"><div className="label">Brush</div>
+          <Seg value={String(style.removeSize)} onChange={(v) => onChange({ removeSize: +v })} options={[['4', 'Small'], ['9', 'Medium'], ['18', 'Large']]} /></div>
       )}
       {tool === 'highlight' && <div className="field"><div className="label">Colour</div><Swatches value={style.highlight} list={HIGHLIGHTS} custom={false} onPick={(highlight) => onChange({ highlight: highlight ?? HIGHLIGHTS[0] })} /></div>}
       {(tool === 'underline' || tool === 'strike') && <div className="field"><div className="label">Colour</div><Swatches value={style.ink} list={MARK_INKS} onPick={(ink) => onChange({ ink: ink ?? MARK_INKS[0] })} /></div>}

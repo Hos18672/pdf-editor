@@ -114,6 +114,11 @@ export type EditorObject =
   | (Base & { type: 'whiteout'; fill: string })
   /** black box: what is under it is removed from the file (text, picture pixels) */
   | (Base & { type: 'redact' })
+  /**
+   * Remove: letters, shapes and pictures wholly under these brush strokes (page view units) are taken out
+   * of the page's content; nothing is drawn (the box is where the strokes are)
+   */
+  | (Base & { type: 'erase'; strokes: import('./cut').CutStroke[] })
   /** a highlight, or (style) a line under / through the text */
   | (Base & { type: 'highlight'; fill: string; style?: 'underline' | 'strike' })
   | (Base & { type: 'line'; stroke: string; strokeWidth: number; x2: number; y2: number; arrow?: boolean })

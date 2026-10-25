@@ -27,6 +27,10 @@ export const markWidth = (h: number) => Math.max(0.6, Math.min(3, h * 0.075));
 
 
 interface Props {
+  /** Remove: a brush stroke painted on the page (page view units) */
+  onRemove?: (src: number, stroke: { r: number; pts: number[] }) => void;
+  /** Remove strokes not yet taken out of the page on screen (shown as paint meanwhile) */
+  erasing?: { r: number; pts: number[] }[];
   /** search / privacy-check matches on this page (viewport units) */
   hits?: { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[];
   src: number;
@@ -225,7 +229,7 @@ export function PageView(p: Props) {
     toLocal(e.clientX, e.clientY, pageRef.current!, info.w, info.h, zoom, rotation);
 
   // ---- creating shapes / placing things ----
-  const dragTools: Tool[] = ['whiteout', 'redact', 'highlight', 'underline', 'strike', 'rect', 'ellipse', 'line', 'arrow', 'draw', 'link'];
+  const dragTools: Tool[] = ['whiteout', 'redact', 'highlight', 'underline', 'strike', 'rect', 'ellipse', 'line', 'arrow', 'draw', 'link', 'remove'];
   const onLayerClick = (e: React.MouseEvent) => {
     if (gesture.multi) return;
     if (p.pasting && p.onPasteAt) { p.onPasteAt(p.src, local(e).x, local(e).y); return; }
@@ -316,7 +320,7 @@ export function PageView(p: Props) {
     if ((p.tool === 'sign' || p.tool === 'image') && p.onPlace(p.src, pt.x, pt.y)) return;
     if (dragTools.includes(p.tool)) {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-      setDraft({ x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y, pts: p.tool === 'draw' ? [pt.x, pt.y] : undefined });
+      setDraft({ x0: pt.x, y0: pt.y, x1: pt.x, y1: pt.y, pts: p.tool === 'draw' || p.tool === 'remove' ? [pt.x, pt.y] : undefined });
       e.preventDefault();
       return;
     }
@@ -341,6 +345,14 @@ export function PageView(p: Props) {
     let w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
     const id = uid();
     const st = p.style;
+    if (p.tool === 'remove') {
+      // the stroke as painted (a tap: a dot)
+      const pts = d.pts ?? [d.x0, d.y0];
+      const keep: number[] = [pts[0], pts[1]];
+      for (let i = 2; i + 1 < pts.length; i += 2) if (Math.hypot(pts[i] - keep[keep.length - 2], pts[i + 1] - keep[keep.length - 1]) * zoom >= 2) keep.push(pts[i], pts[i + 1]);
+      p.onRemove?.(p.src, { r: st.removeSize, pts: keep });
+      return;
+    }
     if (p.tool === 'draw') {
       const pts = d.pts ?? [];
       if (pts.length < 4) return;
@@ -491,7 +503,14 @@ export function PageView(p: Props) {
             <FormLayer fields={p.fields} values={p.forms} zoom={zoom} interactive={p.tool === 'fill'} active={p.activeField}
               onValue={p.onFieldValue} onFocus={p.onFieldFocus} onSign={p.onFieldSign} />
           )}
-          {p.objects.map((o) => (
+          {p.erasing && p.erasing.length > 0 && (
+            <svg className="draftline erasing" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+              {p.erasing.map((k, i) => k.pts.length === 2
+                ? <circle key={i} cx={k.pts[0] * zoom} cy={k.pts[1] * zoom} r={k.r * zoom} fill="rgba(255,92,120,.35)" />
+                : <polyline key={i} points={k.pts.map((v) => v * zoom).join(' ')} fill="none" stroke="rgba(255,92,120,.35)" strokeWidth={k.r * 2 * zoom} strokeLinecap="round" strokeLinejoin="round" />)}
+            </svg>
+          )}
+          {p.objects.filter((o) => o.type !== 'erase').map((o) => (
             <ObjectView key={o.id} o={o} zoom={zoom} selected={p.selected === o.id} editing={p.editing === o.id}
               pass={p.tool === 'text' ? o.type !== 'text' : dragTools.includes(p.tool) && p.selected !== o.id}
               local={local} rotation={rotation} onSelect={() => p.onSelect(o.id)} onEditing={(v) => (v ? p.onEditing(o.id) : p.onStopEditing(o.id))}
@@ -528,6 +547,15 @@ export function arrowHead(x0: number, y0: number, x1: number, y1: number, sw: nu
 }
 
 function Draft({ d, zoom, tool, style }: { d: { x0: number; y0: number; x1: number; y1: number; pts?: number[] }; zoom: number; tool: Tool; style: ToolStyle }) {
+  if (d.pts && tool === 'remove') {
+    return (
+      <svg className="draftline" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>
+        {d.pts.length <= 2
+          ? <circle cx={d.pts[0] * zoom} cy={d.pts[1] * zoom} r={style.removeSize * zoom} fill="rgba(255,92,120,.5)" />
+          : <polyline points={d.pts.map((v) => v * zoom).join(' ')} fill="none" stroke="rgba(255,92,120,.5)" strokeWidth={style.removeSize * 2 * zoom} strokeLinecap="round" strokeLinejoin="round" />}
+      </svg>
+    );
+  }
   if (d.pts) {
     return (
       <svg className="draftline" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', pointerEvents: 'none', overflow: 'visible' }}>

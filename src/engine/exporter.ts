@@ -4,7 +4,7 @@ import {
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
-import { cutPlan } from './cut';
+import { cutPlan, erasePictures } from './cut';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
 import { addTextLayer } from './textLayer';
@@ -300,11 +300,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     }
     // Remove: letters, shapes and pictures wholly under the painted strokes are taken out
     let cutBlank: Map<number, string> | null = null;
-    const cutStrokes = vm ? input.objects.flatMap((o) => (o.page === pi && o.type === 'image' && o.cut?.length ? o.cut : [])) : [];
+    const cutStrokes = vm ? input.objects.flatMap((o) => (o.page !== pi ? [] : o.type === 'erase' ? o.strokes : o.type === 'image' && o.cut?.length ? o.cut : [])) : [];
     if (cutStrokes.length) {
       const plan = cutPlan(ops, { glyphs, draws, paths }, cutStrokes, vm);
       plan.glyphs.forEach((g) => remove.add(g));
       cutBlank = plan.blank;
+      await erasePictures(doc, resources, plan.pictures, cutStrokes, vm).catch((err) => console.warn('remove in pictures', err));
     }
     // invisible lines read again from the picture: their new text is written with the layer below
     for (const region of input.dropText?.[pi] ?? []) {
@@ -337,7 +338,9 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       // see are part of an image, so cover them with the paper colour and draw the new text visibly.
       const hidden = !!e.ocr || (hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length);
       if (!e.text.trim()) {
-        if (!hits.length || hidden) add += await cover(e, hidden);
+        // (letters already taken out by Remove need no cover)
+        const cutAway = !hits.length && !e.ocr && glyphsInRegion(glyphs, e).some((g) => remove.has(g));
+        if ((!hits.length && !cutAway) || hidden) add += await cover(e, hidden);
         continue;
       }
       const lines = e.text.split('\n');
@@ -488,7 +491,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
 
     // Objects drawn in viewport space
     // (a Remove done in the page's content is not drawn again as a picture)
-    const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link' && !(o.type === 'image' && o.vector));
+    const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link' && o.type !== 'erase' && !(o.type === 'image' && o.vector));
     if (objs.length) {
       add += 'q ' + invert(vm).map(f).join(' ') + ' cm\n';
       for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe, { docSources, matchPdf, arabicPdf });
