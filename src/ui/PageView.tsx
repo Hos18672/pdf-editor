@@ -229,7 +229,9 @@ export function PageView(p: Props) {
   const onLayerClick = (e: React.MouseEvent) => {
     if (gesture.multi) return;
     if (p.pasting && p.onPasteAt) { p.onPasteAt(p.src, local(e).x, local(e).y); return; }
-    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
+    const onObj = !!(e.target as HTMLElement).closest('.obj');
+    if (onObj && !(p.tool === 'text' && downObj.current)) return;
+    if ((e.target as HTMLElement).closest('.run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
     const id = uid();
     if (p.tool === 'fill' && p.fillMark) {
@@ -298,13 +300,17 @@ export function PageView(p: Props) {
     };
   };
   const hadSelection = useRef(false);
+  const downObj = useRef<string | null>(null);
   const downAt = useRef<{ x: number; y: number } | null>(null);
   const onLayerDown = (e: React.PointerEvent) => {
     hadSelection.current = p.selected !== null || p.editing !== null;
+    // started on an object the tool works through
+    const through = (e.nativeEvent as any).peObj as string | undefined;
+    downObj.current = through ?? null;
     if (e.button !== 0 || gesture.multi) return;
     // a second finger (pinch starting): drop the stroke the first one began
     if (e.pointerType === 'touch' && !e.isPrimary) { setDraft(null); return; }
-    if ((e.target as HTMLElement).closest('.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
+    if ((e.target as HTMLElement).closest(through ? '.run, textarea, .objbar, .ff, .ffbox, .ffsig' : '.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
     if (p.tool === 'text' || (p.tool === 'fill' && p.fillMark)) return;
     if ((p.tool === 'sign' || p.tool === 'image') && p.onPlace(p.src, pt.x, pt.y)) return;
@@ -328,7 +334,8 @@ export function PageView(p: Props) {
     const d = draft;
     setDraft(null);
     if (gesture.multi) return;
-    // a tap (no drag) while something is selected only lets go of it; it adds nothing
+    // a tap (no drag) on an object selects it; while something is selected, a tap only lets go of it
+    if (downObj.current && Math.hypot(d.x1 - d.x0, d.y1 - d.y0) * zoom < 8) { p.onSelect(downObj.current); return; }
     if (hadSelection.current && Math.hypot(d.x1 - d.x0, d.y1 - d.y0) * zoom < 8) { p.onSelect(null); return; }
     const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
     let w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
@@ -486,6 +493,7 @@ export function PageView(p: Props) {
           )}
           {p.objects.map((o) => (
             <ObjectView key={o.id} o={o} zoom={zoom} selected={p.selected === o.id} editing={p.editing === o.id}
+              pass={p.tool === 'text' ? o.type !== 'text' : dragTools.includes(p.tool) && p.selected !== o.id}
               local={local} rotation={rotation} onSelect={() => p.onSelect(o.id)} onEditing={(v) => (v ? p.onEditing(o.id) : p.onStopEditing(o.id))}
               onChange={(patch, merge) => p.onChange(o.id, patch, merge)}
               onDelete={() => p.onDelete(o.id)} onDuplicate={() => p.onDuplicate(o.id)}
@@ -1001,7 +1009,9 @@ function StyledText({ text, scales, looks, base, mode }: { text: string; scales?
 
 type Snap = { xs: number[]; cx: number; cy: number };
 
-function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag, snap, page, onGuides, mobile, onMore, sheetOpen }: {
+function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onEditing, onChange, onDelete, onDuplicate, onDrag, snap, page, onGuides, mobile, onMore, sheetOpen, pass }: {
+  /** the tool in hand works through this object (a text box tapped on a whiteout, a box drawn over a shape) */
+  pass?: boolean;
   o: EditorObject; zoom: number; selected: boolean; editing: boolean; rotation: number;
   local: (e: { clientX: number; clientY: number }) => { x: number; y: number };
   onSelect: () => void; onEditing: (v: boolean) => void; onChange: (patch: Partial<EditorObject>, merge: boolean) => void;
@@ -1026,6 +1036,8 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
 
   const start = (mode: 'move' | 'grip' | 'resize' | 'end' | 'start' | 'rotate') => (e: React.PointerEvent) => {
     if (e.button !== 0 || gesture.multi) return;
+    // the page's tool takes it (marked so the page knows which object it started on)
+    if (pass && mode === 'move' && !editing) { (e.nativeEvent as any).peObj = o.id; return; }
     e.stopPropagation();
     const pt = local(e);
     // while typing, a tap places the caret; dragging (> 10px) moves the box
