@@ -165,12 +165,13 @@ export function detectKernels(): Detector {
 
   interface EdgeMap { w: number; h: number; on: Uint8Array; ang: Float32Array; mag: Float32Array; L: Float32Array; S: Float32Array; list: Int32Array }
 
-  function edgeMap(img: Rgba): EdgeMap {
+  function edgeMap(img: Rgba, fine = false): EdgeMap {
     const { w, h } = img, n = w * h;
     const r = Math.max(1, Math.round(Math.min(w, h) / 170));
     // closing removes dark text and thin lines on the sheet, keeps its outline in place
-    let L = morph(morph(luminance(img), w, h, r, true), w, h, r, false);
-    L = blur(L, w, h, 1.1);
+    // (fine: kept, for things outlined only by a thin dark line, like a white frame on a pale wall)
+    let L = fine ? luminance(img) : morph(morph(luminance(img), w, h, r, true), w, h, r, false);
+    L = blur(L, w, h, fine ? 0.8 : 1.1);
     const S = blur(chroma(img), w, h, 1.4);
     const mag = new Float32Array(n), ang = new Float32Array(n), gx = new Float32Array(n), gy = new Float32Array(n);
     const bins = new Uint32Array(256);
@@ -189,7 +190,8 @@ export function detectKernels(): Detector {
     bins[0] += 2 * w + 2 * (h - 2); // the border pixels (0)
     // thresholds from the gradient distribution
     const pct = (q: number) => { let c = 0; for (let b = 0; b < 256; b++) { c += bins[b]; if (c >= q * n) return b / 4; } return 64; };
-    const high = Math.max(2.5, Math.min(16, pct(0.9))), low = high * 0.45;
+    // (fine: faint long lines count too: hysteresis keeps them only where they join a stronger stretch)
+    const high = fine ? Math.max(2.2, Math.min(10, pct(0.8))) : Math.max(2.5, Math.min(16, pct(0.9))), low = high * 0.45;
     // directions only where an edge can be
     for (let i = 0; i < n; i++) if (mag[i] >= low) ang[i] = Math.atan2(gy[i], gx[i]);
     // non-maximum suppression
@@ -751,10 +753,21 @@ export function detectKernels(): Detector {
    * Returns null when nothing plausible is there.
    */
   function detectQuad(img: Rgba, opts: { maxLines?: number; live?: boolean; ratios?: number[] } = {}): Detection | null {
-    const E = edgeMap(img);
+    const first = detectWith(img, opts, false);
+    if (first && (first.score > 0.62 || (first.agree ?? 0) > 0.5)) return first;
+    // nothing clear: look again with thin lines kept (a picture frame, a sign or a screen on a wall,
+    // outlined only by a fine dark edge or its shadow, which the first look smooths away with the print)
+    const fine = detectWith(img, opts, true);
+    if (fine && fine.score > Math.max(0.55, (first?.score ?? 0) + 0.03)) return fine;
+    return first;
+  }
+
+  function detectWith(img: Rgba, opts: { maxLines?: number; live?: boolean; ratios?: number[] }, fineEdges: boolean): Detection | null {
+    const E = edgeMap(img, fineEdges);
     const { w, h } = E;
     const minDim = Math.min(w, h);
-    const lines = houghLines(E, opts.maxLines ?? (opts.live ? 18 : 22));
+    const lines = houghLines(E, (opts.maxLines ?? (opts.live ? 18 : 22)) + (fineEdges ? 8 : 0));
+    if ((globalThis as any).__detDebug) { (globalThis as any).__detLines = lines; (globalThis as any).__detE = E; }
     // the image border can stand in for a side that runs out of the picture
     const borders: Line[] = [
       { a: 1, b: 0, c: 0.5, border: true, votes: 0 }, { a: 1, b: 0, c: w - 1.5, border: true, votes: 0 },
