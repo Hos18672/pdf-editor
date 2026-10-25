@@ -183,7 +183,7 @@ button { cursor: pointer; }
 .start { position: relative; height: 100%; overflow-x: hidden; overflow-y: auto; background: var(--desk-dots), var(--desk); color: var(--text); display: flex; flex-direction: column; container-type: inline-size; isolation: isolate; }
 .s2-glow { position: absolute; width: 720px; height: 720px; right: -12%; top: -18%; border-radius: 50%; background: #FFE14D; opacity: .35; filter: blur(90px); pointer-events: none; z-index: -1; }
 :root[data-theme="dark"] .s2-glow { opacity: .10; }
-.s2-nav { position: relative; flex: none; display: flex; align-items: center; gap: 12px; padding: calc(24px + var(--safe-t)) calc(40px + var(--safe-r)) 24px calc(40px + var(--safe-l)); }
+.s2-nav { position: relative; z-index: 5; flex: none; display: flex; align-items: center; gap: 12px; padding: calc(24px + var(--safe-t)) calc(40px + var(--safe-r)) 24px calc(40px + var(--safe-l)); }
 .s2-nav .sp { flex: 1; }
 .s2-brand { font-weight: 800; font-size: 18px; letter-spacing: -.02em; white-space: nowrap; }
 .logo3 { flex: none; display: grid; place-items: center; }
@@ -191,8 +191,8 @@ button { cursor: pointer; }
 .logo2 { position: relative; flex: none; border-radius: 12px; background: #1E2559; display: grid; place-items: center; box-shadow: 0 6px 16px rgba(30,37,89,.3); }
 .logo2 i { width: 40%; height: 50%; background: #fff; border-radius: 2px 6px 2px 2px; }
 .logo2 b { position: absolute; right: 17.5%; bottom: 17.5%; width: 25%; height: 25%; border-radius: 50%; background: #FFE14D; border: 2px solid #1E2559; }
-.s2-navbtn { height: 40px; padding: 0 14px; border-radius: 999px; border: 0; background: transparent; display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: var(--text); text-decoration: none; white-space: nowrap; transition: background .18s; }
-.s2-navbtn:hover { background: color-mix(in srgb, var(--surface) 70%, transparent); }
+.s2-navbtn { height: 40px; padding: 0 16px; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--surface) 72%, transparent); box-shadow: inset 0 0 0 1px var(--line-2, rgba(20,23,46,.08)); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); display: inline-flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; color: var(--text); text-decoration: none; white-space: nowrap; transition: background .18s; }
+.s2-navbtn:hover { background: var(--surface); }
 .s2-round { width: 44px; height: 44px; flex: none; border-radius: 999px; border: 0; background: color-mix(in srgb, var(--surface) 80%, transparent); box-shadow: 0 1px 2px rgba(20,23,46,.08); display: grid; place-items: center; color: var(--text); padding: 0; transition: background .18s; }
 .s2-round:hover { background: var(--surface); }
 .s2-hero { position: relative; flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 64px; align-items: center; align-content: center; padding: 0 72px 40px; max-width: 1560px; width: 100%; margin: 0 auto; }

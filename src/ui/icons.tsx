@@ -11,7 +11,7 @@ const ALIAS: Record<string, string> = {
   rotate: 'arrow-clockwise', restore: 'arrow-counter-clockwise', up: 'caret-up', down: 'caret-down', left: 'caret-left',
   right: 'caret-right', check: 'check:bold', upload: 'upload-simple', open: 'folder-open:bold', move: 'arrows-out-cardinal',
   lock: 'lock-simple:fill', grip: 'dots-six-vertical', more: 'sliders-horizontal', fit: 'arrows-horizontal',
-  resize: 'arrows-out-simple:bold', pencil: 'pencil-simple', offline: 'wifi-slash:fill', tools: 'squares-four',
+  resize: 'arrows-out-simple:bold', pencil: 'pencil-simple', offline: 'wifi-slash:fill', tools: 'toolbox',
 };
 
 /** Phosphor icon (MIT). `name` is an app alias or a Phosphor name, optionally with `:weight`. */
