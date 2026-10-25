@@ -1916,7 +1916,23 @@ export function scanKernels(): Kernels {
 
   function erase(img: PixelImage, strokes: Stroke[], texture = false): Float32Array | null {
     const M = strokeMask(img.w, img.h, strokes);
-    if (M && !(texture && cloneFill(img, M))) inpaint(img, M, brightness(img));
+    if (!M) return M;
+    const w = img.w, h = img.h, L = Math.max(w, h);
+    let bx0 = w, by0 = h, bx1 = -1, by1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0, p = y * w; x < w; x++, p++) if (M[p] > 0.02) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+    if (bx1 < 0) return M;
+    // only the area round the paint is worked on (a whole page at full size took too much memory on phones)
+    const T = Math.max(24, Math.min(64, Math.round(L / 45)));
+    const pad = Math.max(Math.max(T * 4, 140) + T * 2, Math.round(Math.max(bx1 - bx0, by1 - by0) * 0.6) + 24);
+    const x0 = Math.max(0, bx0 - pad), y0 = Math.max(0, by0 - pad), x1 = Math.min(w - 1, bx1 + pad), y1 = Math.min(h - 1, by1 + pad);
+    const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
+    const sub: PixelImage = { w: cw, h: ch, data: new Uint8ClampedArray(cw * ch * 4) }, SM = new Float32Array(cw * ch);
+    for (let y = 0; y < ch; y++) {
+      sub.data.set(img.data.subarray(((y + y0) * w + x0) * 4, ((y + y0) * w + x1 + 1) * 4), y * cw * 4);
+      SM.set(M.subarray((y + y0) * w + x0, (y + y0) * w + x1 + 1), y * cw);
+    }
+    if (!(texture && cloneFill(sub, SM, T))) inpaint(sub, SM, brightness(sub));
+    for (let y = 0; y < ch; y++) img.data.set(sub.data.subarray(y * cw * 4, (y + 1) * cw * 4), ((y + y0) * w + x0) * 4);
     return M;
   }
 
@@ -1926,7 +1942,7 @@ export function scanKernels(): Kernels {
    * surroundings look most like its own, then a smooth correction (from the differences along the
    * edge) blends shading and colour in. False when nothing to copy from was found.
    */
-  function cloneFill(img: PixelImage, M: Float32Array): boolean {
+  function cloneFill(img: PixelImage, M: Float32Array, tile?: number): boolean {
     const w = img.w, h = img.h, d = img.data, n = w * h;
     const hole = new Uint8Array(n);
     let bx0 = w, by0 = h, bx1 = -1, by1 = -1;
@@ -1934,7 +1950,7 @@ export function scanKernels(): Kernels {
       hole[p] = 1; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
     }
     if (bx1 < 0) return true;
-    const T = Math.max(24, Math.min(64, Math.round(Math.max(w, h) / 45))), r = Math.max(6, Math.round(T / 3));
+    const T = tile ?? Math.max(24, Math.min(64, Math.round(Math.max(w, h) / 45))), r = Math.max(6, Math.round(T / 3));
     const R = Math.max(T * 4, 140);
     // summed hole counts: a source window must lie wholly outside the hole
     const S = new Int32Array((w + 1) * (h + 1));

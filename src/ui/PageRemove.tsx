@@ -97,6 +97,9 @@ function spread(D: Float32Array, w: number, h: number, r: number): Float32Array 
   return o;
 }
 
+/** a promise that gives up after ms (a phone's worker or renderer can stall) */
+const within = <T,>(p: Promise<T>, ms: number) => Promise.race([p, new Promise<never>((_, no) => setTimeout(() => no(new Error('timeout')), ms))]);
+
 const loadImg = (src: string) => new Promise<HTMLImageElement>((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = src; });
 
 /**
@@ -106,7 +109,8 @@ const loadImg = (src: string) => new Promise<HTMLImageElement>((ok, no) => { con
  */
 export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApply, onCancel }: {
   pdf: any; bytes: Uint8Array; vm: M; src: number; rotation: number; size: { w: number; h: number }; objects: EditorObject[];
-  onApply: (patch: Patch | null) => void; onCancel: () => void;
+  /** the change, and the painted strokes (page view units) */
+  onApply: (patch: Patch | null, area: CutStroke[]) => void; onCancel: () => void;
 }) {
   const rot = (((rotation / 90) % 4) + 4) % 4;
   const base = useRef<{ img: PixelImage; s: number } | null>(null);
@@ -168,7 +172,7 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
     const b = base.current!, un = unturn(st), L = Math.max(size.w, size.h);
     const strokes: CutStroke[] = un.map((k) => ({ r: k.r * L, pts: k.pts.map((v, i) => v * (i % 2 ? size.h : size.w)) }));
     const fn = await cut.current;
-    const doc = fn ? await fn([...prevCuts, ...strokes], vm).catch(() => null) : null;
+    const doc = fn ? await within(fn([...prevCuts, ...strokes], vm), 30000).catch(() => null) : null;
     if (doc) {
       try {
         // the area round the strokes (what is taken out lies wholly under them), drawn again
@@ -180,7 +184,7 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
         const ax = Math.max(0, Math.floor(X0 * b.s) - pad), ay = Math.max(0, Math.floor(Y0 * b.s) - pad);
         const aw = Math.min(W, Math.ceil(X1 * b.s) + pad) - ax, ah = Math.min(H, Math.ceil(Y1 * b.s) + pad) - ay;
         if (aw <= 0 || ah <= 0) throw new Error('outside');
-        const part = await drawPage(await doc.getPage(1), b.s, others, src, { x: ax, y: ay, w: aw, h: ah });
+        const part = await within(drawPage(await doc.getPage(1), b.s, others, src, { x: ax, y: ay, w: aw, h: ah }), 30000);
         // changes only count near the new strokes (and take the soft edges of the letters along)
         const near = (px: number, py: number) => underStrokes(strokes, px / b.s, py / b.s, 14 / b.s + 4);
         // the whole page with that area put in, and what changed there: the taken-out things
@@ -199,22 +203,31 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
         }
       } catch { /* drawn below as before */ } finally { doc.destroy?.(); }
     }
-    const r = await eraseImage(b.img, un, true);
-    last.current = { key, img: r.img, M: r.mask };
+    try {
+      const r = await within(eraseImage(b.img, un, true), 30000);
+      last.current = { key, img: r.img, M: r.mask };
+    } catch {
+      // nothing could be done: the page as it was (Done adds nothing)
+      last.current = { key, img: b.img, M: null };
+    }
     return last.current;
   };
   const [saving, setSaving] = useState(false);
 
   const apply = async (st: Stroke[]) => {
     const b = base.current;
-    if (!b || !st.length) { onApply(null); return; }
+    const L = Math.max(size.w, size.h);
+    const area: CutStroke[] = unturn(st).map((k) => ({ r: k.r * L, pts: k.pts.map((v, i) => v * (i % 2 ? size.h : size.w)) }));
+    const onApply0 = onApply;
+    const onApply1 = (p: Patch | null) => onApply0(p, area);
+    if (!b || !st.length) { onApply1(null); return; }
     setSaving(true);
     const { img, M, cut: cutStrokes } = await filled(st, true);
-    if (!M) { onApply(null); return; }
+    if (!M) { onApply1(null); return; }
     const w = img.w, h = img.h;
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
     for (let y = 0; y < h; y++) for (let x = 0, p = y * w; x < w; x++, p++) if (M[p] > 0.02) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
-    if (x1 < 0) { onApply(null); return; }
+    if (x1 < 0) { onApply1(null); return; }
     x0 = Math.max(0, x0 - 1); y0 = Math.max(0, y0 - 1); x1 = Math.min(w - 1, x1 + 1); y1 = Math.min(h - 1, y1 + 1);
     const cw = x1 - x0 + 1, ch = y1 - y0 + 1;
     const out = new ImageData(cw, ch);
@@ -226,13 +239,13 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
     const c = document.createElement('canvas');
     c.width = cw; c.height = ch;
     c.getContext('2d')!.putImageData(out, 0, 0);
-    onApply({ src: c.toDataURL('image/png'), x: x0 / b.s, y: y0 / b.s, w: cw / b.s, h: ch / b.s, ...(cutStrokes ? { cut: cutStrokes, vector: true } : {}) });
+    onApply1({ src: c.toDataURL('image/png'), x: x0 / b.s, y: y0 / b.s, w: cw / b.s, h: ch / b.s, ...(cutStrokes ? { cut: cutStrokes, vector: true } : {}) });
   };
 
   return (
     <RemovePainter plain={plain} aspect={rot % 2 ? size.h / size.w : size.w / size.h} initial={[]}
       hint="Paint over what should go: a stamp, a stain, a note, a logo"
       render={async (st) => { if (!base.current) throw new Error('not ready'); return toUrl((await filled(st)).img, rot); }}
-      onApply={(st) => { if (!saving) apply(st).catch(() => onApply(null)); }} onCancel={onCancel} />
+      onApply={(st) => { if (!saving) apply(st).catch(() => onApply(null, [])); }} onCancel={onCancel} />
   );
 }

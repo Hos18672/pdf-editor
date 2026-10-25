@@ -14,6 +14,7 @@ import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
 import { PageRemove } from './PageRemove';
+import { underStrokes } from '../engine/cut';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, objTitle, Stepper, toolHasProps, fontLabel, Toggle, RunTextTools, ObjTextTools } from './Panel';
 import { readFields, FormField, isFilled } from './Fields';
 import { exportPdf } from '../engine/exporter';
@@ -1631,14 +1632,27 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       {removing !== null && infos[removing] && (
         <PageRemove pdf={pdf} bytes={file.bytes} vm={infos[removing].vm} src={removing} rotation={snap.pages.find((p) => p.src === removing)?.rotation ?? 0} size={infos[removing]}
           objects={snap.objects} onCancel={() => setRemoving(null)}
-          onApply={(patch) => {
+          onApply={(patch, area) => {
             const src = removing;
             setRemoving(null);
-            if (!patch) return;
+            // lines changed in the editor that lie under the paint: their new text goes too (the cut only
+            // reaches what is in the file)
+            const vm = infos[src].vm;
+            const gone = (pageData[src]?.runs ?? []).filter((r) => {
+              const e = snap.edits[r.key];
+              if (!e || !e.text || !area.length) return false;
+              const b = runBox(r, vm), c = Math.cos(b.angle), sn = Math.sin(b.angle), up = b.h * 0.3;
+              return [0.2, 0.5, 0.8].filter((t) => underStrokes(area, b.x + c * b.w * t + sn * up + (e.dx ?? 0), b.y + sn * b.w * t - c * up + (e.dy ?? 0))).length >= 2;
+            });
+            if (!patch && !gone.length) { toast({ msg: 'Nothing to remove there' }); return; }
             const id = uid();
-            addObject({ id, page: src, type: 'image', ...patch });
-            setSelected(id);
-            toast({ msg: 'Removed. Drag the patch to adjust it, or delete it to undo', kind: 'ok' });
+            commit((s) => {
+              const edits = { ...s.edits };
+              for (const r of gone) edits[r.key] = { ...edits[r.key], text: '' };
+              return { ...s, edits, objects: patch ? [...s.objects, inPage({ id, page: src, type: 'image', ...patch } as EditorObject)] : s.objects };
+            });
+            if (patch) setSelected(id);
+            toast({ msg: patch ? 'Removed. Tap the patch and delete it to undo' : 'Removed', kind: 'ok' });
           }} />
       )}
       {showSig && <SignatureModal sheet={mobile} onClose={() => setShowSig(null)} onPick={(s) => { const f = showSig.field; setShowSig(null); placeStamp(s, 'signature', f); }} />}

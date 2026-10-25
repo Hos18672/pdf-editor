@@ -48,6 +48,8 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
   const [strokes, setStrokes] = useState<Stroke[]>(initial);
   const [brush, setBrush] = useState<(typeof SIZES)[number]['id']>('m');
   const [preview, setPreview] = useState<{ url: string; n: number; key: string } | null>(null);
+  // strokes whose preview couldn't be made (not shown as working forever)
+  const [failed, setFailed] = useState('');
   const [z, setZ] = useState<Z>(NOZ);
   const zRef = useRef(z); zRef.current = z;
   const live = useRef<Stroke | null>(null);
@@ -71,7 +73,7 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
       render(strokes).then((url) => {
         if (gone) URL.revokeObjectURL(url);
         else showPreview({ url, n: strokes.length, key: strokesKey });
-      }).catch(() => null);
+      }).catch((e) => { if (!gone && String(e?.message ?? e) !== 'outdated') setFailed(strokesKey); });
     }, 120);
     return () => { gone = true; clearTimeout(t); };
   }, [strokesKey, !!plain]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -184,7 +186,7 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
   };
 
   const brushPx = R * L;
-  const busy = !!strokes.length && (!preview || preview.key !== strokesKey);
+  const busy = !!strokes.length && (!preview || preview.key !== strokesKey) && failed !== strokesKey;
   const img = fits ? preview!.url : plain?.url;
 
   return createPortal(
