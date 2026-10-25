@@ -24,13 +24,16 @@ const saveAuto = (v: boolean) => { try { localStorage.setItem('pe.scan.auto', v 
 /** what to point the camera at, by mode */
 const lookFor = (mode: ScanMode) => mode === 'id' ? 'Place the card inside the frame' : mode === 'passport' ? 'Fit the photo page inside the frame' : 'Point the camera at a document';
 
+/** the outline seen in the preview when a photo was taken (fractions of the frame, and its width / height) */
+export type ShotHint = { quad: Pt[]; aspect: number };
+
 export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, onImport, onDone, onClose }: {
   mode: ScanMode; onMode: (m: ScanMode) => void; count: number; lastThumb: string | null;
   /** Done was tapped while the last page is still being read */
   waiting?: boolean;
   /** extra line under the hint, e.g. "Front side" */
   step: string | null;
-  onShot: (blob: Blob) => void; onImport: (files: File[]) => void; onDone: () => void; onClose: () => void;
+  onShot: (blob: Blob, hint?: ShotHint) => void; onImport: (files: File[]) => void; onDone: () => void; onClose: () => void;
 }) {
   const video = useRef<HTMLVideoElement>(null);
   const view = useRef<HTMLDivElement>(null);
@@ -53,6 +56,8 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
   const autoRef = useRef(auto); autoRef.current = auto;
   const busyRef = useRef(false);
   const shotRef = useRef<() => void>(() => {});
+  /** the outline last seen live (fractions of the camera frame): the photo's crop when it is taken */
+  const liveQuad = useRef<{ quad: Pt[]; aspect: number; at: number } | null>(null);
   // Done tapped during a shot: carried out when the photo is in
   const doneAfter = useRef(false);
   const [doneWait, setDoneWait] = useState(false);
@@ -193,14 +198,18 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       const v = video.current, b = box.current;
       if (!v || !b || !v.videoWidth || busyRef.current) { timer = window.setTimeout(tick, 120); return; }
       const vw = v.videoWidth, vh = v.videoHeight;
-      const k0 = Math.min(1, 360 / Math.max(vw, vh));
-      const fw = Math.round(vw * k0), fh = Math.round(vh * k0);
+      // only the part of the camera frame seen on screen (the preview fills the screen and crops the
+      // rest): what is found must be what you see, and the visible part gets all the pixels
+      const cw0 = b.clientWidth || vw, ch0 = b.clientHeight || vh, sc0 = Math.max(cw0 / vw, ch0 / vh);
+      const visW = Math.min(vw, cw0 / sc0), visH = Math.min(vh, ch0 / sc0), sx = (vw - visW) / 2, sy = (vh - visH) / 2;
+      const k0 = Math.min(1, 360 / Math.max(visW, visH));
+      const fw = Math.max(1, Math.round(visW * k0)), fh = Math.max(1, Math.round(visH * k0));
       if (frame.width !== fw || frame.height !== fh) { frame.width = fw; frame.height = fh; }
-      fctx.drawImage(v, 0, 0, fw, fh);
+      fctx.drawImage(v, sx, sy, visW, visH, 0, 0, fw, fh);
       const img = { w: fw, h: fh, data: fctx.getImageData(0, 0, fw, fh).data };
       const { det, mean } = await liveDetect(img, { ratios: MODE_RATIOS[modeRef.current] });
       if (stop) return;
-      const k = vw / fw;
+      const k = visW / fw;
       const now = performance.now();
       // where the video is drawn (object-fit: cover: the whole screen)
       const cw = b.clientWidth, ch = b.clientHeight, sc = Math.max(cw / vw, ch / vh);
@@ -208,7 +217,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       // a clear outline, or an outline that matches the sheet as a whole (a receipt on a white desk)
       const diag = Math.hypot(vw, vh);
       const strong = !!det && (det.score > 0.62 || (det.agree ?? 0) > 0.5);
-      const raw = det ? (det.quad.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad) : null;
+      const raw = det ? (det.quad.map((p) => ({ x: sx + p.x * k, y: sy + p.y * k })) as Quad) : null;
       const near = (a: Quad, b: Quad, f: number) => Math.max(...a.map((p, i) => Math.hypot(p.x - b[i].x, p.y - b[i].y))) / diag < f;
       const recent = !!kept && now - keptAt < 900;
       const ok = strong || (!!det && recent && det.score > 0.4 && near(raw!, kept!, 0.05));
@@ -224,8 +233,9 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
         if (!armed && shotQuad && Math.max(...q.map((p, i) => Math.hypot(p.x - shotQuad![i].x, p.y - shotQuad![i].y))) / diag > 0.12) armed = true;
         target = q.map((p) => ({ x: ox + p.x * sc, y: oy + p.y * sc }));
         // big enough: by area, or by length (a long receipt that fills the frame's height)
-        const area = quadArea(q) / (vw * vh);
-        const span = Math.max(...q.map((p, i) => Math.hypot(q[(i + 1) % 4].x - p.x, q[(i + 1) % 4].y - p.y))) / Math.max(vw, vh);
+        const area = quadArea(q) / (visW * visH);
+        const span = Math.max(...q.map((p, i) => Math.hypot(q[(i + 1) % 4].x - p.x, q[(i + 1) % 4].y - p.y))) / Math.max(visW, visH);
+        liveQuad.current = { quad: q.map((p) => ({ x: p.x / vw, y: p.y / vh })), aspect: vw / vh, at: now };
         const close = area >= 0.12 || span >= 0.6;
         const held = Math.min(1, (now - stableSince) / 900);
         if (mean < 45) say('Too dark: add light or turn on the torch');
@@ -314,7 +324,8 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
         }
       }
       if (v.paused) v.play().catch(() => null);
-      onShot(blob);
+      const lq = liveQuad.current;
+      onShot(blob, lq && performance.now() - lq.at < 1200 ? { quad: lq.quad, aspect: lq.aspect } : undefined);
     } catch (e) {
       console.warn('capture failed', e);
     } finally {

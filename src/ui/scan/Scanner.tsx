@@ -10,7 +10,7 @@ import { SortableArea, useSortableItem } from '../sortable';
 import type { Bp } from '../hooks';
 import type { Quad } from './geom';
 import type { Filter } from './kernels';
-import { Camera, MODES } from './Camera';
+import { Camera, MODES, type ShotHint } from './Camera';
 import { CropEditor } from './CropEditor';
 import { EraseEditor } from './EraseEditor';
 import { Pager } from './Pager';
@@ -80,14 +80,14 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   }, []);
 
   // ---- adding photos
-  const add = useCallback(async (blob: Blob, kind: ScanMode, side?: 'front' | 'back') => {
+  const add = useCallback(async (blob: Blob, kind: ScanMode, side?: 'front' | 'back', hint?: ShotHint) => {
     const id = newId();
     findingRef.current++;
     setFinding((n) => n + 1);
     try {
       const bmp = await decode(blob);
       const w = bmp.width, h = bmp.height;
-      let found = await findDocument(bmp, kind);
+      let found = await findDocument(bmp, kind, hint);
       if (kind === 'book') {
         // an open book: the two pages of the spread, cut at the gutter
         const px = pixelsOf(bmp, 700);
@@ -138,15 +138,15 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   }, [toReview, finding]);
 
   const idCount = pages.filter((p) => p.kind === 'id').length;
-  const onShot = useCallback((blob: Blob) => {
+  const onShot = useCallback((blob: Blob, hint?: ShotHint) => {
     const m = mode;
     if (m === 'id') {
       const n = pagesRef.current.filter((p) => p.kind === 'id').length + 0;
       const side = n % 2 === 0 ? 'front' : 'back';
-      add(blob, 'id', side).then(() => { if (side === 'back') { setView('review'); setCur(pagesRef.current.length - 1); } });
+      add(blob, 'id', side, hint).then(() => { if (side === 'back') { setView('review'); setCur(pagesRef.current.length - 1); } });
       return;
     }
-    add(blob, m).then(() => { if (m === 'passport') { setView('review'); setCur(pagesRef.current.length - 1); } });
+    add(blob, m, undefined, hint).then(() => { if (m === 'passport') { setView('review'); setCur(pagesRef.current.length - 1); } });
   }, [add, mode]);
 
   const onImport = useCallback(async (files: File[]) => {

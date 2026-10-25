@@ -328,6 +328,8 @@ export function PageView(p: Props) {
     const d = draft;
     setDraft(null);
     if (gesture.multi) return;
+    // a tap (no drag) while something is selected only lets go of it; it adds nothing
+    if (hadSelection.current && Math.hypot(d.x1 - d.x0, d.y1 - d.y0) * zoom < 8) { p.onSelect(null); return; }
     const x = Math.min(d.x0, d.x1), y = Math.min(d.y0, d.y1);
     let w = Math.abs(d.x1 - d.x0), h = Math.abs(d.y1 - d.y0);
     const id = uid();
@@ -1418,8 +1420,10 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
         <><span className="sep" /><button type="button" aria-label="More options" title="More options" onClick={onMore}><Icon name="more" size={18} /></button></>
       )}
     </div>, document.body) : null;
+  // thin or small things (a line, an underline, a dot): a bigger area around them takes the tap
+  const thin = typeof style.width === 'number' && typeof style.height === 'number' && (style.width < 32 || style.height < 32);
   return (
-    <div ref={objRef} data-id={o.id} className={`obj${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${editing ? ' editing' : ''}`} style={style}
+    <div ref={objRef} data-id={o.id} className={`obj${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${editing ? ' editing' : ''}${thin ? ' thin' : ''}`} style={style}
       onPointerDown={start('move')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
       onDoubleClick={() => o.type === 'text' && onEditing(true)}>
       {inner}

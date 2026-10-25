@@ -233,7 +233,7 @@ export interface Found { quad: Quad; bend: Bend | null; sure: boolean; format: s
 export const tlog = (label: string, t0: number) => { if ((window as any).__scanDebug) console.log(`scan ${label} ${Math.round(performance.now() - t0)}ms`); };
 
 /** Finds the document in a photo (corners refined on a 1600 px copy), in a worker when possible. */
-export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: ScanMode): Promise<Found> {
+export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: ScanMode, hint?: { quad: { x: number; y: number }[]; aspect: number }): Promise<Found> {
   const { w, h } = sizeOf(bmp);
   const t0 = performance.now();
   const full = { x: 0, y: 0, w, h };
@@ -262,6 +262,19 @@ export async function findDocument(bmp: ImageBitmap | HTMLCanvasElement, mode: S
     }
   }
   tlog('find', t0);
+  // the outline seen in the preview when the photo was taken wins over a different one found in the
+  // photo (something else at the frame's edge, outside the preview): its corners are refined here
+  if (hint && Math.abs(w / h / hint.aspect - 1) < 0.04) {
+    const hq = hint.quad.map((p) => ({ x: p.x * w, y: p.y * h })) as Quad;
+    const diag = Math.hypot(w, h);
+    const off = rel ? Math.max(...rel.map((p, i) => Math.hypot(p.x * w - hq[i].x, p.y * h - hq[i].y))) / diag : 1;
+    if (off > 0.06) {
+      const { D } = localKernels();
+      const mid = pixelsOf(bmp, 1600), L = D.luminance(mid), k = mid.w / w;
+      const q = D.refineQuad(L, mid.w, mid.h, hq.map((p) => ({ x: p.x * k, y: p.y * k })) as Quad).map((p) => ({ x: p.x / k, y: p.y / k })) as Quad;
+      return { quad: q, bend: null, sure: true, ...shapeOf(q, w, h, mode) };
+    }
+  }
   if (!det || !rel) return { quad: fullQuad(w, h), bend: null, sure: false, ...shapeOf(fullQuad(w, h), w, h, mode) };
   const quad = rel.map((p) => ({ x: p.x * w, y: p.y * h })) as Quad;
   const sure = (det.score > 0.78 && Math.min(...det.support) > 0.45) || (det.agree ?? 0) > 0.75;

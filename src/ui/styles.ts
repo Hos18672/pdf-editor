@@ -482,6 +482,7 @@ button { cursor: pointer; }
 .layer.passive .run { pointer-events: none; }
 
 .obj { position: absolute; touch-action: none; z-index: 2; }
+.obj.thin::before { content: ''; position: absolute; left: 50%; top: 50%; width: max(100%, 36px); height: max(100%, 36px); transform: translate(-50%, -50%); }
 .obj.selected { outline: 1.5px solid var(--sel); outline-offset: 0; }
 :root[data-theme="dark"] .obj.selected { outline-color: #3446C9; }
 .obj .dotc { position: absolute; width: 9px; height: 9px; background: #fff; border: 1.5px solid #3446C9; border-radius: 50%; pointer-events: none; }
