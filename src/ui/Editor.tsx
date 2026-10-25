@@ -13,6 +13,7 @@ import { FindBar, PrivacyCheck } from './FindBar';
 import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
+import { PageRemove } from './PageRemove';
 import { RunProps, ObjProps, ToolProps, IdleProps, ChangeItem, objTitle, Stepper, toolHasProps, fontLabel, Toggle, RunTextTools, ObjTextTools } from './Panel';
 import { readFields, FormField, isFilled } from './Fields';
 import { exportPdf } from '../engine/exporter';
@@ -74,7 +75,7 @@ const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const MIN_Z = 0.25, MAX_Z = 4;
 const clampZ = (z: number) => Math.max(MIN_Z, Math.min(MAX_Z, z));
 
-type RailT = Tool | 'shapes' | 'markup' | 'pages';
+type RailT = Tool | 'shapes' | 'markup' | 'pages' | 'remove';
 type RailItem = { t: RailT; label: string; icon: string; key: string; opts?: boolean };
 /** Tools grouped by intent (rail, mobile "All tools" sheet). `opts`: the tool has a flyout with options. */
 const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
@@ -89,6 +90,7 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
   { name: 'Mark up', tint: 'var(--tint-markup)', items: [
     { t: 'whiteout', label: 'Whiteout', icon: 'eraser', key: 'W' },
     { t: 'redact', label: 'Redact', icon: 'eye-slash', key: 'X' },
+    { t: 'remove', label: 'Remove', icon: 'bandaids', key: 'M' },
     { t: 'markup', label: 'Highlight', icon: 'highlighter', key: 'H', opts: true },
     { t: 'shapes', label: 'Shapes', icon: 'shapes', key: 'R', opts: true },
     { t: 'draw', label: 'Draw', icon: 'scribble', key: 'D', opts: true }] },
@@ -97,7 +99,7 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
 ];
 const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
 /** phone: every tool in the bottom bar, most used first (it scrolls sideways) */
-const DOCK: RailT[] = ['edit', 'text', 'sign', 'markup', 'draw', 'shapes', 'whiteout', 'redact', 'image', 'link', 'fill', 'pages'];
+const DOCK: RailT[] = ['edit', 'text', 'sign', 'markup', 'draw', 'shapes', 'whiteout', 'remove', 'redact', 'image', 'link', 'fill', 'pages'];
 const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line', 'arrow'];
 /** highlight, underline, strike-through: one rail button, picked in its flyout */
 const MARK_TOOLS: Tool[] = ['highlight', 'underline', 'strike'];
@@ -171,6 +173,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [pageData, setPageData] = useState<Record<number, PageData>>({});
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
   const [showSig, setShowSig] = useState<null | { field?: FormField }>(null);
+  /** Remove (paint over marks) open on this page (original index) */
+  const [removing, setRemoving] = useState<number | null>(null);
   const [view, setView] = useState<'doc' | 'pages'>(start === 'pages' ? 'pages' : 'doc');
   // tool flyout beside the rail (tablet / desktop) or above the dock (phone, shapes only)
   const [flyout, setFlyout] = useState<{ t: RailT; top: number } | null>(null);
@@ -1056,6 +1060,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const railClick = (r: RailItem) => {
     setMoreOpen(false);
     if (mobile) setRecent((v) => useRecent(v, r.t));
+    if (r.t === 'remove') { setFlyout(null); setSelected(null); setEditing(null); if (view === 'pages') setView('doc'); setRemoving(curRef.current); return; }
     if (r.t === 'pages') { setFlyout(null); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }
     const same = railActive(r);
     if (r.t === 'shapes' || r.t === 'markup') {
@@ -1069,6 +1074,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (r.opts && !mobile) openFlyout(r.t);
   };
   const railActive = (r: RailItem) => r.t === 'pages' ? view === 'pages'
+    : r.t === 'remove' ? removing !== null
     : view === 'pages' ? false
     : r.t === 'shapes' ? SHAPE_TOOLS.includes(tool)
     : r.t === 'markup' ? MARK_TOOLS.includes(tool)
@@ -1621,6 +1627,19 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       {addAfter !== null && onAddPages && (
         <AddPagesSheet after={addAfter} total={snap.pages.length} mobile={mobile} onClose={() => setAddAfter(null)}
           onAdd={(w) => { const at = addAfter; setAddAfter(null); onAddPages(at, w).then((first) => { if (first !== null && view === 'doc') setTimeout(() => goToPage(first), 400); }); }} />
+      )}
+      {removing !== null && infos[removing] && (
+        <PageRemove pdf={pdf} src={removing} rotation={snap.pages.find((p) => p.src === removing)?.rotation ?? 0} size={infos[removing]}
+          objects={snap.objects} onCancel={() => setRemoving(null)}
+          onApply={(patch) => {
+            const src = removing;
+            setRemoving(null);
+            if (!patch) return;
+            const id = uid();
+            addObject({ id, page: src, type: 'image', ...patch });
+            setSelected(id);
+            toast({ msg: 'Removed. Drag the patch to adjust it, or delete it to undo', kind: 'ok' });
+          }} />
       )}
       {showSig && <SignatureModal sheet={mobile} onClose={() => setShowSig(null)} onPick={(s) => { const f = showSig.field; setShowSig(null); placeStamp(s, 'signature', f); }} />}
       {dragInfo && (() => {

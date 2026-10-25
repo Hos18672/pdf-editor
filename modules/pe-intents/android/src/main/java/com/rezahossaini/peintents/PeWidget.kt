@@ -6,7 +6,7 @@ import android.appwidget.AppWidgetProvider
 import android.content.Context
 import android.widget.RemoteViews
 
-/** Home-screen widget: one tap to scan, open, sign or convert. */
+/** Home-screen widget "Quick actions": one tap to scan, edit, sign or convert. */
 class PeWidget : AppWidgetProvider() {
   override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
     for (id in ids) {
@@ -19,6 +19,21 @@ class PeWidget : AppWidgetProvider() {
         )
         views.setOnClickPendingIntent(view, pi)
       }
+      manager.updateAppWidget(id, views)
+    }
+  }
+}
+
+/** Home-screen widget "Scan": one tap opens the scanner. */
+class PeScanWidget : AppWidgetProvider() {
+  override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
+    for (id in ids) {
+      val views = RemoteViews(context.packageName, R.layout.pe_widget_scan)
+      val pi = PendingIntent.getActivity(
+        context, 7200, PeIntentsModule.actionIntent(context, "scan"),
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+      )
+      views.setOnClickPendingIntent(R.id.pe_ws_scan, pi)
       manager.updateAppWidget(id, views)
     }
   }

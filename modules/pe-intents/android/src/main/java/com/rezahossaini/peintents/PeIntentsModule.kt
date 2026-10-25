@@ -157,7 +157,7 @@ class PeIntentsModule : Module() {
     fun publishShortcuts(context: Context) {
       val list = listOf(
         Triple("scan", "Scan document", R.drawable.pe_sc_scan),
-        Triple("open", "Open PDF", R.drawable.pe_sc_open),
+        Triple("open", "Edit a PDF", R.drawable.pe_sc_open),
         Triple("sign", "Sign a PDF", R.drawable.pe_sc_sign),
         Triple("convert", "Convert to PDF", R.drawable.pe_sc_convert),
       ).mapIndexed { i, (id, label, icon) ->

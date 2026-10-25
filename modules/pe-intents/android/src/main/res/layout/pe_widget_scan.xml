@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paginka Scan: one tap opens the camera -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+  android:id="@+id/pe_ws_scan"
+  android:layout_width="match_parent"
+  android:layout_height="match_parent"
+  android:background="@drawable/pe_widget_scan_bg"
+  android:gravity="center"
+  android:orientation="vertical"
+  android:padding="8dp">
+  <ImageView
+    android:layout_width="34dp"
+    android:layout_height="34dp"
+    android:contentDescription="Scan"
+    android:src="@drawable/pe_ic_scan" />
+  <TextView
+    android:layout_width="wrap_content"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="4dp"
+    android:maxLines="1"
+    android:text="Scan"
+    android:textColor="#1E2559"
+    android:textSize="13sp"
+    android:fontFamily="sans-serif-medium" />
+</LinearLayout>

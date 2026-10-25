@@ -34,7 +34,8 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
   const pinch = useRef<{ d0: number; m0: { x: number; y: number }; z0: Z } | null>(null);
   const pan = useRef<{ x: number; y: number; z0: Z; moved: boolean } | null>(null);
   const lastTap = useRef<{ x: number; y: number; t: number } | null>(null);
-  useEffect(() => { setZ(NOZ); }, [cur, compare]);
+  // every compare starts with both halves in view: before on the left, the chosen look on the right
+  useEffect(() => { setZ(NOZ); setSplit(0.5); }, [cur, compare]);
 
   useEffect(() => {
     const el = vp.current;
@@ -220,11 +221,11 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
                 {on && compare && orig && (
                   <>
                     <img className="sc-orig" src={orig} alt="" draggable={false} style={{ clipPath: `inset(0 ${(1 - split) * 100}% 0 0)` }} />
-                    <span className="sc-tag l">Original</span><span className="sc-tag r">{label}</span>
+                    <span className="sc-tag l">Before</span><span className="sc-tag r">{label}</span>
                     <div className="sc-split" style={{ left: `${split * 100}%` }} onPointerDown={splitDown} role="slider" aria-label="Compare with the original" aria-valuenow={Math.round(split * 100)}><i /></div>
                   </>
                 )}
-                {on && compare && !orig && <div className="sc-working sm"><span className="spinner" />Original…</div>}
+                {on && compare && !orig && <div className="sc-working sm"><span className="spinner" />Loading the photo…</div>}
                 {on && (!r || r.quick) && <div className="sc-working"><span className="spinner" />Straightening and cleaning…</div>}
                 {on && stale && !r!.quick && <div className="sc-working sm"><span className="spinner" />Applying…</div>}
                 {on && !p.sure && r && !r.quick && !compare && !zoomed && (

@@ -50,6 +50,8 @@ export interface Kernels {
   warpTo(job: Omit<Job, 'filter' | 'radius'>, W: number, H: number, pad: number, grid?: Grid | null): PixelImage;
   /** how far the printed lines on a straightened page wander from straight (in line spacings) */
   bentness(img: PixelImage): Bentness | null;
+  /** fills what the strokes cover from the picture around it (in place); the covered share of each pixel, or null */
+  erase(img: PixelImage, strokes: Stroke[]): Float32Array | null;
 }
 
 export function scanKernels(): Kernels {
@@ -1908,5 +1910,11 @@ export function scanKernels(): Kernels {
     return info.few ? null : { rms: info.rms, lines: info.lines };
   }
 
-  return { process, prepare, finish, shrink, estimateBlur, warpTo, bentness };
+  function erase(img: PixelImage, strokes: Stroke[]): Float32Array | null {
+    const M = strokeMask(img.w, img.h, strokes);
+    if (M) inpaint(img, M, brightness(img));
+    return M;
+  }
+
+  return { process, prepare, finish, shrink, estimateBlur, warpTo, bentness, erase };
 }

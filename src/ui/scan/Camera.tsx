@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from '../icons';
-import { quadArea, type Pt, type Quad } from './geom';
+import { FORMATS, quadArea, type Pt, type Quad } from './geom';
 import { liveDetect, stopLive } from './live';
 import { MODE_RATIOS, sharpness, type ScanMode } from './engine';
 
@@ -21,6 +21,9 @@ const saveAuto = (v: boolean) => { try { localStorage.setItem('pe.scan.auto', v 
  * Live camera with document outline, auto-capture when the page is held still and sharp, torch,
  * and photo import. Hands each shot to `onShot` as a JPEG (full camera resolution when possible).
  */
+/** what to point the camera at, by mode */
+const lookFor = (mode: ScanMode) => mode === 'id' ? 'Place the card inside the frame' : mode === 'passport' ? 'Fit the photo page inside the frame' : 'Point the camera at a document';
+
 export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, onImport, onDone, onClose }: {
   mode: ScanMode; onMode: (m: ScanMode) => void; count: number; lastThumb: string | null;
   /** Done was tapped while the last page is still being read */
@@ -38,7 +41,10 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
   const [status, setStatus] = useState<Status>('starting');
   const [torch, setTorch] = useState<{ can: boolean; on: boolean }>({ can: false, on: false });
   const [auto, setAuto] = useState(readAuto);
-  const [hint, setHint] = useState('Point the camera at a document');
+  const [hint, setHint] = useState(() => lookFor(mode));
+  /** the card or passport page is seen (its guide frame lights up) */
+  const [found, setFound] = useState(false);
+  useEffect(() => { setHint(lookFor(mode)); setFound(false); }, [mode]);
   const poly = useRef<SVGGElement>(null);
   const [hold, setHold] = useState(0); // 0…1 progress of holding still
   const [flash, setFlash] = useState(0);
@@ -206,6 +212,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       const near = (a: Quad, b: Quad, f: number) => Math.max(...a.map((p, i) => Math.hypot(p.x - b[i].x, p.y - b[i].y))) / diag < f;
       const recent = !!kept && now - keptAt < 900;
       const ok = strong || (!!det && recent && det.score > 0.4 && near(raw!, kept!, 0.05));
+      setFound(!!det && ok);
       if (det && ok) {
         let q = raw!;
         // small steps are noise: settle on the average, so the outline sits still on a still page
@@ -235,7 +242,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
         // a frame or two without the sheet (blur, a hand passing): keep the outline a moment
         if (now - lostSince > 500) { target = null; last = null; stableSince = 0; holdTo(0); }
         if (now - lostSince > 700) armed = true;
-        say(mean < 45 ? 'Too dark: add light or turn on the torch' : 'Point the camera at a document');
+        say(mean < 45 ? 'Too dark: add light or turn on the torch' : lookFor(modeRef.current));
       }
       timer = window.setTimeout(tick, 16);
     };
@@ -328,6 +335,8 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
     try { await track.applyConstraints({ advanced: [{ torch: on } as any] }); setTorch({ can: true, on }); } catch { setTorch({ can: false, on: false }); }
   };
 
+  // ID cards and passports: a frame of the card's own shape to aim at (instead of the page outline)
+  const ratio = mode === 'id' ? FORMATS.id1.ratio : mode === 'passport' ? FORMATS.id3.ratio : null;
   const pickFiles = (l: FileList | null) => { const f = l ? Array.from(l) : []; if (f.length) onImport(f); };
   const ring = 2 * Math.PI * 37;
 
@@ -336,12 +345,18 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       <div className="scam-view" ref={view}>
         <div className="scam-frame" ref={box}>
           <video ref={video} playsInline muted autoPlay aria-label="Camera preview" />
-          <svg className="scam-svg" aria-hidden="true">
+          <svg className="scam-svg" aria-hidden="true" style={ratio ? { display: 'none' } : undefined}>
             <g ref={poly} style={{ display: 'none' }}>
               <polygon className={hold >= 1 ? 'go' : ''} />
               {[0, 1, 2, 3].map((i) => <circle key={i} r="7" />)}
             </g>
           </svg>
+          {status === 'live' && ratio && (
+            <div className={`scam-guide${found ? ' on' : ''}${hold >= 1 ? ' go' : ''}`} style={{ aspectRatio: String(ratio), width: `min(86%, 600px, calc((100vh - 330px) * ${ratio.toFixed(3)}))` }} aria-hidden="true">
+              <i className="tl" /><i className="tr" /><i className="bl" /><i className="br" />
+              {hold > 0 && hold < 1 && <b style={{ transform: `scaleX(${hold})` }} />}
+            </div>
+          )}
           <div key={flash} className={flash ? 'scam-flash' : ''} />
         </div>
         {status !== 'live' && status !== 'starting' && (

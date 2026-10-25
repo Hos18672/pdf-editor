@@ -15,13 +15,38 @@ const NOZ: Z = { k: 1, x: 0, y: 0 };
  * are filled in from the page around them. Pinch or use the buttons to zoom in for small marks.
  */
 export function EraseEditor({ page, long, onApply, onCancel }: { page: ScanPage; long: number; onApply: (erase: Stroke[]) => void; onCancel: () => void }) {
+  const [plain, setPlain] = useState<Pic | null>(null);
+  // the page without any removals (what is painted on)
+  useEffect(() => {
+    let gone = false, url = '';
+    renderLook(page, { long, noErase: true }).then((r) => { url = r.url; if (gone) URL.revokeObjectURL(r.url); else setPlain({ url: r.url, w: r.w, h: r.h }); }).catch(() => null);
+    return () => { gone = true; if (url) URL.revokeObjectURL(url); };
+  }, [page, long]);
+  const unturn = (st: Stroke[]) => turnStrokes(st, (4 - (page.rot % 4)) % 4) ?? [];
+  return (
+    <RemovePainter plain={plain} aspect={page.rot % 2 ? 1 / page.ratio : page.ratio} initial={turnStrokes(page.erase, page.rot) ?? []}
+      render={(st) => renderLook({ ...page, erase: unturn(st) }, { long }).then((r) => r.url)}
+      onApply={(st) => onApply(unturn(st))} onCancel={onCancel} />
+  );
+}
+
+export type Pic = { url: string; w: number; h: number };
+
+/**
+ * The painter behind Remove (scanner and editor): paint over things on a picture, see them filled in.
+ * `render` makes the picture with the strokes removed (an object URL, freed here); strokes are fractions
+ * of the picture as shown.
+ */
+export function RemovePainter({ plain, aspect, initial, render, onApply, onCancel, hint = 'Paint over what should go: a finger, a stain, a mark' }: {
+  plain: Pic | null; aspect: number; initial: Stroke[]; render: (strokes: Stroke[]) => Promise<string>;
+  onApply: (strokes: Stroke[]) => void; onCancel: () => void; hint?: string;
+}) {
   const stage = useRef<HTMLDivElement>(null);
   const draw = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
-  // strokes on the page as it is shown (turned upright)
-  const [strokes, setStrokes] = useState<Stroke[]>(() => turnStrokes(page.erase, page.rot) ?? []);
+  // strokes on the picture as it is shown
+  const [strokes, setStrokes] = useState<Stroke[]>(initial);
   const [brush, setBrush] = useState<(typeof SIZES)[number]['id']>('m');
-  const [plain, setPlain] = useState<{ url: string; w: number; h: number } | null>(null);
   const [preview, setPreview] = useState<{ url: string; n: number; key: string } | null>(null);
   const [z, setZ] = useState<Z>(NOZ);
   const zRef = useRef(z); zRef.current = z;
@@ -32,12 +57,6 @@ export function EraseEditor({ page, long, onApply, onCancel }: { page: ScanPage;
   const [cursor, setCursor] = useState<{ x: number; y: number } | null>(null);
   useBack(onCancel);
 
-  // the page without any removals (what is painted on), then previews with them
-  useEffect(() => {
-    let gone = false, url = '';
-    renderLook(page, { long, noErase: true }).then((r) => { url = r.url; if (gone) URL.revokeObjectURL(r.url); else setPlain({ url: r.url, w: r.w, h: r.h }); }).catch(() => null);
-    return () => { gone = true; if (url) URL.revokeObjectURL(url); };
-  }, [page, long]);
   const strokesKey = JSON.stringify(strokes);
   const prevUrl = useRef('');
   const showPreview = (v: { url: string; n: number; key: string } | null) => {
@@ -49,14 +68,13 @@ export function EraseEditor({ page, long, onApply, onCancel }: { page: ScanPage;
     if (!strokes.length) { showPreview(null); return; }
     let gone = false;
     const t = setTimeout(() => {
-      const unturned = turnStrokes(strokes, (4 - (page.rot % 4)) % 4) ?? [];
-      renderLook({ ...page, erase: unturned }, { long }).then((r) => {
-        if (gone) URL.revokeObjectURL(r.url);
-        else showPreview({ url: r.url, n: strokes.length, key: strokesKey });
+      render(strokes).then((url) => {
+        if (gone) URL.revokeObjectURL(url);
+        else showPreview({ url, n: strokes.length, key: strokesKey });
       }).catch(() => null);
     }, 120);
     return () => { gone = true; clearTimeout(t); };
-  }, [strokesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [strokesKey, !!plain]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => { if (prevUrl.current) URL.revokeObjectURL(prevUrl.current); }, []);
 
   useLayoutEffect(() => {
@@ -75,7 +93,7 @@ export function EraseEditor({ page, long, onApply, onCancel }: { page: ScanPage;
     return () => window.removeEventListener('keydown', onKey);
   }, [onCancel]);
 
-  const pw = plain?.w ?? (page.rot % 2 ? 1 / page.ratio : page.ratio) * 1000, ph = plain?.h ?? 1000;
+  const pw = plain?.w ?? aspect * 1000, ph = plain?.h ?? 1000;
   const pad = 20;
   const s = size.w ? Math.min((size.w - pad * 2) / pw, (size.h - pad * 2) / ph) : 0;
   const W = pw * s, H = ph * s, L = Math.max(W, H);
@@ -173,8 +191,8 @@ export function EraseEditor({ page, long, onApply, onCancel }: { page: ScanPage;
     <div className="scrop serase" role="dialog" aria-modal="true" aria-label="Remove marks">
       <header className="scrop-top">
         <button className="btn lg on-dark" onClick={onCancel}>Cancel</button>
-        <div className="t"><b>Remove</b><span>Paint over what should go: a finger, a stain, a mark</span></div>
-        <button className="btn primary lg" onClick={() => onApply(turnStrokes(strokes, (4 - (page.rot % 4)) % 4) ?? [])}><Icon name="check" size={18} />Done</button>
+        <div className="t"><b>Remove</b><span>{hint}</span></div>
+        <button className="btn primary lg" onClick={() => onApply(strokes)}><Icon name="check" size={18} />Done</button>
       </header>
       <div className="scrop-stage" ref={stage} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
         onPointerLeave={() => setCursor(null)}

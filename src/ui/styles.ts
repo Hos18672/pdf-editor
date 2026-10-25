@@ -1043,6 +1043,17 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .scam-svg polygon { fill: rgba(255,225,77,.16); stroke-opacity: .98; stroke: #FFE14D; stroke-width: 3; stroke-linejoin: round; transition: fill .2s; }
 .scam-svg polygon.go { fill: rgba(91,214,154,.22); stroke: #5BD69A; }
 .scam-svg circle { fill: #fff; stroke: #FFE14D; stroke-width: 3; }
+.scam-guide { position: absolute; left: 50%; top: calc(50% - 40px); transform: translate(-50%, -50%); border-radius: 20px; box-shadow: 0 0 0 100vmax rgba(7,8,12,.42); border: 1.5px solid rgba(255,255,255,.35); pointer-events: none; transition: border-color .2s, box-shadow .2s; }
+.scam-guide i { position: absolute; width: 34px; height: 34px; border: 4px solid #fff; transition: border-color .2s; }
+.scam-guide .tl { left: -3px; top: -3px; border-right: 0; border-bottom: 0; border-top-left-radius: 22px; }
+.scam-guide .tr { right: -3px; top: -3px; border-left: 0; border-bottom: 0; border-top-right-radius: 22px; }
+.scam-guide .bl { left: -3px; bottom: -3px; border-right: 0; border-top: 0; border-bottom-left-radius: 22px; }
+.scam-guide .br { right: -3px; bottom: -3px; border-left: 0; border-top: 0; border-bottom-right-radius: 22px; }
+.scam-guide.on { border-color: rgba(255,225,77,.7); }
+.scam-guide.on i { border-color: #FFE14D; }
+.scam-guide.go { border-color: rgba(91,214,154,.8); }
+.scam-guide.go i { border-color: #5BD69A; }
+.scam-guide b { position: absolute; left: 20%; right: 20%; bottom: 14px; height: 4px; border-radius: 2px; background: #5BD69A; transform-origin: left; }
 .scam-flash { position: absolute; inset: 0; background: #fff; pointer-events: none; animation: scam-flash .35s ease-out forwards; }
 @keyframes scam-flash { from { opacity: .85; } to { opacity: 0; } }
 .scam-top { position: absolute; left: 0; right: 0; top: 0; padding: calc(14px + var(--safe-t)) calc(14px + var(--safe-r)) 14px calc(14px + var(--safe-l)); display: flex; align-items: center; gap: 10px; background: linear-gradient(rgba(0,0,0,.5), transparent); z-index: 2; }

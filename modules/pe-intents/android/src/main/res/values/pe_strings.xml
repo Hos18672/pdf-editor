@@ -1,5 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-  <string name="pe_widget_label">PDF Editor</string>
-  <string name="pe_widget_desc">Scan, open, sign or convert in one tap</string>
+  <string name="pe_widget_label">Quick actions</string>
+  <string name="pe_widget_desc">Scan, edit, sign or convert to PDF in one tap</string>
+  <string name="pe_widget_scan_label">Scan</string>
+  <string name="pe_widget_scan_desc">Open the scanner in one tap</string>
 </resources>
