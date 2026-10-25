@@ -3,7 +3,7 @@ import {
   decodePDFRawStream, degrees, PDFFont, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList, PDFBool, PDFString,
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
-import { interpret, removeGlyphs, invert, Glyph, M } from './interpreter';
+import { interpret, removeGlyphs, hideGlyphs, invert, Glyph, M } from './interpreter';
 import { cutPlan, erasePictures } from './cut';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
@@ -300,10 +300,12 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     }
     // Remove: letters, shapes and pictures wholly under the painted strokes are taken out
     let cutBlank: Map<number, string> | null = null;
+    /** letters Remove made invisible in place (see hideGlyphs) */
+    const hide = new Set<Glyph>();
     const cutStrokes = vm ? input.objects.flatMap((o) => (o.page !== pi ? [] : o.type === 'erase' ? o.strokes : o.type === 'image' && o.cut?.length ? o.cut : [])) : [];
     if (cutStrokes.length) {
       const plan = cutPlan(ops, { glyphs, draws, paths }, cutStrokes, vm);
-      plan.glyphs.forEach((g) => remove.add(g));
+      plan.glyphs.forEach((g) => hide.add(g));
       cutBlank = plan.blank;
       await erasePictures(doc, resources, plan.pictures, cutStrokes, vm).catch((err) => console.warn('remove in pictures', err));
     }
@@ -339,7 +341,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       const hidden = !!e.ocr || (hits.length > 0 && hits.filter((g) => g.style.Tr === 3 || g.style.Tr === 7).length * 2 > hits.length);
       if (!e.text.trim()) {
         // (letters already taken out by Remove need no cover)
-        const cutAway = !hits.length && !e.ocr && glyphsInRegion(glyphs, e).some((g) => remove.has(g));
+        const cutAway = !hits.length && !e.ocr && glyphsInRegion(glyphs, e).some((g) => remove.has(g) || hide.has(g));
         if ((!hits.length && !cutAway) || hidden) add += await cover(e, hidden);
         continue;
       }
@@ -485,8 +487,16 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       }
     }
 
+    // a show op rewritten for an edit takes the painted-over letters out with it
+    if (hide.size && remove.size) { const rops = new Set([...remove].map((g) => g.opIndex)); for (const g of hide) if (rops.has(g.opIndex)) remove.add(g); }
     const replacements = removeGlyphs(glyphs, shows, remove, fonts);
     if (cutBlank) for (const [i, v] of cutBlank) if (!replacements.has(i)) replacements.set(i, v);
+    if (hide.size) {
+      // letters both edited away and painted over: the edit's rewrite of that op stands, with them gone
+      const ops2 = new Set(replacements.keys());
+      const own = new Set([...hide].filter((g) => !ops2.has(g.opIndex) && !remove.has(g)));
+      for (const [i, v] of hideGlyphs(glyphs, shows, own)) replacements.set(i, v);
+    }
     const body = rebuild(original, ops, replacements);
 
     // Objects drawn in viewport space

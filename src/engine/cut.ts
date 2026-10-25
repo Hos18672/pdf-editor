@@ -5,7 +5,7 @@
 import { PDFDocument, PDFDict, PDFName, PDFPageLeaf, PDFRef, PDFRawStream } from 'pdf-lib';
 import type { Op } from './contentStream';
 import { tokenize, rebuild } from './contentStream';
-import { interpret, removeGlyphs, apply, invert, Glyph, M, PathDraw } from './interpreter';
+import { interpret, hideGlyphs, apply, invert, Glyph, M, PathDraw } from './interpreter';
 import { readFontMetrics, FontMetrics } from './fonts';
 
 /** a brush stroke in page view units (scale 1, the page's own rotation): points as x, y pairs, radius */
@@ -34,11 +34,12 @@ export function cutPlan(ops: Op[], it: { glyphs: Glyph[]; draws: { name: string;
   const inside = (x: number, y: number, grow = 0) => { const [vx, vy] = apply(vm, x, y); return underStrokes(strokes, vx, vy, grow); };
   const glyphs = new Set<Glyph>();
   for (const g of it.glyphs) {
-    // the middle of the letter, and its left and right halves
+    // a letter the paint touches goes whole (its left edge, middle or right edge, half way up; not the
+    // lines above and below, which the brush only grazes)
     const dx = g.end[0] - g.origin[0], dy = g.end[1] - g.origin[1], len = Math.hypot(dx, dy) || 1;
     const ux = -dy / len * g.height * 0.35, uy = dx / len * g.height * 0.35;
-    const pts: [number, number][] = [0.2, 0.5, 0.8].map((t) => [g.origin[0] + dx * t + ux, g.origin[1] + dy * t + uy]);
-    if (pts.filter(([x, y]) => inside(x, y)).length >= 2) glyphs.add(g);
+    const pts: [number, number][] = [0.12, 0.5, 0.88].map((t) => [g.origin[0] + dx * t + ux, g.origin[1] + dy * t + uy]);
+    if (pts.some(([x, y]) => inside(x, y))) glyphs.add(g);
   }
   const blank = new Map<number, string>();
   // a little slack: a stroke painted right along a shape's edge still takes it
@@ -70,7 +71,7 @@ export function cutContent(original: Uint8Array, fonts: (res: string) => FontMet
   const it = interpret(ops, fonts);
   const plan = cutPlan(ops, it, strokes, vm);
   if (!plan.glyphs.size && !plan.blank.size) return null;
-  const rep = removeGlyphs(it.glyphs, it.shows, plan.glyphs, fonts);
+  const rep = hideGlyphs(it.glyphs, it.shows, plan.glyphs);
   for (const [i, v] of plan.blank) rep.set(i, v);
   return rebuild(original, ops, rep);
 }

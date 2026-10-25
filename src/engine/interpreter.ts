@@ -256,3 +256,47 @@ export function removeGlyphs(
   }
   return out;
 }
+
+/**
+ * Makes the given glyphs invisible where they are (text render mode 3 around them), so every other glyph
+ * keeps its exact place whatever the font's widths say (a gap computed from wrong widths moved the rest of
+ * the line). Used by Remove. Show ops are split into runs of seen and hidden glyphs; kerning stays.
+ */
+export function hideGlyphs(glyphs: Glyph[], shows: Map<number, ShowOp>, hide: Set<Glyph>): Map<number, string> {
+  const byOp = new Map<number, Glyph[]>();
+  for (const g of glyphs) {
+    if (!byOp.has(g.opIndex)) byOp.set(g.opIndex, []);
+    byOp.get(g.opIndex)!.push(g);
+  }
+  const out = new Map<number, string>();
+  for (const [opIndex, list] of byOp) {
+    if (!list.some((g) => hide.has(g))) continue;
+    const show = shows.get(opIndex)!;
+    const tr = list[0].style.Tr;
+    const parts: string[] = [];
+    let arr: Operand[] = [], bytes: number[] = [], hidden = false;
+    const flushBytes = () => { if (bytes.length) { arr.push({ t: 'str', v: Uint8Array.from(bytes), hex: true }); bytes = []; } };
+    const flush = () => {
+      flushBytes();
+      if (!arr.length) return;
+      const tj = serializeOp('TJ', [{ t: 'arr', v: arr }]);
+      parts.push(hidden ? `3 Tr ${tj} ${tr} Tr` : tj);
+      arr = [];
+    };
+    show.array.forEach((el, e) => {
+      if (el.t === 'num') { flushBytes(); arr.push(el); return; }
+      if (el.t !== 'str') return;
+      for (const g of list.filter((x) => x.elem === e)) {
+        const h = hide.has(g);
+        if (h !== hidden) { flush(); hidden = h; }
+        for (let k = 0; k < g.len; k++) bytes.push(el.v[g.pos + k]);
+      }
+    });
+    flush();
+    const body = parts.join(' ') || serializeOp('TJ', [{ t: 'arr', v: [{ t: 'str', v: new Uint8Array(0), hex: true }] }]);
+    if (show.kind === 'TJ' || show.kind === 'Tj') out.set(opIndex, body);
+    else if (show.kind === "'") out.set(opIndex, 'T* ' + body);
+    else out.set(opIndex, `${list[0].style.Tw} Tw ${list[0].style.Tc} Tc T* ${body}`);
+  }
+  return out;
+}

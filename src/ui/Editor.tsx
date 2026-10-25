@@ -788,6 +788,22 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const shown = preview?.keys[src] === editKeyOf(src);
     return [...(shown ? [] : erases.filter((o) => o.page === src).flatMap((o) => o.strokes)), ...(pendingCuts[src] ?? [])];
   };
+  /** lines of the file wholly painted over by Remove: no longer offered for editing */
+  const erasedRuns = useMemo(() => {
+    const out = new Set<string>();
+    for (const [src, d] of Object.entries(pageData)) {
+      const strokes = erases.filter((o) => o.page === +src).flatMap((o) => o.strokes);
+      if (!strokes.length) continue;
+      const vm = infos[+src]?.vm;
+      if (!vm) continue;
+      for (const r of d.runs) {
+        if (snap.edits[r.key]) continue;
+        const b = runBox(r, vm), c = Math.cos(b.angle), sn = Math.sin(b.angle), up = b.h * 0.3;
+        if ([0.1, 0.5, 0.9].every((t) => underStrokes(strokes, b.x + c * b.w * t + sn * up, b.y + sn * b.w * t - c * up))) out.add(r.key);
+      }
+    }
+    return out;
+  }, [eraseSig, pageData, snap.edits]); // eslint-disable-line react-hooks/exhaustive-deps
   const removeStroke = async (src: number, stroke: CutStroke) => {
     const vm = infos[src].vm;
     setPendingCuts((m) => ({ ...m, [src]: [...(m[src] ?? []), stroke] }));
@@ -797,10 +813,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const inFile = cutsSomething(content, stroke, vm);
       // lines under the paint: changed ones lose their new text, untouched ones are taken out with the cut
       const gone = (pageData[src]?.runs ?? []).filter((r) => {
+        // only lines changed in the editor: their new text isn't in the file, so the cut can't reach it
         if (isScanKey(r.key)) return false;
         const e = snap.edits[r.key];
-        if (e && !e.text) return false;
-        if (!e && !inFile) return false;
+        if (!e || !e.text) return false;
         const b = runBox(r, vm), c = Math.cos(b.angle), sn = Math.sin(b.angle), up = b.h * 0.3;
         return [0.2, 0.5, 0.8].filter((t) => underStrokes([stroke], b.x + c * b.w * t + sn * up + (e?.dx ?? 0), b.y + sn * b.w * t - c * up + (e?.dy ?? 0))).length >= 2;
       });
@@ -1593,7 +1609,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   onSelect={(id) => { setSelected(id); if (id === null) setSheetFor(null); }} onEditing={setEditing} onStopEditing={stopEditing}
                   hits={hitsByPage[p.src]}
                   onRunEdit={setRunEdit} onAdd={addObject} onChange={changeObject}
-                  onRemove={removeStroke} erasing={erasingOn(p.src)}
+                  onRemove={removeStroke} erasing={erasingOn(p.src)} skipRuns={erasedRuns}
                   onPlace={() => false}
                   onDelete={removeObject} onDuplicate={duplicateObject}
                   onTextPlaced={() => setTool('edit')}

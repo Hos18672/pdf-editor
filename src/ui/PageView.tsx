@@ -31,6 +31,8 @@ interface Props {
   onRemove?: (src: number, stroke: { r: number; pts: number[] }) => void;
   /** Remove strokes not yet taken out of the page on screen (shown as paint meanwhile) */
   erasing?: { r: number; pts: number[] }[];
+  /** lines painted over by Remove (not offered for editing) */
+  skipRuns?: Set<string>;
   /** search / privacy-check matches on this page (viewport units) */
   hits?: { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[];
   src: number;
@@ -473,7 +475,7 @@ export function PageView(p: Props) {
           {p.hits?.map((h, i) => (
             <div key={i} className={`hitbox${h.cur ? ' cur' : ''}${h.priv ? ' priv' : ''}`} style={{ left: (h.x - 1) * zoom, top: (h.y - 1) * zoom, width: (h.w + 2) * zoom, height: (h.h + 2) * zoom }} />
           ))}
-          {p.data?.runs.map((r) => (
+          {p.data?.runs.filter((r) => !p.skipRuns?.has(r.key)).map((r) => (
             <RunView key={r.key} run={r} vm={info.vm} zoom={zoom} font={p.fonts[r.fontName]} color={p.data!.colors[r.key]}
               edit={p.edits[r.key]} shown={shownEdit(r.key)} editing={p.editing === r.key} selected={p.selected === r.key} room={rooms[r.key]} live={liveRun(r.key)}
               moving={p.moving === r.key} onMove={(dx, dy) => p.onRunMove?.(r.key, dx, dy)}
