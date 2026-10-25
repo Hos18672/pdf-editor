@@ -4,7 +4,7 @@ import type { PixelImage, Stroke } from './scan/kernels';
 import { eraseImage, turnStrokes } from './scan/engine';
 import type { EditorObject, M } from '../engine/types';
 import { PDFDocument, PDFName } from 'pdf-lib';
-import { cutContent, pageFonts, type CutStroke } from '../engine/cut';
+import { cutContent, pageFonts, underStrokes, type CutStroke } from '../engine/cut';
 import { readContents } from '../engine/exporter';
 import { openPdf } from './pdfjs';
 
@@ -75,12 +75,24 @@ async function toUrl(img: PixelImage, rot: number): Promise<string> {
   return URL.createObjectURL(blob!);
 }
 
-/** a mask grown by a pixel (the soft edges of what was taken out) */
-function grow(D: Float32Array, w: number, h: number): Float32Array {
-  const o = new Float32Array(D.length);
-  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
-    const p = y * w + x;
-    if (D[p] || (x > 0 && D[p - 1]) || (x < w - 1 && D[p + 1]) || (y > 0 && D[p - w]) || (y < h - 1 && D[p + w])) o[p] = 1;
+/**
+ * a mask grown by r pixels: the picture of the change reaches a little past it (it is the same as the
+ * page there), so scaled down on screen its edge doesn't let the removed letters' outlines through
+ */
+function spread(D: Float32Array, w: number, h: number, r: number): Float32Array {
+  // separable box max: rows, then columns
+  const a = new Float32Array(D.length), o = new Float32Array(D.length);
+  for (let y = 0; y < h; y++) {
+    let last = -1e9;
+    for (let x = 0; x < w; x++) { if (D[y * w + x]) last = x; if (x - last <= r) a[y * w + x] = 1; }
+    last = 1e9;
+    for (let x = w - 1; x >= 0; x--) { if (D[y * w + x]) last = x; if (last - x <= r) a[y * w + x] = 1; }
+  }
+  for (let x = 0; x < w; x++) {
+    let last = -1e9;
+    for (let y = 0; y < h; y++) { if (a[y * w + x]) last = y; if (y - last <= r) o[y * w + x] = 1; }
+    last = 1e9;
+    for (let y = h - 1; y >= 0; y--) { if (a[y * w + x]) last = y; if (last - y <= r) o[y * w + x] = 1; }
   }
   return o;
 }
@@ -98,20 +110,29 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
 }) {
   const rot = (((rotation / 90) % 4) + 4) % 4;
   const base = useRef<{ img: PixelImage; s: number } | null>(null);
+  // Removes done before on this page are in the page's content (drawn with it, not as their pictures:
+  // a picture that didn't load let the removed text come back into the next Remove)
+  const prevCuts = objects.flatMap((o) => (o.page === src && o.type === 'image' && o.vector && o.cut?.length ? o.cut : []));
+  const others = objects.filter((o) => !(o.type === 'image' && o.vector));
   const [plain, setPlain] = useState<Pic | null>(null);
 
   useEffect(() => {
     let gone = false, url = '';
     (async () => {
-      const page = await pdf.getPage(src + 1);
       const s = Math.min(3, LONG / Math.max(size.w, size.h));
-      const img = await drawPage(page, s, objects, src);
+      cut.current = cutter(bytes, src).catch(() => null);
+      let img: PixelImage | null = null;
+      if (prevCuts.length) {
+        const fn = await cut.current;
+        const doc = fn ? await fn(prevCuts, vm).catch(() => null) : null;
+        if (doc) { try { img = await drawPage(await doc.getPage(1), s, others, src); } catch { img = null; } finally { doc.destroy?.(); } }
+      }
+      img ??= await drawPage(await pdf.getPage(src + 1), s, prevCuts.length ? objects : others, src);
       if (gone) return;
       base.current = { img, s };
       url = await toUrl(img, rot);
       if (gone) URL.revokeObjectURL(url);
       else setPlain({ url, w: rot % 2 ? img.h : img.w, h: rot % 2 ? img.w : img.h });
-      cut.current = cutter(bytes, src).catch(() => null);
     })().catch(() => onCancel());
     return () => { gone = true; if (url) URL.revokeObjectURL(url); };
   }, [pdf, src]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -147,7 +168,7 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
     const b = base.current!, un = unturn(st), L = Math.max(size.w, size.h);
     const strokes: CutStroke[] = un.map((k) => ({ r: k.r * L, pts: k.pts.map((v, i) => v * (i % 2 ? size.h : size.w)) }));
     const fn = await cut.current;
-    const doc = fn ? await fn(strokes, vm).catch(() => null) : null;
+    const doc = fn ? await fn([...prevCuts, ...strokes], vm).catch(() => null) : null;
     if (doc) {
       try {
         // the area round the strokes (what is taken out lies wholly under them), drawn again
@@ -159,7 +180,9 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
         const ax = Math.max(0, Math.floor(X0 * b.s) - pad), ay = Math.max(0, Math.floor(Y0 * b.s) - pad);
         const aw = Math.min(W, Math.ceil(X1 * b.s) + pad) - ax, ah = Math.min(H, Math.ceil(Y1 * b.s) + pad) - ay;
         if (aw <= 0 || ah <= 0) throw new Error('outside');
-        const part = await drawPage(await doc.getPage(1), b.s, objects, src, { x: ax, y: ay, w: aw, h: ah });
+        const part = await drawPage(await doc.getPage(1), b.s, others, src, { x: ax, y: ay, w: aw, h: ah });
+        // changes only count near the new strokes (and take the soft edges of the letters along)
+        const near = (px: number, py: number) => underStrokes(strokes, px / b.s, py / b.s, 14 / b.s + 4);
         // the whole page with that area put in, and what changed there: the taken-out things
         const img = { w: W, h: H, data: new Uint8ClampedArray(b.img.data) };
         const D = new Float32Array(W * H);
@@ -168,10 +191,10 @@ export function PageRemove({ pdf, bytes, vm, src, rotation, size, objects, onApp
           const i = (y * aw + x) * 4, p = (y + ay) * W + x + ax, j = p * 4;
           const dd = Math.abs(part.data[i] - b.img.data[j]) + Math.abs(part.data[i + 1] - b.img.data[j + 1]) + Math.abs(part.data[i + 2] - b.img.data[j + 2]);
           img.data[j] = part.data[i]; img.data[j + 1] = part.data[i + 1]; img.data[j + 2] = part.data[i + 2];
-          if (dd > 24) { D[p] = 1; changed++; }
+          if (dd > 8 && near(x + ax, y + ay)) { D[p] = 1; changed++; }
         }
         if (changed > 20) {
-          last.current = { key, img, M: grow(D, W, H), cut: strokes };
+          last.current = { key, img, M: spread(D, W, H, Math.ceil(2.5 * b.s)), cut: strokes };
           return last.current;
         }
       } catch { /* drawn below as before */ } finally { doc.destroy?.(); }
