@@ -1,10 +1,9 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { RemovePainter, type Pic } from './scan/EraseEditor';
-import { scanKernels, type Kernels, type PixelImage, type Stroke } from './scan/kernels';
-import { turnStrokes } from './scan/engine';
+import type { PixelImage, Stroke } from './scan/kernels';
+import { eraseImage, turnStrokes } from './scan/engine';
 import type { EditorObject } from '../engine/types';
 
-let K: Kernels | null = null;
 /** longest side of the page picture painted on (pixels) */
 const LONG = 2400;
 
@@ -73,17 +72,22 @@ export function PageRemove({ pdf, src, rotation, size, objects, onApply, onCance
 
   /** the strokes on the page as it is in the file (they are painted on it as shown, turned) */
   const unturn = (st: Stroke[]) => turnStrokes(st, (4 - rot) % 4) ?? [];
-  const filled = (st: Stroke[]) => {
-    const b = base.current!;
-    const img = { w: b.img.w, h: b.img.h, data: new Uint8ClampedArray(b.img.data) };
-    const M = (K ??= scanKernels()).erase(img, unturn(st));
-    return { img, M };
+  // the page's own texture (a printed pattern, paper grain) is copied in, not a smooth blend
+  const last = useRef<{ key: string; img: PixelImage; M: Float32Array | null } | null>(null);
+  const filled = async (st: Stroke[]) => {
+    const key = JSON.stringify(st);
+    if (last.current?.key === key) return last.current;
+    const r = await eraseImage(base.current!.img, unturn(st), true);
+    last.current = { key, img: r.img, M: r.mask };
+    return last.current;
   };
+  const [saving, setSaving] = useState(false);
 
-  const apply = (st: Stroke[]) => {
+  const apply = async (st: Stroke[]) => {
     const b = base.current;
     if (!b || !st.length) { onApply(null); return; }
-    const { img, M } = filled(st);
+    setSaving(true);
+    const { img, M } = await filled(st);
     if (!M) { onApply(null); return; }
     const w = img.w, h = img.h;
     let x0 = w, y0 = h, x1 = -1, y1 = -1;
@@ -106,7 +110,7 @@ export function PageRemove({ pdf, src, rotation, size, objects, onApply, onCance
   return (
     <RemovePainter plain={plain} aspect={rot % 2 ? size.h / size.w : size.w / size.h} initial={[]}
       hint="Paint over what should go: a stamp, a stain, a note, a logo"
-      render={async (st) => { if (!base.current) throw new Error('not ready'); return toUrl(filled(st).img, rot); }}
-      onApply={apply} onCancel={onCancel} />
+      render={async (st) => { if (!base.current) throw new Error('not ready'); return toUrl((await filled(st)).img, rot); }}
+      onApply={(st) => { if (!saving) apply(st).catch(() => onApply(null)); }} onCancel={onCancel} />
   );
 }

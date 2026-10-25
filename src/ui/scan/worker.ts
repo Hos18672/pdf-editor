@@ -69,6 +69,11 @@ ctx.onmessage = async (e: MessageEvent) => {
       const o = m.orient ? O.textOrientation(shrinkFast(img, 1000)) : undefined;
       const r = await out(img, m.jpeg);
       ctx.postMessage({ id: m.id, r: { ...r.r, orient: o } }, r.t);
+    } else if (m.type === 'erase') {
+      const M = K.erase(m.img, m.strokes, !!m.texture);
+      const t: Transferable[] = [m.img.data.buffer];
+      if (M) t.push(M.buffer);
+      ctx.postMessage({ id: m.id, r: { img: m.img, mask: M } }, t);
     } else if (m.type === 'thumbs') {
       const small = K.shrink(m.img, m.max);
       const k = small.w / m.img.w;

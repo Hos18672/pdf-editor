@@ -459,6 +459,21 @@ export async function renderLook(p: ScanPage, opt: { long: number; filter?: Filt
   return { blob: b.blob, url: URL.createObjectURL(b.blob), w: b.w, h: b.h, blur: base.blur, orient: r.orient, bent: base.bent };
 }
 
+/**
+ * Removes what the strokes cover from a picture (in a worker when there is one): the filled picture and
+ * the covered share of each pixel. texture: matching texture is copied in from nearby.
+ */
+export async function eraseImage(img: PixelImage, strokes: Stroke[], texture: boolean): Promise<{ img: PixelImage; mask: Float32Array | null }> {
+  const copy = { w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) };
+  try {
+    return await post<{ img: PixelImage; mask: Float32Array | null }>({ type: 'erase', img: copy, strokes, texture }, [copy.data.buffer]);
+  } catch {
+    const own = { w: img.w, h: img.h, data: new Uint8ClampedArray(img.data) };
+    const mask = localKernels().K.erase(own, strokes, texture);
+    return { img: own, mask };
+  }
+}
+
 /** Small previews of a page in every look, from the kept straightened page. */
 export async function renderThumbs(p: ScanPage, filters: Filter[], long: number, max: number): Promise<Record<string, string>> {
   const t0 = performance.now();

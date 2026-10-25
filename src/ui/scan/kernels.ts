@@ -50,8 +50,12 @@ export interface Kernels {
   warpTo(job: Omit<Job, 'filter' | 'radius'>, W: number, H: number, pad: number, grid?: Grid | null): PixelImage;
   /** how far the printed lines on a straightened page wander from straight (in line spacings) */
   bentness(img: PixelImage): Bentness | null;
-  /** fills what the strokes cover from the picture around it (in place); the covered share of each pixel, or null */
-  erase(img: PixelImage, strokes: Stroke[]): Float32Array | null;
+  /**
+   * fills what the strokes cover from the picture around it (in place); the covered share of each pixel,
+   * or null. texture: copies matching texture from nearby (a printed pattern, paper grain) instead of a
+   * smooth blend
+   */
+  erase(img: PixelImage, strokes: Stroke[], texture?: boolean): Float32Array | null;
 }
 
 export function scanKernels(): Kernels {
@@ -1910,10 +1914,129 @@ export function scanKernels(): Kernels {
     return info.few ? null : { rms: info.rms, lines: info.lines };
   }
 
-  function erase(img: PixelImage, strokes: Stroke[]): Float32Array | null {
+  function erase(img: PixelImage, strokes: Stroke[], texture = false): Float32Array | null {
     const M = strokeMask(img.w, img.h, strokes);
-    if (M) inpaint(img, M, brightness(img));
+    if (M && !(texture && cloneFill(img, M))) inpaint(img, M, brightness(img));
     return M;
+  }
+
+  /**
+   * Fills the covered pixels (M: 0…1) with texture copied from nearby, tile by tile (most surrounded
+   * tiles first, so later tiles also match what was filled before): each tile takes the spot whose
+   * surroundings look most like its own, then a smooth correction (from the differences along the
+   * edge) blends shading and colour in. False when nothing to copy from was found.
+   */
+  function cloneFill(img: PixelImage, M: Float32Array): boolean {
+    const w = img.w, h = img.h, d = img.data, n = w * h;
+    const hole = new Uint8Array(n);
+    let bx0 = w, by0 = h, bx1 = -1, by1 = -1;
+    for (let y = 0; y < h; y++) for (let x = 0, p = y * w; x < w; x++, p++) if (M[p] > 0.02) {
+      hole[p] = 1; if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y;
+    }
+    if (bx1 < 0) return true;
+    const T = Math.max(24, Math.min(64, Math.round(Math.max(w, h) / 45))), r = Math.max(6, Math.round(T / 3));
+    const R = Math.max(T * 4, 140);
+    // summed hole counts: a source window must lie wholly outside the hole
+    const S = new Int32Array((w + 1) * (h + 1));
+    for (let y = 0; y < h; y++) { let row = 0; for (let x = 0; x < w; x++) { row += hole[y * w + x]; S[(y + 1) * (w + 1) + x + 1] = S[y * (w + 1) + x + 1] + row; } }
+    const holeIn = (x0: number, y0: number, x1: number, y1: number) => S[(y1 + 1) * (w + 1) + x1 + 1] - S[y0 * (w + 1) + x1 + 1] - S[(y1 + 1) * (w + 1) + x0] + S[y0 * (w + 1) + x0];
+    const orig = new Uint8ClampedArray(d);
+    const known = new Uint8Array(n);
+    for (let p = 0; p < n; p++) known[p] = hole[p] ? 0 : 1;
+    // corrections measured along tile edges (target − source), filled into the hole afterwards
+    const dS = new Float32Array(n * 3), dW = new Float32Array(n);
+    type Tile = { x0: number; y0: number; x1: number; y1: number; done: boolean };
+    const tiles: Tile[] = [];
+    for (let ty = by0; ty <= by1; ty += T) for (let tx = bx0; tx <= bx1; tx += T) {
+      const x1 = Math.min(w - 1, tx + T - 1), y1 = Math.min(h - 1, ty + T - 1);
+      if (holeIn(tx, ty, x1, y1) > 0) tiles.push({ x0: tx, y0: ty, x1, y1, done: false });
+    }
+    const f = 4; // coarse search step
+    let any = false;
+    for (let left = tiles.length; left > 0; left--) {
+      // the tile with the most known surroundings
+      let best: Tile | null = null, bk = -1;
+      for (const t of tiles) if (!t.done) {
+        let k = 0, c = 0;
+        const wx0 = Math.max(0, t.x0 - r), wy0 = Math.max(0, t.y0 - r), wx1 = Math.min(w - 1, t.x1 + r), wy1 = Math.min(h - 1, t.y1 + r);
+        for (let y = wy0; y <= wy1; y += 3) for (let x = wx0; x <= wx1; x += 3) { c++; k += known[y * w + x]; }
+        if (k / c > bk) { bk = k / c; best = t; }
+      }
+      const t = best!; t.done = true;
+      const wx0 = Math.max(0, t.x0 - r), wy0 = Math.max(0, t.y0 - r), wx1 = Math.min(w - 1, t.x1 + r), wy1 = Math.min(h - 1, t.y1 + r);
+      // the template: known pixels of the window (every other one)
+      const tp: number[] = [];
+      for (let y = wy0; y <= wy1; y += 2) for (let x = wx0; x <= wx1; x += 2) if (known[y * w + x]) tp.push(x, y);
+      if (tp.length < 16) continue;
+      const cost = (ox: number, oy: number, step: number, lim: number) => {
+        let e = 0;
+        for (let i = 0; i < tp.length; i += 2 * step) {
+          const p = (tp[i + 1] * w + tp[i]) * 4, q = ((tp[i + 1] + oy) * w + tp[i] + ox) * 4;
+          const a = d[p] - d[q], b = d[p + 1] - d[q + 1], c = d[p + 2] - d[q + 2];
+          e += a * a + b * b + c * c;
+          if (e > lim) return e;
+        }
+        return e;
+      };
+      const okAt = (ox: number, oy: number) => wx0 + ox >= 0 && wy0 + oy >= 0 && wx1 + ox < w && wy1 + oy < h && holeIn(t.x0 + ox, t.y0 + oy, t.x1 + ox, t.y1 + oy) === 0 && holeIn(wx0 + ox, wy0 + oy, wx1 + ox, wy1 + oy) === 0;
+      let bo: [number, number] | null = null, be = Infinity;
+      for (let oy = -R; oy <= R; oy += f) for (let ox = -R; ox <= R; ox += f) {
+        if (!okAt(ox, oy)) continue;
+        const e = cost(ox, oy, 5, be);
+        if (e < be) { be = e; bo = [ox, oy]; }
+      }
+      if (!bo) continue;
+      // refine around the best spot, with the whole template
+      let [rx, ry] = bo; be = cost(rx, ry, 1, Infinity);
+      for (let oy = bo[1] - f; oy <= bo[1] + f; oy++) for (let ox = bo[0] - f; ox <= bo[0] + f; ox++) {
+        if ((ox === bo[0] && oy === bo[1]) || !okAt(ox, oy)) continue;
+        const e = cost(ox, oy, 1, be);
+        if (e < be) { be = e; rx = ox; ry = oy; }
+      }
+      any = true;
+      // edge differences for the smooth correction
+      for (let i = 0; i < tp.length; i += 2) {
+        const x = tp[i], y = tp[i + 1], p = y * w + x;
+        if (hole[p]) continue;
+        const q = ((y + ry) * w + x + rx) * 4;
+        dS[p * 3] += orig[p * 4] - orig[q]; dS[p * 3 + 1] += orig[p * 4 + 1] - orig[q + 1]; dS[p * 3 + 2] += orig[p * 4 + 2] - orig[q + 2]; dW[p]++;
+      }
+      for (let y = t.y0; y <= t.y1; y++) for (let x = t.x0; x <= t.x1; x++) {
+        const p = y * w + x;
+        if (!hole[p] || known[p]) continue;
+        const i = p * 4, j = ((y + ry) * w + x + rx) * 4;
+        d[i] = d[j]; d[i + 1] = d[j + 1]; d[i + 2] = d[j + 2];
+        known[p] = 1;
+      }
+    }
+    if (!any) { d.set(orig); return false; }
+    // holes no tile could fill (nothing to copy from): a smooth fill there
+    const rest = new Float32Array(n);
+    let restAny = false;
+    for (let p = 0; p < n; p++) if (!known[p]) { rest[p] = 1; restAny = true; }
+    if (restAny) inpaint(img, rest);
+    // the correction: edge differences (offset by 128 to fit a picture), spread over the hole
+    const corr: PixelImage = { w, h, data: new Uint8ClampedArray(n * 4) };
+    const cm = new Float32Array(n);
+    for (let p = 0; p < n; p++) {
+      const i = p * 4;
+      if (dW[p] > 0) { corr.data[i] = 128 + dS[p * 3] / dW[p]; corr.data[i + 1] = 128 + dS[p * 3 + 1] / dW[p]; corr.data[i + 2] = 128 + dS[p * 3 + 2] / dW[p]; }
+      else { corr.data[i] = corr.data[i + 1] = corr.data[i + 2] = 128; cm[p] = hole[p] ? 1 : 0; }
+      corr.data[i + 3] = 255;
+    }
+    // near the hole, pixels without a measured difference are unknown too (further out: no correction)
+    const ex = r * 2;
+    for (let y = Math.max(0, by0 - ex); y <= Math.min(h - 1, by1 + ex); y++) for (let x = Math.max(0, bx0 - ex); x <= Math.min(w - 1, bx1 + ex); x++) { const p = y * w + x; if (!dW[p] && !hole[p]) cm[p] = 1; }
+    inpaint(corr, cm);
+    for (let p = 0; p < n; p++) {
+      if (!hole[p]) continue;
+      const i = p * 4, a = Math.min(1, M[p] * 1.6);
+      for (let c = 0; c < 3; c++) {
+        const v = d[i + c] + (corr.data[i + c] - 128);
+        d[i + c] = orig[i + c] + (v - orig[i + c]) * a;
+      }
+    }
+    return true;
   }
 
   return { process, prepare, finish, shrink, estimateBlur, warpTo, bentness, erase };
