@@ -391,6 +391,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
         // Every font the line already uses can supply glyphs: the main one first, then the
         // others (a line is often split across several subset / Type3 fonts, e.g. Chrome prints).
         const sources: Source[] = [];
+        const srcOf = new Map<string, number>();
         const order = [main, ...[...count.keys()].filter((k) => k !== main)];
         // then the other pieces of the same typeface & weight used elsewhere on the page,
         // so letters this line doesn't contain still come from the real font
@@ -404,8 +405,40 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
           const fs = g0.style.fontSize * (mainH.height / (g0.height || mainH.height)) * e.sizeScale;
           const map = res === main && Object.keys(e.charMap).length ? e.charMap : toUni(res);
           const fm = fonts(res);
-          sources.push({ key: '/' + res, bpc: fm?.bytesPerCode ?? 1, map, fs, wd: fm ? (c) => fm.width(c) : undefined });
+          srcOf.set(res, sources.length);
+          sources.push({ key: '/' + res, bpc: fm?.bytesPerCode ?? 1, map, fs, fam: family!.root(res), wd: fm ? (c) => fm.width(c) : undefined });
         }
+        // Letters kept from the old line (same start / same end) stay in the font they had; new letters
+        // use the line's main font (not a bold piece that happens to hold the glyph).
+        const prefer: number[] = (() => {
+          const cps = [...e.text];
+          const out = cps.map(() => -1);
+          const old = [...hits].sort((a, b) => (a.origin[0] * ux + a.origin[1] * uy) - (b.origin[0] * ux + b.origin[1] * uy));
+          const inv = new Map<string, Map<number, string>>();
+          const oc = old.map((g) => {
+            const res = g.style.fontRes;
+            if (!inv.has(res)) {
+              const m = new Map<number, string>();
+              for (const [ch, code] of Object.entries(res === main && Object.keys(e.charMap).length ? e.charMap : toUni(res))) m.set(code, ch);
+              inv.set(res, m);
+            }
+            return inv.get(res)!.get(g.code) ?? (g.code === 32 ? ' ' : '');
+          });
+          // spaces are often gaps, not glyphs: compare the letters only
+          const oi = old.map((_, k) => k).filter((k) => oc[k] && oc[k] !== ' ');
+          const ni = cps.map((_, k) => k).filter((k) => !/\s/.test(cps[k]));
+          let a = 0;
+          while (a < ni.length && a < oi.length && cps[ni[a]] === oc[oi[a]]) a++;
+          let z = 0;
+          while (z < ni.length - a && z < oi.length - a && cps[ni[ni.length - 1 - z]] === oc[oi[oi.length - 1 - z]]) z++;
+          for (let k = 0; k < a; k++) out[ni[k]] = srcOf.get(old[oi[k]].style.fontRes) ?? -1;
+          for (let k = 0; k < z; k++) out[ni[ni.length - 1 - k]] = srcOf.get(old[oi[oi.length - 1 - k]].style.fontRes) ?? -1;
+          // letters typed in between continue the look of the letter before them
+          if (a > 0) for (let k = ni[a - 1] + 1; k < (z ? ni[ni.length - z] : cps.length); k++) if (out[k] < 0) out[k] = out[ni[a - 1]];
+          // a space between two kept letters of one font stays in it
+          for (let k = 1; k < cps.length - 1; k++) if (/\s/.test(cps[k]) && out[k] < 0 && out[k - 1] === out[k + 1]) out[k] = out[k - 1];
+          return out;
+        })();
         let s = 'q ' + (e.offset ? `1 0 0 1 ${f(e.offset[0])} ${f(e.offset[1])} cm ` : '') + st.ctm.map(f).join(' ') + ' cm BT ';
         const tr = st.Tr === 3 ? 0 : st.Tr;
         s += `${f(st.Tc)} Tc ${f(st.Tw)} Tw ${f(st.Tz)} Tz ${f(st.Ts)} Ts ${tr} Tr `;
@@ -438,9 +471,13 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
             // the next line as far down as its largest letters need
             if (li > 0) down += lead * Math.max(1, ...(lineK?.[li] ?? [1]));
             const lineTm = mulM([1, 0, 0, 1, 0, -down], first.tm);
-            const w = writeLine(pieces(line, lineK?.[li], lineL?.[li]), (p) => ({
-              ...encodeMixed(p.t.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe, true, p.k, sp), fauxB: !!p.l?.b, fauxI: !!p.l?.i,
-            }), { lineTm, fill, tr, fs: sources[0].fs, boldW: (fs) => fs * FAUX_BOLD * vs });
+            let at = lines.slice(0, li).reduce((n, l) => n + [...l].length + 1, 0);
+            const w = writeLine(pieces(line, lineK?.[li], lineL?.[li]), (p) => {
+              const pf = prefer.slice(at, at + [...p.t].length);
+              at += [...p.t].length;
+              return {
+              ...encodeMixed(p.t.normalize('NFC'), sources, fbKey, sources[0].fs, fb, safe, true, p.k, sp, p.t.normalize('NFC') === p.t ? pf : undefined), fauxB: !!p.l?.b, fauxI: !!p.l?.i,
+            }; }, { lineTm, fill, tr, fs: sources[0].fs, boldW: (fs) => fs * FAUX_BOLD * vs });
             s += w.ops;
             deco += w.deco;
           });
@@ -702,7 +739,7 @@ function fontFamilies(glyphs: Glyph[], toUni: (res: string) => Record<string, nu
   return { root: find, all: () => [...parent.keys()] };
 }
 
-interface Source { key: string; bpc: number; map: Record<string, number>; fs: number; /** advance of a code (text space per unit of size) */ wd?: (code: number) => number }
+interface Source { key: string; /** the typeface group (pieces of one font share it) */ fam?: string; bpc: number; map: Record<string, number>; fs: number; /** advance of a code (text space per unit of size) */ wd?: (code: number) => number }
 
 /** one line of Arabic-script text: its pieces in screen order, shaped by the font, and its width */
 function arabicLine(af: PDFFont, line: string, rtl: boolean, size: number): { tj: string; width: number } {
@@ -731,6 +768,8 @@ function encodeMixed(
   /** size of the letters × the line's size */
   k = 1,
   sp: Spacing = { tc: 0, tw: 0, tz: 100 },
+  /** per letter: the source it keeps from the old text (-1: none) */
+  prefer?: number[],
 ): { ops: string; w: number } {
   // split into runs per font: the line's own fonts first, a standard font for anything else
   let out = '';
@@ -768,8 +807,13 @@ function encodeMixed(
     buf = [];
     fbBuf = '';
   };
+  let ci = 0;
   for (const ch of line) {
-    let idx = sources.findIndex((s) => s.map[ch] !== undefined);
+    const pi = prefer?.[ci++] ?? -1;
+    // a kept letter keeps its font; a new one comes from the main font's own typeface group
+    let idx = pi >= 0 && sources[pi].map[ch] !== undefined ? pi
+      : prefer ? sources.findIndex((s) => s.fam === sources[0].fam && s.map[ch] !== undefined)
+      : sources.findIndex((s) => s.map[ch] !== undefined);
     if (idx < 0 && ch === ' ' && gapSpace) idx = cur >= 0 ? cur : 0; // keep spaces in the current font (as a gap)
     if (idx !== cur) { flush(); cur = idx; }
     if (idx >= 0) buf.push([sources[idx].map[ch] ?? -1, ch]);
