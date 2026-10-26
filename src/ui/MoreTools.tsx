@@ -476,7 +476,8 @@ async function readPages(src: Src, ocr: boolean, prog: (f: number) => void): Pro
   for (let k = 0; k < src.pages.length; k++) {
     const page = await src.pdf.getPage(src.pages[k].src + 1);
     let t = pageText((await page.getTextContent()).items);
-    if (t.replace(/\s/g, '').length < 8 && ocr) {
+    // only pages with (almost) no text of their own are read as pictures: short real text beats OCR
+    if (t.replace(/\s/g, '').length < 4 && ocr) {
       if (!worker) worker = await (await import('./ocr')).loadOcr();
       const vp = page.getViewport({ scale: 2.4 });
       const c = document.createElement('canvas');
@@ -642,7 +643,12 @@ export function SafeCopy(p: TP) {
   const note = lang === 'de'
     ? `KOPIE – nur für ${purpose.trim() || '…'}${to.trim() ? ` an ${to.trim()}` : ''} – ${date}`
     : `COPY – only for ${(PURPOSES.find((x) => x[0] === purpose)?.[1] ?? purpose.trim()) || '…'}${to.trim() ? ` to ${to.trim()}` : ''} – ${date}`;
+  const [err, setErr] = useState<string | null>(null);
   const pick = async (files: File[]) => {
+    setErr(null);
+    try { await pickFiles(files); } catch { setErr('That file couldn’t be opened. Choose a PDF or a photo.'); }
+  };
+  const pickFiles = async (files: File[]) => {
     const list: NonNullable<typeof items> = [];
     for (const f of files) {
       if (isPdf(f)) {
@@ -689,7 +695,8 @@ export function SafeCopy(p: TP) {
         <div className="flist" style={{ maxWidth: 560, marginTop: '6vh' }}>
           <DropBox icon="identification-badge:duotone" title="Choose an ID, passport or other document" button="Choose files"
             sub="A PDF or photos. The copy gets “COPY – only for …” written across it, burned into the picture."
-            accept={ACCEPT.pdfOrImage} multiple filter={(f) => isPdf(f) || isImage(f)} onFiles={pick} />
+            accept={ACCEPT.pdfOrImage} multiple filter={(f) => isPdf(f) || isImage(f)} onFiles={pick}
+            onReject={() => setErr('That isn’t a PDF or a picture.')} err={err} />
         </div>
       </div>
     );
