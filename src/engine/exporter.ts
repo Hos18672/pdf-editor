@@ -295,7 +295,13 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
     if (reds.length) {
       const inv = invert(vm);
       const boxes = reds.map((o) => boxOf([[o.x, o.y], [o.x + o.w, o.y], [o.x + o.w, o.y + o.h], [o.x, o.y + o.h]].map(([x, y]) => applyM(inv, x, y))));
-      for (const g of glyphs) if (boxes.some((b) => coverShare(glyphBox(g), b) > 0.3)) remove.add(g);
+      // a letter the box reaches into goes whole (a sliver left outside the box would still show it); the
+      // lines above and below, which the box only grazes, stay
+      const hit = (a: Box, b: Box) => {
+        const w = Math.min(a.x1, b.x1) - Math.max(a.x0, b.x0), h = Math.min(a.y1, b.y1) - Math.max(a.y0, b.y0);
+        return w > 0 && h > 0 && w / Math.max(1e-6, a.x1 - a.x0) > 0.08 && h / Math.max(1e-6, a.y1 - a.y0) > 0.35;
+      };
+      for (const g of glyphs) if (boxes.some((b) => hit(glyphBox(g), b))) remove.add(g);
       await redactPictures(doc, resources, draws, boxes).catch((err) => console.warn('redact pictures', err));
     }
     // Remove: letters, shapes and pictures wholly under the painted strokes are taken out
