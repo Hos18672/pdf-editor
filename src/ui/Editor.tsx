@@ -387,7 +387,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const onWheel = (e: WheelEvent) => {
       if (!e.ctrlKey && !e.metaKey) return;
       e.preventDefault();
-      wheelK *= Math.exp(-e.deltaY * 0.01);
+      // a mouse wheel notch (±100) is one gentle step (about ×1.35); a pinch sends small deltas
+      wheelK *= Math.exp(-Math.max(-30, Math.min(30, e.deltaY)) * 0.01);
       wheelAt = { x: e.clientX, y: e.clientY };
       if (wheelFrame) return;
       wheelFrame = requestAnimationFrame(() => {
@@ -1759,7 +1760,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             })}
           </div>
           <span className="sep" aria-hidden />
-          <button className={`dk3 more${moreOpen ? ' on' : ''}`} aria-haspopup="dialog" onClick={() => { setFlyout(null); setMoreOpen(true); }}>
+          <button className={`dk3 more${moreOpen ? ' on' : ''}`} aria-haspopup="dialog" onClick={() => { setFlyout(null); setSelected(null); setMoreOpen(true); }}>
             <span className="ic"><Icon name="dots-nine:bold" size={22} /></span>More
           </button>
         </nav>

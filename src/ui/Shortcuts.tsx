@@ -32,6 +32,12 @@ const GROUPS: { name: string; rows: [string[], string][] }[] = [
 
 export function ShortcutsSheet({ onClose }: { onClose: () => void }) {
   useBack(onClose);
+  // Esc closes the list
+  React.useEffect(() => {
+    const k = (e: KeyboardEvent) => { if (e.key === 'Escape') { e.stopPropagation(); onClose(); } };
+    window.addEventListener('keydown', k, true);
+    return () => window.removeEventListener('keydown', k, true);
+  }, [onClose]);
   return (
     <>
       <div className="sheet-scrim keys-scrim" onClick={onClose} />
