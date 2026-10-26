@@ -293,7 +293,8 @@ export function shapeOf(quad: Quad, w: number, h: number, mode: ScanMode, bent =
   // receipts, and book pages (any trim size): their own proportions
   if (mode === 'receipt' || mode === 'book') return { format: null, ratio: r };
   // a page whose sides bend is paper, never a stiff card
-  const s = snapRatio(r, bent ? ['a4', 'letter', 'legal', 'a5'] : ['a4', 'letter', 'legal', 'a5', 'id1', 'id3']);
+  // (a passport page is the same shape as A4 within 0.5%: only Passport mode picks it, else every other A4 photo became one)
+  const s = snapRatio(r, bent ? ['a4', 'letter', 'legal', 'a5'] : ['a4', 'letter', 'legal', 'a5', 'id1']);
   // sheets lie in either orientation, but a "landscape legal" is far more likely an ID card
   if (s.format?.id === 'legal' && r > 1) {
     const c = snapRatio(r, ['id1'], 0.08);

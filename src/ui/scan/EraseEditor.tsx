@@ -266,7 +266,7 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
         {cursor && s > 0 && !moving && !panning.current && <i className="serase-brush" style={{ left: cursor.x - (stage.current?.getBoundingClientRect().left ?? 0), top: cursor.y - (stage.current?.getBoundingClientRect().top ?? 0), width: brushPx * 2, height: brushPx * 2 }} />}
         {!plain && <div className="scrop-wait"><span className="spinner" /></div>}
         {busy && plain && <div className="serase-busy" role="status"><span className="spinner" />Removing…</div>}
-        <div className="serase-zoom">
+        <div className="serase-zoom" onPointerDown={(e) => e.stopPropagation()}>  {/* not a brush stroke, and the click must reach the buttons */}
           <button onClick={() => zoomBy(1 / 1.4)} disabled={z.k <= 1.001} aria-label="Zoom out" title="Zoom out (−)"><Icon name="minus" size={16} /></button>
           <button className="pct" onClick={() => setZ(NOZ)} disabled={z.k <= 1.001} title="Fit the page (0)">{pct}%</button>
           <button onClick={() => zoomBy(1.4)} disabled={z.k >= MAXZ - 0.01} aria-label="Zoom in" title="Zoom in (+)"><Icon name="plus" size={16} /></button>
