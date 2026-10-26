@@ -112,7 +112,7 @@ export function DropBox({ icon, title, sub, accept, multiple, onFiles, filter, o
       </div>
       <button className="btn primary lg" onClick={() => input.current?.click()}><Icon name="open" size={18} />{button}</button>
       {err && <div className="dz-err">{err}</div>}
-      <input ref={input} type="file" accept={accept} multiple={multiple} hidden onChange={(e) => { const f = e.target.files; e.target.value = ''; if (f?.length) take([...f]); }} />
+      <input ref={input} type="file" accept={accept} multiple={multiple} hidden onChange={(e) => { const f = [...(e.target.files ?? [])]; e.target.value = ''; if (f.length) take(f); }} />
     </div>
   );
 }
