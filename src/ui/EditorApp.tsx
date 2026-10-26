@@ -247,7 +247,7 @@ export default function EditorApp(host: HostProps) {
       }
       open(name, bytes);
     } catch (e: any) {
-      setOpenState({ kind: 'error', message: `That file couldn’t be turned into a PDF${e?.message ? ` (${e.message})` : ''}.` } as any);
+      setOpenState({ kind: 'error', message: e?.message === 'unsupported' ? 'That file type isn’t supported. Use a PDF, a picture, a Word, Excel or PowerPoint file, or text.' : `That file couldn’t be turned into a PDF${e?.message ? ` (${e.message})` : ''}.` } as any);
     }
   };
   const pick = async () => {
@@ -336,11 +336,12 @@ export default function EditorApp(host: HostProps) {
           onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }}
           onScan={() => setRoute({ name: 'scan', back: 'tools' })} />
       ) : (
-        <Start state={openState} onFile={(f) => readFile(f)} onImport={importFiles} onPick={pick} mobile={bp === 'mobile'}
+        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
           onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme}
           onRecent={async (d) => {
             const b = await recentBytes(d.id);
+            startAfterOpen.current = undefined; // a cancelled "Sign" must not leak into this file
             if (b) open(d.name, b, undefined, d.kind, d.id);
             else setToastMsg({ msg: 'That file is no longer stored here', kind: 'err' });
           }}

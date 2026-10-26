@@ -35,7 +35,8 @@ export function Tools(p: Props) {
   const [tool, setTool] = useState<ToolId>(p.initial);
   const [convertKind, setConvertKind] = useState<string>('');
   const mobile = p.bp === 'mobile', desk = p.bp === 'desktop' || p.bp === 'large';
-  const back = () => (tool === 'hub' ? p.onBack() : setTool('hub'));
+  // a tool opened straight from a start-screen chip goes back to where it came from, not to the list
+  const back = () => (tool === 'hub' || tool === p.initial ? p.onBack() : setTool('hub'));
   useBack(back);
   const meta: Record<ToolId, [string, string]> = {
     hub: ['All tools', 'Every tool runs on this device'],
@@ -196,7 +197,7 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const started = useRef(false);
 
-  const drop = useFileDrop((f) => add(f), { accept: (f) => isPdf(f) || isImage(f) });
+  const drop = useFileDrop((f) => add(f), { accept: (f) => isPdf(f) || isImage(f), onReject: () => p.toast({ msg: 'Only PDFs and images can be combined. Use “Convert to PDF” for other files.', kind: 'err' }) });
   const add = async (list: FileList | File[]) => {
     const added: CFile[] = [];
     for (const f of Array.from(list)) {
@@ -230,6 +231,9 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
 
   const run = async () => {
     if (!files.length) return;
+    // a range that matches no page of its file would silently leave the file out
+    const badRange = files.find((f) => f.kind === 'pdf' && f.range.trim() && !parseRange(f.range, f.pages).length);
+    if (badRange) { p.toast({ msg: `“${badRange.range}” matches no page of ${badRange.name} (${badRange.pages} pages)`, kind: 'err' }); return; }
     p.setBusy({ title: 'Combining files', detail: `${files.length} files · ${total} pages. Nothing is uploaded.` });
     try {
       const out = await PDFDocument.create();
