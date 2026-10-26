@@ -1269,9 +1269,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       if (same && flyout?.t === r.t) setFlyout(null); else openFlyout(r.t);
       return;
     }
-    if (same && r.opts && !mobile) { if (flyout?.t === r.t) setFlyout(null); else openFlyout(r.t); return; }
+    // phone: Remove (brush size) and Draw (colour, width) show their options too; nothing can be edited after
+    const phoneOpts = mobile && (r.t === 'remove' || r.t === 'draw');
+    if (same && r.opts && (!mobile || phoneOpts)) { if (flyout?.t === r.t) setFlyout(null); else openFlyout(r.t); return; }
     pickTool(r.t);
-    if (r.opts && !mobile) openFlyout(r.t);
+    if (r.opts && (!mobile || phoneOpts)) openFlyout(r.t);
   };
   const railActive = (r: RailItem) => r.t === 'pages' ? view === 'pages'
     : view === 'pages' ? false
@@ -1712,7 +1714,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                   ))}
                 </div>
               )}
-              {!mobile && toolHasProps(t) && <ToolProps tool={t} style={style} compact onChange={(v) => setStyle((x) => ({ ...x, ...v }))} />}
+              {(!mobile || flyout.t === 'remove' || flyout.t === 'draw') && toolHasProps(t) && <ToolProps tool={t} style={style} compact onChange={(v) => setStyle((x) => ({ ...x, ...v }))} />}
             </div>
           );
         })()}
