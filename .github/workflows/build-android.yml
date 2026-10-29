@@ -81,7 +81,12 @@ jobs:
         run: |
           tag="${GITHUB_REF_NAME}"
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="android-build-${{ github.run_number }}"; fi
-          gh release create "$tag" "${{ steps.apk.outputs.file }}" \
+          # the error (if any) is written as an annotation, so it can be read without the full log
+          gh --version | head -1
+          if ! out=$(gh release create "$tag" "${{ steps.apk.outputs.file }}" \
             --target "${GITHUB_SHA}" \
             --title "Paginka ${{ steps.apk.outputs.version }} (Android, build ${{ github.run_number }})" \
-            --notes "Android app (APK) built from ${GITHUB_SHA::7}. On your phone: download the .apk, open it and allow installing from this source."
+            --notes "Android app (APK) built from ${GITHUB_SHA::7}. On your phone: download the .apk, open it and allow installing from this source." 2>&1); then
+            echo "::error title=Publish failed::$(echo "$out" | tr '\n' ' ' | head -c 900)"
+            exit 1
+          fi
