@@ -85,7 +85,7 @@ jobs:
           # every background process gets its own output files (a pipe left open keeps the step running)
           adb start-server > /dev/null 2>&1 < /dev/null
           setsid nohup emulator -avd smoke -no-window -gpu swangle_indirect -no-snapshot -noaudio -no-boot-anim \
-            -camera-back none -camera-front none -memory 4096 -cores 4 -accel on > emu.log 2>&1 < /dev/null &
+            -memory 4096 -cores 4 -accel on > emu.log 2>&1 < /dev/null &
           t0=$(date +%s)
           timeout 300 adb wait-for-device < /dev/null || { echo "::error title=no device after 5 min::$(tail -c 1500 emu.log | tr '\n' ' ')"; exit 1; }
           until [ "$(timeout 10 adb shell getprop sys.boot_completed < /dev/null 2>/dev/null | tr -d '\r')" = "1" ]; do
@@ -93,7 +93,10 @@ jobs:
             sleep 5
           done
           for k in window_animation_scale transition_animation_scale animator_duration_scale; do timeout 10 adb shell settings put global $k 0 < /dev/null || true; done
-          echo "::notice title=emulator booted::in $(( $(date +%s) - t0 ))s"
+          # right after boot Play Services is still starting up; under that load it can freeze (ANR) and take
+          # the app with it (the app's WebView uses its fonts): let the system settle first
+          sleep 75
+          echo "::notice title=emulator booted::in $(( $(date +%s) - t0 ))s (incl. 75s settle)"
 
       - name: Run the test on the emulator
         timeout-minutes: 25
