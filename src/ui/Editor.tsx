@@ -830,7 +830,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setRemovingBusy((n) => n + 1);
     try {
       const content = await readContent(src);
-      const inFile = cutsSomething(content, stroke, vm);
+      const inFile = await cutsSomething(content, stroke, vm);
       // lines under the paint: changed ones lose their new text, untouched ones are taken out with the cut
       const gone = (pageData[src]?.runs ?? []).filter((r) => {
         // only lines changed in the editor: their new text isn't in the file, so the cut can't reach it
@@ -852,8 +852,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         });
         return;
       }
-      if (content) { toast({ msg: 'Nothing to remove there' }); return; }
-      // the page's content couldn't be read: the page's own texture is copied over it instead
+      // a page with real text: the stroke missed it
+      if (content && content.it.glyphs.length) { toast({ msg: 'Nothing to remove there' }); return; }
+      // a picture page whose picture the file holds in a way that can't be cut (inline), or content that
+      // couldn't be read: the page's own texture is copied over what shows there instead
       const src0 = preview && preview.keys[src] !== undefined ? preview.pdf : pdf;
       const patch = await textureFill(await src0.getPage(src + 1), stroke, infos[src]);
       if (!patch) { toast({ msg: 'Nothing to remove there' }); return; }

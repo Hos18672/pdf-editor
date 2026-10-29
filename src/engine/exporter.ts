@@ -4,7 +4,7 @@ import {
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, hideGlyphs, invert, Glyph, M } from './interpreter';
-import { cutPlan, erasePictures } from './cut';
+import { cutPlan, cutForms, erasePictures } from './cut';
 import { readFontMetrics, FontMetrics, parseToUnicode } from './fonts';
 import { renderScanText } from './scanText';
 import { addTextLayer } from './textLayer';
@@ -314,6 +314,9 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       plan.glyphs.forEach((g) => hide.add(g));
       cutBlank = plan.blank;
       await erasePictures(doc, resources, plan.pictures, cutStrokes, vm).catch((err) => console.warn('remove in pictures', err));
+      // what the page keeps inside forms (a placed page, a stamp): taken out of a copy of the form
+      const inForms = await cutForms(doc, resources, draws.filter((d) => !plan.blank.has(d.opIndex)), cutStrokes, vm).catch((err) => { console.warn('remove in forms', err); return null; });
+      if (inForms) for (const [i, v] of inForms.rep) cutBlank.set(i, v);
     }
     // invisible lines read again from the picture: their new text is written with the layer below
     for (const region of input.dropText?.[pi] ?? []) {

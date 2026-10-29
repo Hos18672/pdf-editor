@@ -1077,7 +1077,7 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .scam { position: fixed; inset: 0; z-index: 40; background: #07080C; color: #fff; display: flex; flex-direction: column; overflow: hidden; user-select: none; -webkit-user-select: none; }
 .scam-view { position: absolute; inset: 0; }
 .scam-frame { position: absolute; inset: 0; overflow: hidden; }
-.scam-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #07080C; }
+.scam-frame video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; background: #07080C; }
 .scam-svg { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
 .scam-svg polygon { fill: rgba(255,225,77,.16); stroke-opacity: .98; stroke: #FFE14D; stroke-width: 3; stroke-linejoin: round; transition: fill .2s; }
 .scam-svg polygon.go { fill: rgba(91,214,154,.22); stroke: #5BD69A; }

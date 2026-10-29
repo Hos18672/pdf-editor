@@ -66,7 +66,7 @@ interface GState {
   fill: string[];
 }
 
-export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undefined) {
+export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undefined, ctm0: M = IDENT) {
   const glyphs: Glyph[] = [];
   const shows = new Map<number, ShowOp>();
   /** XObjects drawn (pictures, forms) and where: the unit square through `ctm` */
@@ -74,7 +74,7 @@ export function interpret(ops: Op[], fonts: (res: string) => FontMetrics | undef
   /** shapes drawn: the ops that build and paint each path, and its points (user space; control points too) */
   const paths: PathDraw[] = [];
   let pStart = -1, pPts: [number, number][] = [], pClip = false;
-  let gs: GState = { ctm: IDENT, fontRes: '', fontSize: 0, Tc: 0, Tw: 0, Tz: 100, TL: 0, Ts: 0, Tr: 0, fill: [] };
+  let gs: GState = { ctm: ctm0, fontRes: '', fontSize: 0, Tc: 0, Tw: 0, Tz: 100, TL: 0, Ts: 0, Tr: 0, fill: [] };
   const stack: GState[] = [];
   let tm: M = IDENT;
   let tlm: M = IDENT;

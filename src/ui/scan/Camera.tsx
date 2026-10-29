@@ -198,9 +198,8 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       const v = video.current, b = box.current;
       if (!v || !b || !v.videoWidth || busyRef.current) { timer = window.setTimeout(tick, 120); return; }
       const vw = v.videoWidth, vh = v.videoHeight;
-      // the whole camera frame is shown (object-fit: contain: nothing cut off, so the view isn't zoomed in
-      // and what is seen is what the photo holds)
-      const cw0 = b.clientWidth || vw, ch0 = b.clientHeight || vh, sc0 = Math.min(cw0 / vw, ch0 / vh);
+      // the camera fills the screen (object-fit: cover): pages are looked for in the part on screen
+      const cw0 = b.clientWidth || vw, ch0 = b.clientHeight || vh, sc0 = Math.max(cw0 / vw, ch0 / vh);
       const visW = Math.min(vw, cw0 / sc0), visH = Math.min(vh, ch0 / sc0), sx = (vw - visW) / 2, sy = (vh - visH) / 2;
       const k0 = Math.min(1, 360 / Math.max(visW, visH));
       const fw = Math.max(1, Math.round(visW * k0)), fh = Math.max(1, Math.round(visH * k0));
@@ -211,8 +210,8 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
       if (stop) return;
       const k = visW / fw;
       const now = performance.now();
-      // where the video is drawn (object-fit: contain: the whole frame, centred)
-      const cw = b.clientWidth, ch = b.clientHeight, sc = Math.min(cw / vw, ch / vh);
+      // where the video is drawn (object-fit: cover: filling the screen, centred)
+      const cw = b.clientWidth, ch = b.clientHeight, sc = Math.max(cw / vw, ch / vh);
       const ox = (cw - vw * sc) / 2, oy = (ch - vh * sc) / 2;
       // a clear outline, or an outline that matches the sheet as a whole (a receipt on a white desk)
       const diag = Math.hypot(vw, vh);

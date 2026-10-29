@@ -1,15 +1,15 @@
 // The Remove tool in the editor: what a brush stroke covers is taken out of the page's content (letters,
 // shapes, pictures wholly under it); where nothing in the file can be (a scan, a photo), the page's own
 // texture is copied over it as a picture of just that area.
-import { PDFDocument } from 'pdf-lib';
+import { PDFDict, PDFDocument } from 'pdf-lib';
 import { tokenize, type Op } from '../engine/contentStream';
 import { interpret } from '../engine/interpreter';
-import { cutPlan, pageFonts, type CutStroke } from '../engine/cut';
+import { cutForms, cutPlan, pageFonts, type CutStroke } from '../engine/cut';
 import { readContents } from '../engine/exporter';
 import type { M } from '../engine/types';
 import { eraseImage } from './scan/engine';
 
-type Content = { ops: Op[]; it: ReturnType<typeof interpret> };
+type Content = { ops: Op[]; it: ReturnType<typeof interpret>; doc: PDFDocument; res: PDFDict | undefined };
 
 /** the parsed content of a document's pages, read once per document (bytes) */
 export function contentReader(bytes: Uint8Array) {
@@ -23,7 +23,7 @@ export function contentReader(bytes: Uint8Array) {
         if (!d) return null;
         const leaf = d.getPage(src).node;
         const ops = tokenize(readContents(d, leaf));
-        return { ops, it: interpret(ops, pageFonts(d, leaf)) };
+        return { ops, it: interpret(ops, pageFonts(d, leaf)), doc: d, res: leaf.Resources() };
       }).catch(() => null);
       pages.set(src, p);
     }
@@ -32,10 +32,12 @@ export function contentReader(bytes: Uint8Array) {
 }
 
 /** does the stroke take anything out of the page's content? */
-export function cutsSomething(c: Content | null, stroke: CutStroke, vm: M): boolean {
+export async function cutsSomething(c: Content | null, stroke: CutStroke, vm: M): Promise<boolean> {
   if (!c) return false;
   const plan = cutPlan(c.ops, c.it, [stroke], vm);
-  return plan.glyphs.size > 0 || plan.blank.size > 0 || plan.pictures.length > 0;
+  if (plan.glyphs.size > 0 || plan.blank.size > 0 || plan.pictures.length > 0) return true;
+  // inside forms the page draws (a placed page, a stamp)
+  return (await cutForms(c.doc, c.res, c.it.draws, [stroke], vm, true).catch(() => null))?.found ?? false;
 }
 
 /**

@@ -2,10 +2,10 @@
 // own background (a printed pattern drawn as lines, a tint, a picture behind) shows again exactly.
 // Letters, shapes and placed pictures that lie (almost) wholly under the paint go; everything that
 // reaches out of it (the background pattern's long lines, a frame) stays.
-import { PDFDocument, PDFDict, PDFName, PDFPageLeaf, PDFRef, PDFRawStream } from 'pdf-lib';
+import { PDFDocument, PDFDict, PDFName, PDFPageLeaf, PDFRef, PDFRawStream, PDFArray, decodePDFRawStream } from 'pdf-lib';
 import type { Op } from './contentStream';
 import { tokenize, rebuild } from './contentStream';
-import { interpret, hideGlyphs, apply, invert, Glyph, M, PathDraw } from './interpreter';
+import { interpret, hideGlyphs, apply, invert, mul, Glyph, M, PathDraw } from './interpreter';
 import { readFontMetrics, FontMetrics } from './fonts';
 
 /** a brush stroke in page view units (scale 1, the page's own rotation): points as x, y pairs, radius */
@@ -34,12 +34,17 @@ export function cutPlan(ops: Op[], it: { glyphs: Glyph[]; draws: { name: string;
   const inside = (x: number, y: number, grow = 0) => { const [vx, vy] = apply(vm, x, y); return underStrokes(strokes, vx, vy, grow); };
   const glyphs = new Set<Glyph>();
   for (const g of it.glyphs) {
-    // a letter the paint touches goes whole (its left edge, middle or right edge, half way up; not the
-    // lines above and below, which the brush only grazes)
+    // a letter the paint touches goes whole: its left edge, middle or right edge, low, half way or high up
+    // its body (a small brush over the top of a big letter still takes it; the lines above and below,
+    // which the brush only grazes, stay)
     const dx = g.end[0] - g.origin[0], dy = g.end[1] - g.origin[1], len = Math.hypot(dx, dy) || 1;
-    const ux = -dy / len * g.height * 0.35, uy = dx / len * g.height * 0.35;
-    const pts: [number, number][] = [0.12, 0.5, 0.88].map((t) => [g.origin[0] + dx * t + ux, g.origin[1] + dy * t + uy]);
-    if (pts.some(([x, y]) => inside(x, y))) glyphs.add(g);
+    const nx = -dy / len * g.height, ny = dx / len * g.height;
+    let hit = false;
+    for (const up of [0.12, 0.35, 0.6]) {
+      for (const t of [0.12, 0.5, 0.88]) if (inside(g.origin[0] + dx * t + nx * up, g.origin[1] + dy * t + ny * up)) { hit = true; break; }
+      if (hit) break;
+    }
+    if (hit) glyphs.add(g);
   }
   const blank = new Map<number, string>();
   // a little slack: a stroke painted right along a shape's edge still takes it
@@ -74,6 +79,70 @@ export function cutContent(original: Uint8Array, fonts: (res: string) => FontMet
   const rep = hideGlyphs(it.glyphs, it.shows, plan.glyphs);
   for (const [i, v] of plan.blank) rep.set(i, v);
   return rebuild(original, ops, rep);
+}
+
+/**
+ * Remove inside forms (content the file keeps in a form XObject: a page placed onto another, a stamp, a
+ * whole page wrapped in one): what lies under the strokes is taken out of a copy of the form, and the page
+ * draws the copy instead (the original may be drawn on other pages too). Pictures in the form are filled
+ * in as on the page. Returns the page's `Do` ops to change; `dry`: only whether anything would go.
+ */
+export async function cutForms(doc: PDFDocument, resources: PDFDict | undefined, draws: { name: string; ctm: M; opIndex: number }[], strokes: CutStroke[], vm: M, dry = false, depth = 0): Promise<{ found: boolean; rep: Map<number, string> }> {
+  const rep = new Map<number, string>();
+  let found = false;
+  const xo = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
+  if (!xo || !draws.length || depth > 3) return { found, rep };
+  let sx0 = Infinity, sy0 = Infinity, sx1 = -Infinity, sy1 = -Infinity;
+  for (const st of strokes) for (let i = 0; i + 1 < st.pts.length; i += 2) {
+    sx0 = Math.min(sx0, st.pts[i] - st.r); sx1 = Math.max(sx1, st.pts[i] + st.r); sy0 = Math.min(sy0, st.pts[i + 1] - st.r); sy1 = Math.max(sy1, st.pts[i + 1] + st.r);
+  }
+  const nums = (v: unknown) => (v instanceof PDFArray ? v.asArray().map((n: any) => n?.asNumber?.() ?? 0) : null);
+  for (const d of draws) {
+    const ref = xo.get(PDFName.of(d.name));
+    const st = ref instanceof PDFRef ? doc.context.lookup(ref) : ref;
+    if (!(st instanceof PDFRawStream) || st.dict.get(PDFName.of('Subtype'))?.toString() !== '/Form') continue;
+    const m = nums(st.dict.lookup(PDFName.of('Matrix')));
+    const ctm = m && m.length === 6 ? mul(m as M, d.ctm) : d.ctm;
+    // the form's box on the page: strokes elsewhere don't reach it
+    const bb = nums(st.dict.lookup(PDFName.of('BBox')));
+    if (bb && bb.length === 4) {
+      const v = [[bb[0], bb[1]], [bb[2], bb[1]], [bb[2], bb[3]], [bb[0], bb[3]]].map(([x, y]) => { const [ux, uy] = apply(ctm, x, y); return apply(vm, ux, uy); });
+      if (Math.max(...v.map((q) => q[0])) < sx0 || Math.min(...v.map((q) => q[0])) > sx1 || Math.max(...v.map((q) => q[1])) < sy0 || Math.min(...v.map((q) => q[1])) > sy1) continue;
+    }
+    let bytes: Uint8Array;
+    try { bytes = decodePDFRawStream(st).decode(); } catch { continue; }
+    const res = st.dict.lookupMaybe(PDFName.of('Resources'), PDFDict) ?? resources;
+    const fontDict = res?.lookupMaybe(PDFName.of('Font'), PDFDict);
+    const cache = new Map<string, FontMetrics | undefined>();
+    const fonts = (r: string) => {
+      if (!cache.has(r)) { const fd = fontDict?.lookupMaybe(PDFName.of(r), PDFDict); cache.set(r, fd ? readFontMetrics(doc.context, fd) : undefined); }
+      return cache.get(r);
+    };
+    const ops = tokenize(bytes);
+    const it = interpret(ops, fonts, ctm);
+    const plan = cutPlan(ops, it, strokes, vm);
+    const inner = await cutForms(doc, res, it.draws.filter((x) => !plan.blank.has(x.opIndex)), strokes, vm, dry, depth + 1);
+    const any = plan.glyphs.size > 0 || plan.blank.size > 0 || plan.pictures.length > 0 || inner.found;
+    if (!any) continue;
+    found = true;
+    if (dry) return { found, rep };
+    if (plan.pictures.length) await erasePictures(doc, res, plan.pictures, strokes, vm).catch((err) => console.warn('remove in form pictures', err));
+    if (!plan.glyphs.size && !plan.blank.size && !inner.rep.size) continue;
+    const r = hideGlyphs(it.glyphs, it.shows, plan.glyphs);
+    for (const [i, v] of plan.blank) r.set(i, v);
+    for (const [i, v] of inner.rep) r.set(i, v);
+    const dict = doc.context.obj({}) as PDFDict;
+    for (const [k, v] of st.dict.entries()) if (!['/Filter', '/DecodeParms', '/Length'].includes(k.toString())) dict.set(k, v);
+    if (!st.dict.get(PDFName.of('Resources')) && res) dict.set(PDFName.of('Resources'), res);
+    const copy = doc.context.register(doc.context.flateStream(rebuild(bytes, ops, r), {}));
+    const made = doc.context.lookup(copy) as PDFRawStream;
+    for (const [k, v] of dict.entries()) made.dict.set(k, v);
+    let name = `${d.name}c`, n = 0;
+    while (xo.get(PDFName.of(name))) name = `${d.name}c${++n}`;
+    xo.set(PDFName.of(name), copy);
+    rep.set(d.opIndex, `/${name} Do`);
+  }
+  return { found, rep };
 }
 
 /** the font metrics of a page's fonts, by resource name */
