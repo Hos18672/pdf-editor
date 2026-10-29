@@ -58,6 +58,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run on emulator
+        timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -65,13 +66,15 @@ jobs:
           target: google_apis
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: bash .github/scripts/${{ inputs.suite == 'scan' && 'smoke-scan.sh' || inputs.suite == 'ai' && 'smoke-ai.sh' || 'smoke.sh' }}
+          # a hung adb / DevTools call must not eat the whole job: stop after 25 min, keep the log and logcat
+          script: mkdir -p out && timeout -k 20 1500 bash .github/scripts/${{ inputs.suite == 'scan' && 'smoke-scan.sh' || inputs.suite == 'ai' && 'smoke-ai.sh' || 'smoke.sh' }} 2>&1 | tee out/run.log; adb logcat -d > out/logcat-end.txt; true
 
       - name: Publish results as a pre-release
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          grep -iE "CONSOLE|chromium|ReactNativeJS|AndroidRuntime|WebView" out/logcat.txt | head -200 || true
+          mkdir -p out; date -u > out/published-at.txt
+          cat out/logcat*.txt | grep -iE "CONSOLE|chromium|ReactNativeJS|AndroidRuntime|WebView" | head -200 || true
           gh release create "smoke-${{ github.run_number }}" out/* --prerelease --target "${GITHUB_SHA}" \
             --title "Smoke test ${{ github.run_number }}" --notes "Emulator screenshots and logcat."

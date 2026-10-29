@@ -33,3 +33,22 @@ adb shell am start -a android.intent.action.VIEW -d pdfeditor://action/scan -n $
 sleep 8
 adb exec-out screencap -p > out/shortcut-scan.png
 cat out/intents.txt
+# a share with neither file nor text must be ignored (no file picker), and a recreate must not re-handle the file
+adb shell am force-stop $P
+adb shell am start -a android.intent.action.SEND -t text/plain -n $P/.MainActivity >> out/intents.txt 2>&1
+sleep 15
+adb exec-out screencap -p > out/share-empty.png
+adb shell dumpsys window | grep -E "mCurrentFocus" | sed 's/^/empty-share focus: /' >> out/intents.txt
+adb shell am force-stop $P
+adb logcat -c
+adb shell settings put global always_finish_activities 1
+adb shell am start -a android.intent.action.SEND -t image/jpeg --eu android.intent.extra.STREAM "content://media/external/images/media/$id" --grant-read-uri-permission -n $P/.MainActivity >> out/intents.txt 2>&1
+sleep 20
+adb shell input keyevent KEYCODE_HOME
+sleep 2
+adb shell am start -n $P/.MainActivity >> out/intents.txt 2>&1
+sleep 10
+adb exec-out screencap -p > out/share-recreate.png
+adb shell settings put global always_finish_activities 0
+adb logcat -d > out/recreate-logcat.txt
+tail -4 out/intents.txt

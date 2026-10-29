@@ -1,3 +1,4 @@
+setTimeout(() => { console.log('timeout'); process.exit(0); }, 90000);
 // Reads the state of the app's WebView through DevTools (adb-forwarded to :9222).
 const list = await (await fetch('http://127.0.0.1:9222/json')).json();
 console.log('targets', JSON.stringify(list.map((t) => ({ type: t.type, url: t.url })), null, 1));
