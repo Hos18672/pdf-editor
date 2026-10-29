@@ -207,7 +207,7 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
           const bytes = new Uint8Array(await f.arrayBuffer());
           const pdf = await openPdf(bytes);
           added.push({ id, name: f.name, kind: 'pdf', file: f, pages: pdf.numPages, size: f.size, range: '', pdf });
-        } catch { p.toast({ msg: `Couldn’t read ${f.name}`, kind: 'err' }); }
+        } catch (e: any) { p.toast({ msg: e?.name === 'PasswordException' ? `${f.name} is password-protected. Unlock it first (Password tool).` : `Couldn’t read ${f.name}`, kind: 'err' }); }
       } else if (isImage(f)) {
         added.push({ id, name: f.name, kind: 'image', file: f, pages: 1, size: f.size, range: '', thumb: URL.createObjectURL(f) });
       }
@@ -464,7 +464,8 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
       p.toast({ msg: `Added ${added} ${added === 1 ? 'page' : 'pages'} after page ${at + 1}` });
     } catch (e: any) {
       p.setBusy(null);
-      p.toast({ msg: 'Couldn’t insert: ' + (e?.message ?? 'unknown error'), kind: 'err' });
+      const m = String(e?.message ?? '');
+      p.toast({ msg: /encrypt|password/i.test(m) ? 'That PDF is password-protected. Unlock it first (Password tool).' : /PDF header|parse|Invalid|corrupt/i.test(m) ? 'That file isn’t a readable PDF.' : 'Couldn’t insert: ' + (m || 'unknown error'), kind: 'err' });
     }
   };
   const insertBlank = () => build(async (doc, i) => {
