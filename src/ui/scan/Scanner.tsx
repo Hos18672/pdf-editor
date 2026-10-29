@@ -138,17 +138,29 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     if (pagesRef.current.length) { setView('review'); setCur(Math.max(0, pagesRef.current.length - 1)); }
   }, [toReview, finding]);
 
+  // open the review on a page that setPages has queued but React has not rendered yet (pagesRef is still the old list)
+  const focusId = useRef<string | null>(null);
+  const showPage = useCallback((id: string) => {
+    setView('review');
+    const i = pagesRef.current.findIndex((p) => p.id === id);
+    if (i >= 0) setCur(i); else focusId.current = id;
+  }, []);
+  useEffect(() => {
+    if (!focusId.current) return;
+    const i = pages.findIndex((p) => p.id === focusId.current);
+    if (i >= 0) { focusId.current = null; setCur(i); }
+  }, [pages]);
   const idCount = pages.filter((p) => p.kind === 'id').length;
   const onShot = useCallback((blob: Blob, hint?: ShotHint) => {
     const m = mode;
     if (m === 'id') {
       const n = pagesRef.current.filter((p) => p.kind === 'id').length + 0;
       const side = n % 2 === 0 ? 'front' : 'back';
-      add(blob, 'id', side, hint).then(() => { if (side === 'back') { setView('review'); setCur(pagesRef.current.length - 1); } });
+      add(blob, 'id', side, hint).then((pg) => { if (side === 'back' && pg) showPage(pg.id); });
       return;
     }
-    add(blob, m, undefined, hint).then(() => { if (m === 'passport') { setView('review'); setCur(pagesRef.current.length - 1); } });
-  }, [add, mode]);
+    add(blob, m, undefined, hint).then((pg) => { if (m === 'passport' && pg) showPage(pg.id); });
+  }, [add, mode, showPage]);
 
   const onImport = useCallback(async (files: File[]) => {
     const start = pagesRef.current.length;
