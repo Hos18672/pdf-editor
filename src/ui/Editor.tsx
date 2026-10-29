@@ -754,29 +754,46 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   };
   const [preview, setPreview] = useState<{ pdf: any; keys: Record<number, string> } | null>(null);
   const previewSeq = useRef(0);
+  // One preview is made at a time; a newer change waits for it and then the latest state is made. A
+  // finished preview is always shown (it is newer than what's on screen), so painting several strokes
+  // in a row takes each one out as soon as it's ready instead of waiting for the hand to stop.
+  const lastCutCount = useRef(0);
+  const previewJob = useRef<{ running: boolean; next: null | (() => Promise<void>); shown: number }>({ running: false, next: null, shown: 0 });
   useEffect(() => {
     const seq = ++previewSeq.current;
     const edits = textEdits(snap.edits).filter((e) => !isScanKey(e.key));
     // Remove: what was painted over is taken out of these pages
     const cuts = snap.objects.filter((o) => o.type === 'erase');
-    if (!edits.length && !cuts.length) { setPreview(null); return; }
+    if (!edits.length && !cuts.length) { previewJob.current.next = null; previewJob.current.shown = seq; setPreview(null); return; }
     const keys: Record<number, string> = {};
     for (const e of edits) keys[e.page] = editKeyOf(e.page);
     for (const o of cuts) keys[o.page] = editKeyOf(o.page);
-    const t = setTimeout(async () => {
+    const job = previewJob.current;
+    const make = async () => {
       try {
         const bytes = await exportPdf({
           bytes: file.bytes, pages: infos.map((_, i) => ({ src: i, rotation: 0 })), objects: cuts, edits, scanImage, rules: rulesOf, coverImage: coverOf, matchFont: matchFontBytes,
           viewMatrices: Object.fromEntries(infos.map((i, k) => [k, i.vm])),
         });
-        if (seq !== previewSeq.current) return;
+        if (seq <= job.shown) return;
         const doc = await openPdf(bytes);
-        if (seq !== previewSeq.current) { doc.destroy?.(); return; }
+        if (seq <= job.shown) { doc.destroy?.(); return; }
+        job.shown = seq;
         setPreview((old) => { if (old?.pdf && old.pdf !== pdf) setTimeout(() => old.pdf.destroy?.(), 2000); return { pdf: doc, keys }; });
       } catch (err) {
         console.warn('preview failed', err);
       }
-    }, 250);
+    };
+    const pump = async () => {
+      if (job.running) return;
+      job.running = true;
+      while (job.next) { const run = job.next; job.next = null; await run(); }
+      job.running = false;
+    };
+    // text edits wait a moment for the typing to settle; Remove strokes go at once
+    const onlyCuts = !edits.length || erases.length !== lastCutCount.current;
+    lastCutCount.current = erases.length;
+    const t = setTimeout(() => { job.next = make; pump(); }, onlyCuts ? 0 : 250);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap.edits, hiddenPages, eraseSig]);
@@ -786,8 +803,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [pendingCuts, setPendingCuts] = useState<Record<number, CutStroke[]>>({});
   /** strokes painted on a page that the page on screen doesn't show taken out yet */
   const erasingOn = (src: number): CutStroke[] => {
-    const shown = preview?.keys[src] === editKeyOf(src);
-    return [...(shown ? [] : erases.filter((o) => o.page === src).flatMap((o) => o.strokes)), ...(pendingCuts[src] ?? [])];
+    // only strokes the page on screen doesn't show taken out yet (not every earlier one again)
+    let done: string[] = [];
+    try { done = (JSON.parse(preview?.keys[src] || '[]') as [unknown, string[]])[1] ?? []; } catch { /* none */ }
+    return [...erases.filter((o) => o.page === src && !done.includes(o.id)).flatMap((o) => o.strokes), ...(pendingCuts[src] ?? [])];
   };
   /** lines of the file wholly painted over by Remove: no longer offered for editing */
   const erasedRuns = useMemo(() => {

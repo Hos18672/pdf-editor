@@ -90,6 +90,15 @@ export function pageFonts(doc: PDFDocument, leaf: PDFPageLeaf): (res: string) =>
 }
 
 /**
+ * Pictures already filled in, kept between calls (the editor's live view writes the page again after
+ * every stroke): with the strokes of a call extending those of an earlier one, only the new strokes are
+ * filled in, on the earlier result; with the same strokes the earlier picture is used as it is.
+ */
+type Done = { sig: string[]; px: { w: number; h: number; rgba: Uint8ClampedArray; gray: boolean }; mask?: { w: number; h: number; rgba: Uint8ClampedArray }; jpeg: Uint8Array; maskBytes?: Uint8Array };
+const doneCache = new Map<string, Done>();
+const CACHE_MAX = 4;
+
+/**
  * Pixels of placed pictures under the strokes, filled in from the picture around them (copied texture;
  * a see-through mask is filled too, so a cut-out logo goes see-through where it was painted over).
  * `strokes` in page view units, `vm` user space → page view. Pictures drawn inside forms are left.
@@ -102,17 +111,18 @@ export async function erasePictures(doc: PDFDocument, resources: PDFDict | undef
   const K = scanKernels();
   const back = invert(vm), k = Math.hypot(vm[0], vm[1]) || 1;
   const done = new Set<string>();
+  const num = (v: unknown) => (v as any)?.asNumber?.() ?? 0;
   for (const d of pictures) {
     const ref = xo.get(PDFName.of(d.name));
     if (!(ref instanceof PDFRef) || done.has(ref.toString())) continue;
     const st = doc.context.lookup(ref);
     if (!(st instanceof PDFRawStream) || st.dict.get(PDFName.of('Subtype'))?.toString() !== '/Image') continue;
-    const px = await decodeImage(doc, st).catch(() => null);
-    if (!px) continue;
+    const W = num(st.dict.get(PDFName.of('Width'))), H = num(st.dict.get(PDFName.of('Height')));
+    if (!W || !H) continue;
     // the strokes on the picture: fractions of its width and height, radius × its longer side
     const inv = invert(d.ctm);
-    const sx = px.w / (Math.hypot(d.ctm[0], d.ctm[1]) || 1), sy = px.h / (Math.hypot(d.ctm[2], d.ctm[3]) || 1);
-    const L = Math.max(px.w, px.h);
+    const sx = W / (Math.hypot(d.ctm[0], d.ctm[1]) || 1), sy = H / (Math.hypot(d.ctm[2], d.ctm[3]) || 1);
+    const L = Math.max(W, H);
     const local = strokes.map((s) => {
       const pts: number[] = [];
       for (let i = 0; i + 1 < s.pts.length; i += 2) {
@@ -122,24 +132,61 @@ export async function erasePictures(doc: PDFDocument, resources: PDFDict | undef
       }
       return { r: ((s.r / k) * (sx + sy) / 2) / L, pts };
     });
-    const img = { w: px.w, h: px.h, data: px.rgba };
-    const M0 = K.erase(img, local, true);
-    if (!M0 || !M0.some((v) => v > 0.02)) continue;
-    // a see-through mask: the same strokes filled in it (smoothly)
+    const sig = local.map((s) => JSON.stringify(s));
     const smRef = st.dict.get(PDFName.of('SMask'));
     const smObj = smRef instanceof PDFRef ? doc.context.lookup(smRef) : null;
     const sm = smObj instanceof PDFRawStream ? smObj : null;
+    // the same picture of the same file (its place in the file, size and bytes' length and ends)
+    const c0 = st.contents, key = `${ref.toString()}|${W}x${H}|${c0.length}|${c0[0]},${c0[c0.length >> 1]},${c0[c0.length - 1]}|${smRef?.toString() ?? ''}`;
+    const prev = doneCache.get(key);
+    const same = prev && prev.sig.length === sig.length && prev.sig.every((v, i) => v === sig[i]);
+    if (same) {
+      // nothing new on this picture: the earlier result as it is
+      await writeBack(doc, ref, st, prev.jpeg, prev.px);
+      if (sm && smRef instanceof PDFRef && prev.maskBytes && prev.mask) assignMask(doc, smRef, prev.mask.w, prev.mask.h, prev.maskBytes);
+      done.add(ref.toString());
+      continue;
+    }
+    const grows = prev && prev.sig.length < sig.length && prev.sig.every((v, i) => v === sig[i]);
+    const todo = grows ? local.slice(prev!.sig.length) : local;
+    const px = grows ? { ...prev!.px, rgba: new Uint8ClampedArray(prev!.px.rgba) } : await decodeImage(doc, st).catch(() => null);
+    if (!px) continue;
+    const img = { w: px.w, h: px.h, data: px.rgba };
+    const M0 = K.erase(img, todo, true);
+    if (!grows && (!M0 || !M0.some((v) => v > 0.02))) continue;
+    // a see-through mask: the same strokes filled in it (smoothly)
+    let mask: Done['mask'], maskBytes: Uint8Array | undefined;
     if (sm && smRef instanceof PDFRef) {
-      const mp = await decodeImage(doc, sm).catch(() => null);
+      const mp = grows && prev!.mask ? { w: prev!.mask.w, h: prev!.mask.h, rgba: new Uint8ClampedArray(prev!.mask.rgba) } : await decodeImage(doc, sm).catch(() => null);
       if (mp && mp.w > 0) {
-        const mk = { w: mp.w, h: mp.h, data: mp.rgba };
-        K.erase(mk, local, false);
-        const gray = new Uint8Array(mp.w * mp.h);
-        for (let i = 0; i < gray.length; i++) gray[i] = mp.rgba[i * 4];
-        doc.context.assign(smRef, doc.context.flateStream(gray, { Type: 'XObject', Subtype: 'Image', Width: mp.w, Height: mp.h, ColorSpace: 'DeviceGray', BitsPerComponent: 8 }));
+        K.erase({ w: mp.w, h: mp.h, data: mp.rgba }, grows && prev!.mask ? todo : local, false);
+        maskBytes = new Uint8Array(mp.w * mp.h);
+        for (let i = 0; i < maskBytes.length; i++) maskBytes[i] = mp.rgba[i * 4];
+        assignMask(doc, smRef, mp.w, mp.h, maskBytes);
+        mask = { w: mp.w, h: mp.h, rgba: mp.rgba };
       }
     }
     await writeJpeg(doc, ref, st, px, 0.92);
+    const out = doc.context.lookup(ref);
+    if (out instanceof PDFRawStream) {
+      doneCache.delete(key);
+      doneCache.set(key, { sig, px: { w: px.w, h: px.h, rgba: px.rgba, gray: !!px.gray }, mask, maskBytes, jpeg: out.contents });
+      while (doneCache.size > CACHE_MAX) doneCache.delete(doneCache.keys().next().value!);
+    }
     done.add(ref.toString());
   }
+}
+
+function assignMask(doc: PDFDocument, ref: PDFRef, w: number, h: number, gray: Uint8Array) {
+  doc.context.assign(ref, doc.context.flateStream(gray, { Type: 'XObject', Subtype: 'Image', Width: w, Height: h, ColorSpace: 'DeviceGray', BitsPerComponent: 8 }));
+}
+
+/** a picture written earlier (JPEG bytes) put back in place of the original */
+async function writeBack(doc: PDFDocument, ref: PDFRef, old: PDFRawStream, jpeg: Uint8Array, px: { w: number; h: number }) {
+  const dict = doc.context.obj({ Type: 'XObject', Subtype: 'Image', Width: px.w, Height: px.h, BitsPerComponent: 8, ColorSpace: 'DeviceRGB', Filter: 'DCTDecode' }) as PDFDict;
+  for (const keep of ['SMask', 'Mask', 'Interpolate', 'Intent']) {
+    const v = old.dict.get(PDFName.of(keep));
+    if (v) dict.set(PDFName.of(keep), v);
+  }
+  doc.context.assign(ref, PDFRawStream.of(dict, jpeg));
 }
