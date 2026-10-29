@@ -863,6 +863,7 @@ button { cursor: pointer; }
 .pcell.rm.on .lb { color: var(--danger); text-decoration: line-through; }
 .pcell .gap { position: absolute; right: -27px; top: 38%; width: 28px; height: 28px; border-radius: 50%; background: var(--surface); color: var(--ink); box-shadow: 0 0 0 1px var(--line-2), 0 2px 6px rgba(20,23,46,.1); display: grid; place-items: center; z-index: 2; border: 0; padding: 0; }
 .pcell .gap.on { background: var(--ink); color: var(--on-ink); }
+.pcell .gap::after { content: ""; position: absolute; inset: -8px; border-radius: 50%; } /* invisible: tap target >= 44px */
 .newslot { width: 100%; aspect-ratio: 1 / 1.414; border-radius: 4px; border: 2px dashed #3446C9; background: #F3F5FF; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: #3446C9; font: inherit; font-weight: 600; font-size: 12.5px; cursor: pointer; padding: 8px; text-align: center; transition: background .15s, transform .15s var(--ease); }
 .newslot:hover { background: #E8ECFF; }
 .newslot:active { transform: scale(.97); }
