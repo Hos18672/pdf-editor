@@ -58,6 +58,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run on emulator
+        timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 34
@@ -73,6 +74,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          mkdir -p out; date -u > out/published-at.txt
           cat out/logcat*.txt | grep -iE "CONSOLE|chromium|ReactNativeJS|AndroidRuntime|WebView" | head -200 || true
           gh release create "smoke-${{ github.run_number }}" out/* --prerelease --target "${GITHUB_SHA}" \
             --title "Smoke test ${{ github.run_number }}" --notes "Emulator screenshots and logcat."
