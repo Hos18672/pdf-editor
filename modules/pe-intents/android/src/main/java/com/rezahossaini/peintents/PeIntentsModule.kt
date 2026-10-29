@@ -36,8 +36,14 @@ class PeIntentsModule : Module() {
       if (isRelevant(intent)) {
         pending = Intent(intent)
         intent.putExtra(SEEN, true)
+        handled.add(keyOf(intent))
         sendEvent("onIntent", mapOf("at" to System.currentTimeMillis()))
       }
+    }
+
+    // a finished activity forgets what it handled, so sharing the same file again later works
+    OnActivityDestroys {
+      if (appContext.currentActivity?.isFinishing == true) handled.clear()
     }
 
     Function("takeIntent") {
@@ -74,19 +80,29 @@ class PeIntentsModule : Module() {
   companion object {
     private const val SEEN = "pe_seen"
     @Volatile private var pending: Intent? = null
+    // what the page already took: after a recreate (rotation, "don't keep activities") the system hands back the
+    // original intent without our SEEN extra
+    private val handled = java.util.Collections.synchronizedSet(HashSet<String>())
+
+    private fun keyOf(i: Intent) = listOf(i.action, i.dataString, i.type, i.component?.className, i.getStringExtra(Intent.EXTRA_TEXT),
+      i.getStringExtra(Intent.EXTRA_SUBJECT), streamOf(i), streamsOf(i)).joinToString("|")
 
     private fun take(activity: Activity?): Intent? {
       pending?.let { pending = null; return it }
       val intent = activity?.intent ?: return null
       if (intent.getBooleanExtra(SEEN, false) || !isRelevant(intent)) return null
       intent.putExtra(SEEN, true)
+      val key = keyOf(intent)
+      if (!handled.add(key)) return null
       return intent
     }
 
     private fun isAlias(intent: Intent) = intent.component?.className?.endsWith(".ConvertToPdf") == true
 
     fun isRelevant(intent: Intent): Boolean = when (intent.action) {
-      Intent.ACTION_SEND, Intent.ACTION_SEND_MULTIPLE -> true
+      // a share with neither a file nor text is nothing to open
+      Intent.ACTION_SEND -> streamOf(intent) != null || !intent.getStringExtra(Intent.EXTRA_TEXT).isNullOrEmpty()
+      Intent.ACTION_SEND_MULTIPLE -> streamsOf(intent).isNotEmpty()
       Intent.ACTION_VIEW -> intent.data != null
       else -> false
     }
