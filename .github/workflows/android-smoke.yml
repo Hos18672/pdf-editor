@@ -57,6 +57,10 @@ jobs:
           sudo udevadm control --reload-rules
           sudo udevadm trigger --name-match=kvm
 
+      - name: KVM check
+        run: |
+          echo "::warning title=kvm::$(ls -l /dev/kvm 2>&1) vmx/svm cpus: $(grep -cE 'vmx|svm' /proc/cpuinfo) nproc: $(nproc) $(lscpu | grep -i 'model name' | head -1)"
+
       - name: Run on emulator
         timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
