@@ -61,24 +61,72 @@ jobs:
         run: |
           echo "::warning title=kvm::$(ls -l /dev/kvm 2>&1) vmx/svm cpus: $(grep -cE 'vmx|svm' /proc/cpuinfo) nproc: $(nproc) $(lscpu | grep -i 'model name' | head -1)"
 
-      - name: Run on emulator
-        timeout-minutes: 32
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 34
-          arch: x86_64
-          target: google_apis
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          # a hung adb / DevTools call must not eat the whole job: stop after 25 min, keep the log and logcat
-          script: mkdir -p out && timeout -k 20 1200 bash .github/scripts/${{ inputs.suite == 'scan' && 'smoke-scan.sh' || inputs.suite == 'ai' && 'smoke-ai.sh' || 'smoke.sh' }} > out/run.log 2>&1; adb logcat -d > out/logcat-end.txt; true
+      # The emulator is started by hand in separate steps (not one action), each with its own time limit,
+      # and what matters is written as annotations: they can be read even when the log can't.
+      - name: Emulator - install
+        timeout-minutes: 12
+        run: |
+          SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
+          echo "SDK=$SDK" >> "$GITHUB_ENV"
+          echo "$SDK/emulator" >> "$GITHUB_PATH"; echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+          IMG="system-images;android-34;google_apis;x86_64"
+          if ! yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "$IMG" > sdk.log 2>&1; then
+            echo "::error title=sdkmanager::$(tail -c 900 sdk.log | tr '\n' ' ')"; exit 1
+          fi
+          echo no | "$SDK/cmdline-tools/latest/bin/avdmanager" create avd -n smoke -k "$IMG" -d pixel_6 --force > avd.log 2>&1 || { echo "::error title=avdmanager::$(tail -c 900 avd.log | tr '\n' ' ')"; exit 1; }
+          echo "::notice title=emulator install::$("$SDK/emulator/emulator" -version 2>/dev/null | head -1)"
+
+      - name: Emulator - boot
+        timeout-minutes: 12
+        run: |
+          # every background process gets its own output files (a pipe left open keeps the step running)
+          adb start-server > /dev/null 2>&1 < /dev/null
+          setsid nohup emulator -avd smoke -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim \
+            -camera-back none -camera-front none -memory 4096 -cores 4 -accel on > emu.log 2>&1 < /dev/null &
+          t0=$(date +%s)
+          timeout 300 adb wait-for-device < /dev/null || { echo "::error title=no device after 5 min::$(tail -c 1500 emu.log | tr '\n' ' ')"; exit 1; }
+          until [ "$(timeout 10 adb shell getprop sys.boot_completed < /dev/null 2>/dev/null | tr -d '\r')" = "1" ]; do
+            if [ $(( $(date +%s) - t0 )) -gt 600 ]; then echo "::error title=not booted after 10 min::$(tail -c 1500 emu.log | tr '\n' ' ')"; exit 1; fi
+            sleep 5
+          done
+          for k in window_animation_scale transition_animation_scale animator_duration_scale; do timeout 10 adb shell settings put global $k 0 < /dev/null || true; done
+          echo "::notice title=emulator booted::in $(( $(date +%s) - t0 ))s"
+
+      - name: Run the test on the emulator
+        timeout-minutes: 25
+        run: |
+          mkdir -p out
+          set +e
+          timeout -k 20 1200 bash .github/scripts/${{ inputs.suite == 'scan' && 'smoke-scan.sh' || inputs.suite == 'ai' && 'smoke-ai.sh' || 'smoke.sh' }} > out/run.log 2>&1 < /dev/null
+          rc=$?
+          timeout 60 adb logcat -d > out/logcat-end.txt 2>/dev/null < /dev/null
+          echo "::notice title=test finished::exit $rc (124 = stopped after 20 min)"
+          exit 0
+
+      - name: Report (annotations)
+        if: always()
+        run: |
+          mkdir -p out
+          note() { # title, text: newlines kept (%0A), cut to fit
+            local m; m=$(printf '%s' "$2" | cut -c1-220 | head -c 3500 | sed 's/%/%25/g; s/\r//g' | awk '{printf "%s%%0A", $0}')
+            echo "::notice title=$1::$m"
+          }
+          [ -f emu.log ] && note "emulator log (end)" "$(tail -n 15 emu.log)"
+          [ -f out/run.log ] && note "test log (end)" "$(grep -v '^+ ' out/run.log | tail -n 40)"
+          [ -f out/run.log ] && note "test steps (last)" "$(grep '^+ ' out/run.log | tail -n 12)"
+          for f in out/flow.txt out/intents.txt out/ai-result.txt; do [ -f "$f" ] && note "$(basename $f)" "$(tail -n 40 $f)"; done
+          L=$(ls out/logcat*.txt 2>/dev/null)
+          [ -n "$L" ] && note "crashes / JS errors" "$(cat $L | grep -E 'FATAL EXCEPTION|AndroidRuntime: |Uncaught|CONSOLE.*[Ee]rror|ANR in' | sort | uniq -c | sort -rn | head -n 25)"
+          note "files" "$(ls -la out | tail -n +2)"
+          true
 
       - name: Publish results as a pre-release
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          mkdir -p out; date -u > out/published-at.txt; ls -la out | head -20
-          cat out/logcat*.txt | grep -iE "CONSOLE|chromium|ReactNativeJS|AndroidRuntime|WebView" | head -200 || true
-          gh release create "smoke-${{ github.run_number }}" out/* --prerelease --target "${GITHUB_SHA}" \
-            --title "Smoke test ${{ github.run_number }}" --notes "Emulator screenshots and logcat."
+          mkdir -p out; date -u > out/published-at.txt
+          if ! r=$(gh release create "smoke-${{ github.run_number }}" out/* --prerelease --target "${GITHUB_SHA}" \
+            --title "Smoke test ${{ github.run_number }}" --notes "Emulator screenshots and logcat." 2>&1); then
+            echo "::error title=Publish failed::$(echo "$r" | tr '\n' ' ' | head -c 900)"; exit 1
+          fi
