@@ -84,7 +84,7 @@ jobs:
         run: |
           # every background process gets its own output files (a pipe left open keeps the step running)
           adb start-server > /dev/null 2>&1 < /dev/null
-          setsid nohup emulator -avd smoke -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim \
+          setsid nohup emulator -avd smoke -no-window -gpu swangle_indirect -no-snapshot -noaudio -no-boot-anim \
             -camera-back none -camera-front none -memory 4096 -cores 4 -accel on > emu.log 2>&1 < /dev/null &
           t0=$(date +%s)
           timeout 300 adb wait-for-device < /dev/null || { echo "::error title=no device after 5 min::$(tail -c 1500 emu.log | tr '\n' ' ')"; exit 1; }
@@ -116,6 +116,8 @@ jobs:
             echo "::notice title=$1::$m"
           }
           [ -f emu.log ] && note "emulator log (end)" "$(tail -n 15 emu.log)"
+          [ -f emu.log ] && note "emulator problems" "$(grep -iE 'error|fatal|crash|abort|signal|killed|panic|lost' emu.log | grep -v 'emu-update-last-check' | tail -n 25)"
+          note "emulator process" "$(pgrep -a -f qemu-system | cut -c1-160; echo; timeout 10 adb devices 2>&1; dmesg 2>/dev/null | grep -iE 'oom|killed process' | tail -5)"
           [ -f out/run.log ] && note "test log (end)" "$(grep -v '^+ ' out/run.log | tail -n 40)"
           [ -f out/run.log ] && note "test steps (last)" "$(grep '^+ ' out/run.log | tail -n 12)"
           for f in out/flow.txt out/intents.txt out/ai-result.txt; do [ -f "$f" ] && note "$(basename $f)" "$(tail -n 40 $f)"; done
