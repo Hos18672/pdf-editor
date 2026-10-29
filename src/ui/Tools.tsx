@@ -476,7 +476,9 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
     return count;
   });
   const insertPdf = (f: File) => build(async (doc, i) => {
-    const other = await loadDoc(new Uint8Array(await f.arrayBuffer()));
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    try { (await openPdf(bytes)).destroy?.(); } catch (e: any) { throw new Error(e?.name === 'PasswordException' ? 'password' : 'not a readable PDF (parse)'); } // an encrypted PDF would be copied as garbage pages
+    const other = await loadDoc(bytes);
     const pages = await doc.copyPages(other, other.getPageIndices());
     pages.forEach((pg, k) => doc.insertPage(i + k, pg));
     return pages.length;
