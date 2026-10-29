@@ -14,6 +14,9 @@ const addToCalendar = async (e: { title: string; begin: number; allDay: boolean;
   if (!PeIntents) return false;
   try { return PeIntents.addCalendarEvent(e.title, e.begin, e.allDay, e.note); } catch { return false; }
 };
+// Google's document scanner (only when the native module has it)
+const googleScan = PeIntents?.scanDocument ? async () => PeIntents!.scanDocument() : undefined;
+const takeScan = async () => (PeIntents?.takeScan ? PeIntents.takeScan() : null);
 const readShared = (uri: string) => (PeIntents ? PeIntents.readUri(uri) : Promise.reject(new Error('Not available')));
 
 async function pickPdf() {
@@ -146,6 +149,8 @@ function NativeShell({ dark }: { dark: boolean }) {
         takeIntent={takeIntent}
         readShared={readShared}
         addToCalendar={addToCalendar}
+        googleScan={googleScan}
+        takeScan={takeScan}
         dom={{
           style: { flex: 1, backgroundColor: desk },
           // react-native-webview supports <input type="file"> (signature photos, images) on Android

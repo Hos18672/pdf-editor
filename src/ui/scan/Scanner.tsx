@@ -8,7 +8,7 @@ import { ConfirmClose } from '../ConfirmClose';
 import { useBack } from '../back';
 import { SortableArea, useSortableItem } from '../sortable';
 import type { Bp } from '../hooks';
-import type { Quad } from './geom';
+import { fullQuad, type Quad } from './geom';
 import type { Filter } from './kernels';
 import { Camera, MODES, type ShotHint } from './Camera';
 import { CropEditor } from './CropEditor';
@@ -41,14 +41,17 @@ const stamp = () => {
  * The document scanner: camera (or photos) → automatic crop and straightening → clean-up filters →
  * a PDF at real paper size, optionally searchable. Everything runs on the device.
  */
-export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onSaved }: {
+export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onSaved, initial }: {
   host: HostProps; bp: Bp; toast: (t: ToastMsg) => void; setBusy: (b: BusyMsg | null) => void;
+  /** Android: pages of a Google scan finished while the page was restarted (file URIs) */
+  initial?: string[];
   onClose: () => void; onOpenInEditor: (name: string, bytes: Uint8Array) => void; onSaved?: (name: string, bytes: Uint8Array) => void;
 }) {
   const mobile = bp === 'mobile';
   const [mode, setModeState] = useState<ScanMode>(readMode);
   const [pages, setPages] = useState<ScanPage[]>([]);
-  const [view, setView] = useState<'camera' | 'review'>('camera');
+  // pages handed back after a restart open in the review (the scanner isn't started again)
+  const [view, setView] = useState<'camera' | 'review'>(initial?.length ? 'review' : 'camera');
   const toCamera = () => setView('camera');
   const [cur, setCur] = useState(0);
   const [crop, setCrop] = useState<string | null>(null);
@@ -125,6 +128,61 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       return null;
     } finally { findingRef.current--; setFinding((n) => n - 1); }
   }, [toast]);
+
+  // ---- Android: Google's document scanner (Google Play services) instead of the camera in the page.
+  // Its pages come back found, cropped and cleaned, so they are taken as they are. When it isn't
+  // available on the phone, the built-in camera is used.
+  const [gFailed, setGFailed] = useState(false);
+  const google = !!host.googleScan && !!host.takeScan && !!host.readShared && !gFailed;
+  const gRunning = useRef(false);
+  const addGoogle = useCallback(async (uris: string[]) => {
+    const start = pagesRef.current.length;
+    findingRef.current++;
+    setFinding((n) => n + 1);
+    try {
+      for (const uri of uris) {
+        try {
+          const b64 = await host.readShared!(uri);
+          const bin = atob(b64), bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const blob = new Blob([bytes], { type: 'image/jpeg' });
+          const bmp = await decode(blob);
+          const w = bmp.width, h = bmp.height, q = fullQuad(w, h);
+          // ver 2: Google's pages are already upright (no automatic turning)
+          const page: ScanPage = { id: newId(), blob, w, h, quad: q, auto: q, bend: null, autoBend: null, sure: true, rot: 0,
+            filter: 'original', kind: 'doc', ...shapeOf(q, w, h, 'doc'), ver: 2 };
+          setPages((ps) => [...ps, page]);
+          setSaved(false);
+        } catch (e) { console.warn('scan: Google page not readable', e); }
+      }
+    } finally { findingRef.current--; setFinding((n) => n - 1); }
+    setView('review');
+    setCur(start);
+  }, [host]);
+  const initialDone = useRef(false);
+  useEffect(() => {
+    if (!initial?.length || initialDone.current) return;
+    initialDone.current = true;
+    addGoogle(initial);
+  }, [initial, addGoogle]);
+  useEffect(() => {
+    if (view !== 'camera' || !google || gRunning.current || (initial?.length && !initialDone.current)) return;
+    gRunning.current = true;
+    (async () => {
+      try {
+        const ok = await host.googleScan!();
+        const uris = ok ? await host.takeScan!() : null;
+        if (uris?.length) await addGoogle(uris);
+        else if (pagesRef.current.length) setView('review');
+        else onClose();
+      } catch (e: any) {
+        console.warn('Google scanner not available', e);
+        setGFailed(true);
+        toast({ msg: e?.code === 'UNSUPPORTED' ? 'Google’s scanner doesn’t run on this phone. Using the built-in camera.' : 'Google’s scanner isn’t available. Using the built-in camera.' });
+      } finally { gRunning.current = false; }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, google]);
 
   // Done in the camera while the last photo is still being taken or read: the review opens once it is in
   const [toReview, setToReview] = useState(false);
@@ -412,6 +470,14 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     </>
   );
 
+  if (view === 'camera' && google) {
+    return (
+      <>
+        <div className="scam gscan" role="status"><span className="spinner" /><span>{finding ? 'Adding the pages…' : 'Opening Google’s scanner…'}</span></div>
+        {crumbs}
+      </>
+    );
+  }
   if (view === 'camera') {
     return (
       <>

@@ -15,6 +15,9 @@ interface PeIntentsModule {
   readUri(uri: string): Promise<string>;
   refreshShortcuts(): void;
   addCalendarEvent(title: string, beginMs: number, allDay: boolean, description: string): boolean;
+  /** Google's document scanner: true when pages are ready (takeScan), false when cancelled */
+  scanDocument(): Promise<boolean>;
+  takeScan(): string[] | null;
   addListener(event: 'onIntent', fn: () => void): { remove(): void };
 }
 

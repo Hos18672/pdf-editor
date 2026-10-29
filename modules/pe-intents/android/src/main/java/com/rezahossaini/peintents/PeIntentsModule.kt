@@ -12,6 +12,11 @@ import android.webkit.MimeTypeMap
 import androidx.core.content.pm.ShortcutInfoCompat
 import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
+import com.google.mlkit.common.MlKitException
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
@@ -72,6 +77,59 @@ class PeIntentsModule : Module() {
       true
     }
 
+    // Google's document scanner (Google Play services): finds, crops and cleans the pages itself.
+    // Resolves true when pages are ready (the page then takes them with takeScan), false when cancelled.
+    // The pages are kept here until taken, so they survive the page being restarted meanwhile.
+    AsyncFunction("scanDocument") { promise: Promise ->
+      val activity = appContext.currentActivity
+      if (activity == null) { promise.reject("NO_ACTIVITY", "The app isn't in front", null); return@AsyncFunction }
+      val options = GmsDocumentScannerOptions.Builder()
+        .setGalleryImportAllowed(true)
+        .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+        .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+        .build()
+      activity.runOnUiThread {
+        try {
+          GmsDocumentScanning.getClient(options).getStartScanIntent(activity)
+            .addOnSuccessListener { sender ->
+              try {
+                scanPromise?.resolve(false)
+                scanPromise = promise
+                activity.startIntentSenderForResult(sender, SCAN_REQUEST, null, 0, 0, 0)
+              } catch (e: Throwable) {
+                scanPromise = null
+                promise.reject("START_FAILED", e.message ?: "The scanner couldn't start", e)
+              }
+            }
+            .addOnFailureListener { e ->
+              val code = if (e is MlKitException && e.errorCode == MlKitException.UNSUPPORTED) "UNSUPPORTED" else "UNAVAILABLE"
+              promise.reject(code, e.message ?: "Google's scanner isn't available", e)
+            }
+        } catch (e: Throwable) {
+          promise.reject("UNAVAILABLE", e.message ?: "Google's scanner isn't available", e)
+        }
+      }
+    }
+
+    OnActivityResult { _, payload ->
+      if (payload.requestCode != SCAN_REQUEST) return@OnActivityResult
+      val p = scanPromise
+      scanPromise = null
+      if (payload.resultCode != Activity.RESULT_OK) { p?.resolve(false); return@OnActivityResult }
+      val uris = try {
+        GmsDocumentScanningResult.fromActivityResultIntent(payload.data)?.pages?.map { it.imageUri.toString() } ?: emptyList()
+      } catch (e: Throwable) { emptyList() }
+      if (uris.isNotEmpty()) scanned = uris
+      p?.resolve(uris.isNotEmpty())
+    }
+
+    // the pages of the last finished scan (file URIs, read with readUri), once
+    Function("takeScan") {
+      val u = scanned
+      scanned = null
+      u
+    }
+
     Function("refreshShortcuts") {
       try { publishShortcuts(context) } catch (e: Throwable) { /* not supported */ }
     }
@@ -79,6 +137,9 @@ class PeIntentsModule : Module() {
 
   companion object {
     private const val SEEN = "pe_seen"
+    private const val SCAN_REQUEST = 7301
+    @Volatile private var scanPromise: Promise? = null
+    @Volatile private var scanned: List<String>? = null
     @Volatile private var pending: Intent? = null
     // what the page already took: after a recreate (rotation, "don't keep activities") the system hands back the
     // original intent without our SEEN extra

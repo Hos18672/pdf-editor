@@ -1074,6 +1074,7 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 
 /* ---------- document scanner ---------- */
 .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid currentColor; border-right-color: transparent; display: inline-block; animation: spin .8s linear infinite; flex: none; opacity: .75; }
+.scam.gscan { align-items: center; justify-content: center; gap: 14px; font-weight: 600; font-size: 15px; }
 .scam { position: fixed; inset: 0; z-index: 40; background: #07080C; color: #fff; display: flex; flex-direction: column; overflow: hidden; user-select: none; -webkit-user-select: none; }
 .scam-view { position: absolute; inset: 0; }
 .scam-frame { position: absolute; inset: 0; overflow: hidden; }

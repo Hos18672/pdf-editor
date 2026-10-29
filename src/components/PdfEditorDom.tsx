@@ -16,7 +16,7 @@ if (bridge) {
     let injected: any = null;
     try { injected = JSON.parse(bridge.injectedObjectJson?.() ?? 'null'); } catch { /* not there yet */ }
     w.$$EXPO_DOM_HOST_OS ??= injected?.EXPO_DOM_HOST_OS ?? 'android';
-    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets', 'exitApp', 'takeIntent', 'readShared', 'addToCalendar'], props: { isNative: true } };
+    w.$$EXPO_INITIAL_PROPS ??= injected?.initialProps ?? { names: ['pickPdf', 'savePdf', 'onChrome', 'getInsets', 'exitApp', 'takeIntent', 'readShared', 'addToCalendar', 'googleScan', 'takeScan'], props: { isNative: true } };
   }
 }
 
@@ -49,6 +49,8 @@ const native = bridge ? {
   takeIntent: () => callNative<Incoming | null>('takeIntent', []),
   readShared: (uri: string) => callNative<string>('readShared', [uri]),
   addToCalendar: (e: CalEvent) => callNative<boolean>('addToCalendar', [e]),
+  googleScan: () => callNative<boolean>('googleScan', []),
+  takeScan: () => callNative<string[] | null>('takeScan', []),
 } : null;
 
 // The whole editor is a DOM component: on the web it renders directly, on
@@ -65,6 +67,8 @@ export default function PdfEditorDom(props: {
   takeIntent?: () => Promise<Incoming | null>;
   readShared?: (uri: string) => Promise<string>;
   addToCalendar?: (e: CalEvent) => Promise<boolean>;
+  googleScan?: () => Promise<boolean>;
+  takeScan?: () => Promise<string[] | null>;
   /** Android: the WebView handle (the shell sends the back button through it) */
   ref?: React.Ref<unknown>;
 }) {
