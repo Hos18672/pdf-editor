@@ -68,13 +68,16 @@ jobs:
         run: |
           SDK="${ANDROID_HOME:-$ANDROID_SDK_ROOT}"
           echo "SDK=$SDK" >> "$GITHUB_ENV"
+          # one place for the virtual phone, for avdmanager and the emulator alike
+          export ANDROID_AVD_HOME="$HOME/.android/avd"; mkdir -p "$ANDROID_AVD_HOME"
+          echo "ANDROID_AVD_HOME=$ANDROID_AVD_HOME" >> "$GITHUB_ENV"
           echo "$SDK/emulator" >> "$GITHUB_PATH"; echo "$SDK/platform-tools" >> "$GITHUB_PATH"
           IMG="system-images;android-34;google_apis;x86_64"
           if ! yes | "$SDK/cmdline-tools/latest/bin/sdkmanager" --install emulator platform-tools "$IMG" > sdk.log 2>&1; then
             echo "::error title=sdkmanager::$(tail -c 900 sdk.log | tr '\n' ' ')"; exit 1
           fi
           echo no | "$SDK/cmdline-tools/latest/bin/avdmanager" create avd -n smoke -k "$IMG" -d pixel_6 --force > avd.log 2>&1 || { echo "::error title=avdmanager::$(tail -c 900 avd.log | tr '\n' ' ')"; exit 1; }
-          echo "::notice title=emulator install::$("$SDK/emulator/emulator" -version 2>/dev/null | head -1)"
+          echo "::notice title=emulator install::$("$SDK/emulator/emulator" -version 2>/dev/null | head -1) / avds: $("$SDK/emulator/emulator" -list-avds 2>&1 | tr '\n' ' ')"
 
       - name: Emulator - boot
         timeout-minutes: 12
@@ -105,6 +108,7 @@ jobs:
 
       - name: Report (annotations)
         if: always()
+        shell: bash {0}
         run: |
           mkdir -p out
           note() { # title, text: newlines kept (%0A), cut to fit
@@ -115,7 +119,7 @@ jobs:
           [ -f out/run.log ] && note "test log (end)" "$(grep -v '^+ ' out/run.log | tail -n 40)"
           [ -f out/run.log ] && note "test steps (last)" "$(grep '^+ ' out/run.log | tail -n 12)"
           for f in out/flow.txt out/intents.txt out/ai-result.txt; do [ -f "$f" ] && note "$(basename $f)" "$(tail -n 40 $f)"; done
-          L=$(ls out/logcat*.txt 2>/dev/null)
+          L=$(ls out/logcat*.txt 2>/dev/null || true)
           [ -n "$L" ] && note "crashes / JS errors" "$(cat $L | grep -E 'FATAL EXCEPTION|AndroidRuntime: |Uncaught|CONSOLE.*[Ee]rror|ANR in' | sort | uniq -c | sort -rn | head -n 25)"
           note "files" "$(ls -la out | tail -n +2)"
           true
