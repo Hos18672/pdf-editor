@@ -1,5 +1,5 @@
 // Find text in the document, and the privacy check (personal data found and blacked out in one go).
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
 import { findText, privacyScan, KIND_LABEL, type DocRef, type Hit, type Kind } from './search';
 
@@ -13,6 +13,24 @@ export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile }: {
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
   useEffect(() => { input.current?.focus({ preventScroll: true }); }, []);
+  // desktop: centred over the page area, so it stays clear of the Pages / properties panels beside it
+  const bar = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<React.CSSProperties | undefined>();
+  useLayoutEffect(() => {
+    if (mobile) { setPlace(undefined); return; }
+    const fit = () => {
+      const el = bar.current, wrap = document.querySelector('.canvasWrap') as HTMLElement | null, par = el?.offsetParent as HTMLElement | null;
+      if (!el || !wrap || !par) return;
+      const w = wrap.getBoundingClientRect(), o = par.getBoundingClientRect();
+      setPlace({ left: w.left - o.left + w.width / 2, width: Math.min(560, w.width - 24) });
+    };
+    fit();
+    const wrap = document.querySelector('.canvasWrap');
+    const ro = typeof ResizeObserver !== 'undefined' && wrap ? new ResizeObserver(fit) : null;
+    if (wrap) ro?.observe(wrap);
+    window.addEventListener('resize', fit);
+    return () => { ro?.disconnect(); window.removeEventListener('resize', fit); };
+  }, [mobile]);
   useEffect(() => {
     if (!q.trim()) { setHits([]); onHits([], -1); return; }
     let alive = true;
@@ -33,7 +51,7 @@ export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile }: {
     setCur(n); onHits(hits, n); onGo(hits[n]);
   };
   return (
-    <div className={`findbar${mobile ? ' m' : ''}`} role="search">
+    <div ref={bar} className={`findbar${mobile ? ' m' : ''}`} role="search" style={place}>
       <Icon name="magnifying-glass" size={18} />
       <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find in document" aria-label="Find in document"
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') step(e.shiftKey ? -1 : 1); if (e.key === 'Escape') onClose(); }} />

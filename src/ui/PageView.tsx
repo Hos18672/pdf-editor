@@ -203,7 +203,8 @@ export function PageView(p: Props) {
   // (per line: a newer edit elsewhere on the page leaves the lines already in the preview as they are)
   const shownEdits = useMemo(() => {
     const m = new Map<string, string>();
-    try { for (const [k, e] of JSON.parse(shownKey || '[]') as [string, unknown][]) m.set(k, JSON.stringify(e)); } catch { /* none */ }
+    // the preview key is [[line key, edit]…, erase ids] (see editKeyOf in Editor)
+    try { for (const [k, e] of ((JSON.parse(shownKey || '[[],[]]') as unknown[][])[0] ?? []) as [string, unknown][]) m.set(k, JSON.stringify(e)); } catch { /* none */ }
     return m;
   }, [shownKey]);
   const liveRun = (key: string) => !!p.edits[key] && shownEdits.get(key) === JSON.stringify(p.edits[key]);
