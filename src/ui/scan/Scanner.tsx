@@ -178,7 +178,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       } catch (e: any) {
         console.warn('Google scanner not available', e);
         setGFailed(true);
-        toast({ msg: e?.code === 'UNSUPPORTED' ? 'Google’s scanner doesn’t run on this phone. Using the built-in camera.' : 'Google’s scanner isn’t available. Using the built-in camera.' });
+        toast({ msg: e?.code === 'UNSUPPORTED' ? 'Google’s scanner doesn’t run on this phone. Using the built-in camera.' : `Google’s scanner isn’t available (${String(e?.code ?? e?.message ?? 'error').slice(0, 60)}). Using the built-in camera.` });
       } finally { gRunning.current = false; }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps

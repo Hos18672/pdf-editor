@@ -11,6 +11,8 @@ android {
   defaultConfig {
     versionCode 1
     versionName '1.0.0'
+    // keeps Google's document scanner intact in the release build (see proguard-rules.pro)
+    consumerProguardFiles 'proguard-rules.pro'
   }
 }
 

@@ -15,7 +15,10 @@ const addToCalendar = async (e: { title: string; begin: number; allDay: boolean;
   try { return PeIntents.addCalendarEvent(e.title, e.begin, e.allDay, e.note); } catch { return false; }
 };
 // Google's document scanner (only when the native module has it)
-const googleScan = PeIntents?.scanDocument ? async () => PeIntents!.scanDocument() : undefined;
+const googleScan = async () => {
+  if (typeof PeIntents?.scanDocument !== 'function') throw Object.assign(new Error('Not in this build'), { code: 'MISSING' });
+  return PeIntents.scanDocument();
+};
 const takeScan = async () => (PeIntents?.takeScan ? PeIntents.takeScan() : null);
 const readShared = (uri: string) => (PeIntents ? PeIntents.readUri(uri) : Promise.reject(new Error('Not available')));
 
