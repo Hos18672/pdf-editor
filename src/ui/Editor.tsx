@@ -32,7 +32,8 @@ import { useLineSelSize, lineEditor } from './lineEdit';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop } from './hooks';
-import { ThemeButton } from './Start';
+import { ThemeButton, LangButton } from './Start';
+import { t, tn } from './i18n';
 
 /** a copied line: its text and how it looks (pasted as a text box) */
 interface Clip { text: string; size: number; color: string; font: DocFont | null; family: FontFamily; bold: boolean; italic: boolean }
@@ -586,12 +587,12 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const target = e.target as Element;
     const asPages = view === 'pages' || !!target.closest?.('.pstrip, .addpg');
     const after = Math.max(0, snap.pages.findIndex((p) => p.src === curPage)) + 1;
-    if ((pdfs.length || (asPages && imgs.length)) && !onAddPages) { toast({ msg: 'Pages can’t be added to this document here', kind: 'err' }); return; }
+    if ((pdfs.length || (asPages && imgs.length)) && !onAddPages) { toast({ msg: t('Pages can’t be added to this document here'), kind: 'err' }); return; }
     (async () => {
       // the last one first, so they end up in the order they were dropped
       if (asPages && imgs.length) await onAddPages!(after, { kind: 'images', files: imgs });
       for (const f of [...pdfs].reverse()) await onAddPages!(after, { kind: 'pdf', file: f });
-      if (pdfs.length || (asPages && imgs.length)) toast({ msg: 'Pages added after page ' + after, kind: 'ok' });
+      if (pdfs.length || (asPages && imgs.length)) toast({ msg: t('Pages added after page {p}', { p: after }), kind: 'ok' });
       if (!asPages && imgs.length) {
         const el = target.closest?.('.pageOuter') as HTMLElement | null;
         const pg = el?.querySelector<HTMLElement>('.page');
@@ -604,8 +605,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         }
         imgs.forEach((f, k) => onImage(f, at && { ...at, x: at.x + k * 16, y: at.y + k * 16 }));
       }
-    })().catch(() => toast({ msg: 'Those files couldn’t be added', kind: 'err' }));
-  }, { accept: (f) => isPdf(f) || isImage(f), onReject: () => toast({ msg: 'Drop PDFs or images here. Other files can be turned into PDFs with Convert.', kind: 'err' }), disabled: !!showSig });
+    })().catch(() => toast({ msg: t('Those files couldn’t be added'), kind: 'err' }));
+  }, { accept: (f) => isPdf(f) || isImage(f), onReject: () => toast({ msg: t('Drop PDFs or images here. Other files can be turned into PDFs with Convert.'), kind: 'err' }), disabled: !!showSig });
 
   const onImage = (f?: File, at?: { page: number; x: number; y: number }) => {
     if (!f) return;
@@ -622,7 +623,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         }
         placeStamp({ src, w: im.naturalWidth, h: im.naturalHeight }, 'image', undefined, at);
       };
-      im.onerror = () => toast({ msg: 'Couldn’t place image', kind: 'err' });
+      im.onerror = () => toast({ msg: t('Couldn’t place image'), kind: 'err' });
       im.src = r.result as string;
     };
     r.readAsDataURL(f);
@@ -856,16 +857,16 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         return;
       }
       // a page with real text: the stroke missed it
-      if (content && content.it.glyphs.length) { toast({ msg: 'Nothing to remove there' }); return; }
+      if (content && content.it.glyphs.length) { toast({ msg: t('Nothing to remove there') }); return; }
       // a picture page whose picture the file holds in a way that can't be cut (inline), or content that
       // couldn't be read: the page's own texture is copied over what shows there instead
       const src0 = preview && preview.keys[src] !== undefined ? preview.pdf : pdf;
       const patch = await textureFill(await src0.getPage(src + 1), stroke, infos[src]);
-      if (!patch) { toast({ msg: 'Nothing to remove there' }); return; }
+      if (!patch) { toast({ msg: t('Nothing to remove there') }); return; }
       addObject({ id: uid(), page: src, type: 'image', ...patch });
     } catch (err) {
       console.warn('remove failed', err);
-      toast({ msg: 'That couldn’t be removed', kind: 'err' });
+      toast({ msg: t('That couldn’t be removed'), kind: 'err' });
     } finally {
       setPendingCuts((m) => ({ ...m, [src]: (m[src] ?? []).filter((k) => k !== stroke) }));
       setRemovingBusy((n) => n - 1);
@@ -910,7 +911,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setEditing(null);
     (document.activeElement as HTMLElement | null)?.blur?.();
     await new Promise((r) => setTimeout(r, 30));
-    setBusy({ title: how === 'print' ? 'Preparing to print' : 'Preparing your PDF', detail: `Writing ${editCount || 'your'} ${editCount === 1 ? 'change' : 'changes'} into ${snap.pages.length} ${snap.pages.length === 1 ? 'page' : 'pages'}. Nothing is uploaded.` });
+    setBusy({ title: how === 'print' ? t('Preparing to print') : t('Preparing your PDF'), detail: editCount ? tn(editCount, 'Writing {n} change into {p} pages. Nothing is uploaded.', 'Writing {n} changes into {p} pages. Nothing is uploaded.', { p: snap.pages.length }) : tn(snap.pages.length, 'Writing your changes into {n} page. Nothing is uploaded.', 'Writing your changes into {n} pages. Nothing is uploaded.') });
     try {
       const bytes = await exportPdf({
         bytes: file.bytes, pages: snap.pages, objects: snap.objects, edits: textEdits(snap.edits),
@@ -927,7 +928,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       return true;
     } catch (e: any) {
       console.error(e);
-      toast({ msg: 'The PDF could not be saved: ' + (e?.message || 'unknown error'), kind: 'err', action: { label: 'Retry', run: () => { deliver(how); } } });
+      toast({ msg: t('The PDF could not be saved: {e}', { e: e?.message || t('unknown error') }), kind: 'err', action: { label: t('Retry'), run: () => { deliver(how); } } });
       return false;
     } finally {
       setBusy(null);
@@ -1115,10 +1116,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         // on a phone the hint has done its job once a line opens: give the page the room
         if (mobile && !ocrAll) setOcrHidden(true);
       }
-      else toast({ msg: 'No text found there. Tap right on a line of text.' });
+      else toast({ msg: t('No text found there. Tap right on a line of text.') });
     } catch (e) {
       console.warn('ocr failed', e);
-      toast({ msg: 'Text recognition is not available on this device.', kind: 'err' });
+      toast({ msg: t('Text recognition is not available on this device.'), kind: 'err' });
     } finally {
       setTapAt((t) => (t && t.src === src && t.x === x && t.y === y ? null : t));
     }
@@ -1153,7 +1154,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const ocrDone = ocr?.done.filter((s) => pictureSet.has(s)).length ?? 0;
   useEffect(() => {
     if (ocrAll && pictureOnly.length && ocrDone >= pictureOnly.length) {
-      toast({ msg: 'Text recognised on all pages. Tap a line to edit it.' });
+      toast({ msg: t('Text recognised on all pages. Tap a line to edit it.') });
       setOcrAll(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1162,8 +1163,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   // ----- keyboard -----
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const t = e.target as HTMLElement;
-      if (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable) return;
+      const tg = e.target as HTMLElement;
+      if (tg.tagName === 'TEXTAREA' || tg.tagName === 'INPUT' || tg.tagName === 'SELECT' || tg.isContentEditable) return;
       const mod = e.ctrlKey || e.metaKey;
       const k = e.key.toLowerCase();
       if (mod && k === 'z') { e.preventDefault(); e.shiftKey ? hist.redo() : hist.undo(); }
@@ -1179,7 +1180,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         // an added object: copied (or cut) to paste on any page
         e.preventDefault(); objClip.current = selObj; lastCopy.current = 'obj';
         if (k === 'x') { removeObject(selObj.id); setSelected(null); }
-        toast({ msg: k === 'x' ? 'Cut. Ctrl+V pastes it' : 'Copied. Ctrl+V pastes it' });
+        toast({ msg: k === 'x' ? t('Cut. Ctrl+V pastes it') : t('Copied. Ctrl+V pastes it') });
       }
       else if (mod && k === 'v' && objClip.current && !(clip && !selObj && lastCopy.current === 'run')) {
         e.preventDefault();
@@ -1273,7 +1274,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const formFields = fields.filter((f) => !f.readOnly);
     if (formFields.length && tool === 'edit' && !editing && !selected && !hist.canUndo) {
       pickTool('fill');
-      toast({ msg: `A form: tap a field to fill it in`, action: { label: 'Edit text', run: () => pickTool('edit') } });
+      toast({ msg: t('A form: tap a field to fill it in'), action: { label: t('Edit text'), run: () => pickTool('edit') } });
     }
   }, [fieldsReady]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -1351,7 +1352,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (!add.length) return;
     commit((s) => ({ ...s, objects: [...s.objects, ...add] }));
     setFound({ list: [], cur: -1, priv: false });
-    toast({ msg: `${add.length} ${add.length === 1 ? 'part' : 'parts'} blacked out. They are deleted from the file when you download.`, action: { label: 'Undo', run: hist.undo } });
+    toast({ msg: tn(add.length, '{n} part blacked out. It is deleted from the file when you download.', '{n} parts blacked out. They are deleted from the file when you download.'), action: { label: t('Undo'), run: hist.undo } });
   };
   const hitsByPage = useMemo(() => {
     const m: Record<number, { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[]> = {};
@@ -1488,14 +1489,14 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const out: ChangeItem[] = [];
     for (const [key, e] of Object.entries(snap.edits)) {
       const src = +key.split(':')[0];
-      out.push({ id: key, icon: e.text.trim() ? 'edit' : 'trash', label: e.text.trim() ? `Edited “${e.text.trim().slice(0, 28)}”` : 'Deleted a line', page: pageNo(src) });
+      out.push({ id: key, icon: e.text.trim() ? 'edit' : 'trash', label: e.text.trim() ? t('Edited “{s}”', { s: e.text.trim().slice(0, 28) }) : t('Deleted a line'), page: pageNo(src) });
     }
     for (const o of snap.objects) {
       const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check', link: 'link', erase: 'bandaids' };
-      out.push({ id: o.id, icon: ic[o.type], label: o.type === 'text' ? `Text “${o.text.trim().slice(0, 24) || '…'}”` : objTitle(o), page: pageNo(o.page) });
+      out.push({ id: o.id, icon: ic[o.type], label: o.type === 'text' ? t('Text “{s}”', { s: o.text.trim().slice(0, 24) || '…' }) : objTitle(o), page: pageNo(o.page) });
     }
     const nf = Object.keys(snap.forms).length;
-    if (nf) out.push({ id: 'forms', icon: 'fill', label: `Filled ${nf} form ${nf === 1 ? 'field' : 'fields'}`, page: 1 });
+    if (nf) out.push({ id: 'forms', icon: 'fill', label: tn(nf, 'Filled {n} form field', 'Filled {n} form fields'), page: 1 });
     return out.filter((c) => c.page > 0);
   }, [snap]);
 
@@ -1503,7 +1504,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const lineLabel = (key: string) => {
     const src = +key.split(':')[0];
     const runs = pageData[src]?.runs ?? [];
-    return `Page ${snap.pages.findIndex((p) => p.src === src) + 1} · Line ${runs.findIndex((r) => r.key === key) + 1}`;
+    return t('Page {p} · Line {l}', { p: snap.pages.findIndex((p) => p.src === src) + 1, l: runs.findIndex((r) => r.key === key) + 1 });
   };
   const runProps = (compact: boolean, hideTools = false) => selRun && (
     <RunProps run={selRun} hideTools={hideTools} font={fonts[selRun.fontName]} edit={snap.edits[selRun.key]} line={lineLabel(selRun.key)} compact={compact}
@@ -1555,38 +1556,39 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         onDiscard={() => { setAskClose(false); onClose(); }}
         onDownload={async () => { setAskClose(false); if (await download()) onClose(); }} />}
       <header className="topbar float">
-        <button className="ibtn" onClick={requestClose} aria-label="Close document" title="Close"><Icon name="back" /></button>
+        <button className="ibtn" onClick={requestClose} aria-label={t('Close document')} title={t('Close')}><Icon name="back" /></button>
         <div className="doc">
           <div className="names">
-            <button className="fname fbtn" title="Rename, share, print" onClick={() => setFileMenu(true)} aria-haspopup="dialog">
+            <button className="fname fbtn" title={t('Rename, share, print')} onClick={() => setFileMenu(true)} aria-haspopup="dialog">
               <span>{docName ? docName + '.pdf' : file.name}</span><Icon name="caret-down:bold" size={13} />
             </button>
-            <div className="fmeta"><span>{snap.pages.length} {snap.pages.length === 1 ? 'page' : 'pages'}</span>
-              {editCount > 0 && <span className="chg">{editCount} {editCount === 1 ? 'change' : 'changes'}</span>}</div>
+            <div className="fmeta"><span>{tn(snap.pages.length, '{n} page', '{n} pages')}</span>
+              {editCount > 0 && <span className="chg">{tn(editCount, '{n} change', '{n} changes')}</span>}</div>
           </div>
         </div>
         <div className="group">
-          {desk && <button className={`ibtn${keysOpen ? ' on' : ''}`} onClick={() => { setSelected(null); setKeysOpen((v) => !v); }} aria-label="Keyboard shortcuts" title="Keyboard and mouse shortcuts (?)"><Icon name="keyboard" size={19} /></button>}
-          {!mobile && view === 'doc' && <button className={`ibtn${findOpen ? ' on' : ''}`} onClick={() => { setPrivOpen(false); setFindOpen((v) => !v); }} aria-label="Find in document" title="Find (Ctrl+F)"><Icon name="magnifying-glass" size={19} /></button>}
-          {!mobile && view === 'doc' && <button className={`ibtn${privOpen ? ' on' : ''}`} onClick={() => { setFindOpen(false); setPrivOpen((v) => !v); }} aria-label="Privacy check" title="Privacy check: find and black out personal data"><Icon name="shield-check" size={20} /></button>}
-          <button className="ibtn" onClick={hist.undo} disabled={!hist.canUndo} aria-label="Undo" title="Undo (Ctrl+Z)"><Icon name="undo" /></button>
-          <button className="ibtn" onClick={hist.redo} disabled={!hist.canRedo} aria-label="Redo" title="Redo (Ctrl+Shift+Z)"><Icon name="redo" /></button>
+          {desk && <button className={`ibtn${keysOpen ? ' on' : ''}`} onClick={() => { setSelected(null); setKeysOpen((v) => !v); }} aria-label={t('Keyboard shortcuts')} title={t('Keyboard and mouse shortcuts (?)')}><Icon name="keyboard" size={19} /></button>}
+          {!mobile && view === 'doc' && <button className={`ibtn${findOpen ? ' on' : ''}`} onClick={() => { setPrivOpen(false); setFindOpen((v) => !v); }} aria-label={t('Find in document')} title={t('Find (Ctrl+F)')}><Icon name="magnifying-glass" size={19} /></button>}
+          {!mobile && view === 'doc' && <button className={`ibtn${privOpen ? ' on' : ''}`} onClick={() => { setFindOpen(false); setPrivOpen((v) => !v); }} aria-label={t('Privacy check')} title={t('Privacy check: find and black out personal data')}><Icon name="shield-check" size={20} /></button>}
+          <button className="ibtn" onClick={hist.undo} disabled={!hist.canUndo} aria-label={t('Undo')} title={t('Undo (Ctrl+Z)')}><Icon name="undo" /></button>
+          <button className="ibtn" onClick={hist.redo} disabled={!hist.canRedo} aria-label={t('Redo')} title={t('Redo (Ctrl+Shift+Z)')}><Icon name="redo" /></button>
         </div>
         {!mobile && view === 'doc' && (
           <div className="zoompill">
-            <button className="ibtn" onClick={() => zoomStep(-1)} aria-label="Zoom out" title="Zoom out"><Icon name="minus" size={16} /></button>
-            <button className="pct" onClick={() => zoomTo(fitZoom())} title="Fit width (Ctrl+0)" aria-label={`Zoom ${Math.round(zoom * 100)}%, fit width`}>{Math.round(zoom * 100)}%</button>
-            <button className="ibtn" onClick={() => zoomStep(1)} aria-label="Zoom in" title="Zoom in"><Icon name="plus" size={16} /></button>
-            {desk && <button className="ibtn" onClick={() => zoomTo(fitZoom())} aria-label="Fit width" title="Fit width"><Icon name="fit" size={16} /></button>}
+            <button className="ibtn" onClick={() => zoomStep(-1)} aria-label={t('Zoom out')} title={t('Zoom out')}><Icon name="minus" size={16} /></button>
+            <button className="pct" onClick={() => zoomTo(fitZoom())} title={t('Fit width (Ctrl+0)')} aria-label={t('Zoom {z}%, fit width', { z: Math.round(zoom * 100) })}>{Math.round(zoom * 100)}%</button>
+            <button className="ibtn" onClick={() => zoomStep(1)} aria-label={t('Zoom in')} title={t('Zoom in')}><Icon name="plus" size={16} /></button>
+            {desk && <button className="ibtn" onClick={() => zoomTo(fitZoom())} aria-label={t('Fit width')} title={t('Fit width')}><Icon name="fit" size={16} /></button>}
           </div>
         )}
-        {!mobile && <button className={`ibtn${strip ? ' on' : ''}`} onClick={() => setStrip((v) => !v)} aria-pressed={strip} aria-label="Pages panel" title="Pages panel"><Icon name="sidebar-simple" size={20} weight={strip ? 'fill' : 'regular'} /></button>}
-        {!mobile && <button className="ibtn" onClick={onTools} aria-label="All tools" title="All tools: combine, extract, convert"><Icon name="dots-nine" size={20} /></button>}
+        {!mobile && <button className={`ibtn${strip ? ' on' : ''}`} onClick={() => setStrip((v) => !v)} aria-pressed={strip} aria-label={t('Pages panel')} title={t('Pages panel')}><Icon name="sidebar-simple" size={20} weight={strip ? 'fill' : 'regular'} /></button>}
+        {!mobile && <button className="ibtn" onClick={onTools} aria-label={t('All tools')} title={t('All tools: combine, extract, convert')}><Icon name="dots-nine" size={20} /></button>}
+        {!mobile && <LangButton />}
         {!mobile && <ThemeButton theme={theme} onToggle={onTheme} />}
       </header>
       {/* Download floats on its own, beside the top bar */}
-      <button className={`dlfloat${mobile ? ' m' : ''}`} onClick={() => download()} aria-label={host.isNative ? 'Save PDF' : 'Download PDF'} title={host.isNative ? 'Save PDF' : 'Download PDF'}>
-        <Icon name="download" size={mobile ? 22 : 19} />{!mobile && <span>Download</span>}
+      <button className={`dlfloat${mobile ? ' m' : ''}`} onClick={() => download()} aria-label={host.isNative ? t('Save PDF') : t('Download PDF')} title={host.isNative ? t('Save PDF') : t('Download PDF')}>
+        <Icon name="download" size={mobile ? 22 : 19} />{!mobile && <span>{t('Download')}</span>}
       </button>
       {fileMenu && (
         <FileSheet name={docName ?? file.name.replace(/\.pdf$/i, '') + '-edited'} original={file.name} mobile={mobile} native={!!host.isNative}
@@ -1596,19 +1598,19 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       )}
 
       <div className="body" {...fileDrop.bind}>
-        <DropOverlay show={fileDrop.over} title={view === 'pages' ? 'Drop to add pages' : 'Drop to add'}
-          sub={view === 'pages' ? 'PDFs and images become new pages after the current page' : 'Images go on the page where you drop them; PDFs are added as pages after the current page'} />
+        <DropOverlay show={fileDrop.over} title={view === 'pages' ? t('Drop to add pages') : t('Drop to add')}
+          sub={view === 'pages' ? t('PDFs and images become new pages after the current page') : t('Images go on the page where you drop them; PDFs are added as pages after the current page')} />
         {!mobile && (
-          <nav className="rail" aria-label="Tools">
+          <nav className="rail" aria-label={t('Tools')}>
             {GROUPS.map((g) => (
-              <div key={g.name} className="rgroup" role="group" aria-label={g.name}>
+              <div key={g.name} className="rgroup" role="group" aria-label={t(g.name)}>
                 {g.items.map((r) => {
                   const on = railActive(r);
                   return (
                     <button key={r.t} ref={(el) => { railBtns.current[r.t] = el; }} className={`tool${on ? ' active' : ''}${r.opts ? ' opts' : ''}`}
                       aria-pressed={on} aria-haspopup={r.opts ? 'true' : undefined} aria-expanded={r.opts ? flyout?.t === r.t : undefined}
-                      title={`${r.label} (${r.key})`} onClick={() => railClick(r)}>
-                      <Icon name={r.icon} size={22} weight={on ? 'fill' : 'duotone'} /><span>{r.label}</span>
+                      title={`${t(r.label)} (${r.key})`} onClick={() => railClick(r)}>
+                      <Icon name={r.icon} size={22} weight={on ? 'fill' : 'duotone'} /><span>{t(r.label)}</span>
                     </button>
                   );
                 })}
@@ -1669,34 +1671,34 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
               onChange={(pages) => commit((s) => ({ ...s, pages }))} />
           )}
           {pictureOnly.length > 0 && !ocrHidden && view === 'doc' && (
-            <div className="ocrbar" role="region" aria-label="Text recognition">
+            <div className="ocrbar" role="region" aria-label={t('Text recognition')}>
               <span className="oi"><Icon name="text-t:duotone" size={22} /></span>
               <div className="ot">
-                <b>{pictureOnly.length === snap.pages.length ? (pictureOnly.length === 1 ? 'This page is a picture' : 'These pages are pictures') : `${pictureOnly.length} ${pictureOnly.length === 1 ? 'page is a picture' : 'pages are pictures'}`}</b>
-                <span>{ocr?.failed ? 'Text recognition is not available on this device.'
-                  : ocrAll ? `Reading text · ${ocrDone} of ${pictureOnly.length} pages done. You can edit meanwhile.`
-                  : 'Tap any text to edit it. It is read on this device; nothing is uploaded.'}</span>
+                <b>{pictureOnly.length === snap.pages.length ? (pictureOnly.length === 1 ? t('This page is a picture') : t('These pages are pictures')) : tn(pictureOnly.length, '{n} page is a picture', '{n} pages are pictures')}</b>
+                <span>{ocr?.failed ? t('Text recognition is not available on this device.')
+                  : ocrAll ? t('Reading text · {d} of {n} pages done. You can edit meanwhile.', { d: ocrDone, n: pictureOnly.length })
+                  : t('Tap any text to edit it. It is read on this device; nothing is uploaded.')}</span>
               </div>
               {pictureOnly.length > 1 && !ocr?.failed && ocrDone < pictureOnly.length && (
                 <div className="oa">
                   {ocrAll
-                    ? <button className="btn outline" onClick={stopAll}>Stop</button>
-                    : <button className="btn outline" onClick={readAll}>Read all {pictureOnly.length} pages</button>}
+                    ? <button className="btn outline" onClick={stopAll}>{t('Stop')}</button>
+                    : <button className="btn outline" onClick={readAll}>{t('Read all {n} pages', { n: pictureOnly.length })}</button>}
                 </div>
               )}
               {ocrAll && <div className="op" aria-hidden><i style={{ width: `${Math.round((ocrDone / pictureOnly.length) * 100)}%` }} /></div>}
-              <button className="ibtn muted x" aria-label="Hide" onClick={() => setOcrHidden(true)}><Icon name="close" size={18} /></button>
+              <button className="ibtn muted x" aria-label={t('Hide')} onClick={() => setOcrHidden(true)}><Icon name="close" size={18} /></button>
             </div>
           )}
           {!mobile && view === 'doc' && (
             <div className="pagepill" aria-live="polite"><b>{Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1)}</b>&nbsp;/ {snap.pages.length}</div>
           )}
           {fieldNav && (
-            <div className="fieldnav" role="toolbar" aria-label="Form fields" onMouseDown={(e) => e.preventDefault()}>
-              <button onClick={() => focusField(fillable[Math.max(0, fieldIndex - 1)])} disabled={fieldIndex <= 0} aria-label="Previous field"><Icon name="caret-up:bold" size={18} /></button>
-              <button onClick={() => focusField(fillable[Math.min(fillable.length - 1, fieldIndex + 1)])} disabled={fieldIndex >= fillable.length - 1} aria-label="Next field"><Icon name="caret-down:bold" size={18} /></button>
-              <div className="fn"><b>{fillable[fieldIndex]?.label || 'Field'}</b><span>Field {fieldIndex + 1} of {fillable.length} · {filledCount} filled</span></div>
-              <button className="done" onClick={() => { (document.activeElement as HTMLElement | null)?.blur?.(); setActiveField(null); }}>Done</button>
+            <div className="fieldnav" role="toolbar" aria-label={t('Form fields')} onMouseDown={(e) => e.preventDefault()}>
+              <button onClick={() => focusField(fillable[Math.max(0, fieldIndex - 1)])} disabled={fieldIndex <= 0} aria-label={t('Previous field')}><Icon name="caret-up:bold" size={18} /></button>
+              <button onClick={() => focusField(fillable[Math.min(fillable.length - 1, fieldIndex + 1)])} disabled={fieldIndex >= fillable.length - 1} aria-label={t('Next field')}><Icon name="caret-down:bold" size={18} /></button>
+              <div className="fn"><b>{fillable[fieldIndex]?.label || t('Field')}</b><span>{t('Field {i} of {n} · {f} filled', { i: fieldIndex + 1, n: fillable.length, f: filledCount })}</span></div>
+              <button className="done" onClick={() => { (document.activeElement as HTMLElement | null)?.blur?.(); setActiveField(null); }}>{t('Done')}</button>
             </div>
           )}
         </div>
@@ -1708,37 +1710,37 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             onAdd={onAddPages ? () => setAddAfter(Math.max(0, snap.pages.findIndex((p) => p.src === curPage)) + 1) : undefined} />
         )}
         {!desk && !strip && view === 'doc' && !mobileEditing && !fieldNav && (
-          <button className="pgtab" onClick={() => setStrip(true)} aria-label="Show all pages">
+          <button className="pgtab" onClick={() => setStrip(true)} aria-label={t('Show all pages')}>
             <Icon name="sidebar-simple" size={17} /><b>{Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1)}</b>/{snap.pages.length}
           </button>
         )}
         {desk && view === 'doc' && (
-          <aside className="side" aria-label="Properties">
+          <aside className="side" aria-label={t('Properties')}>
             {panel ?? <IdleProps changes={changes} onPick={pickChange} />}
           </aside>
         )}
         {tablet && view === 'doc' && panel && !(tool === 'fill' && activeField) && (
-          <aside ref={cardRef} className={`floatcard ${cardLeft ? 'l' : 'r'}`} aria-label="Properties">{panel}</aside>
+          <aside ref={cardRef} className={`floatcard ${cardLeft ? 'l' : 'r'}`} aria-label={t('Properties')}>{panel}</aside>
         )}
         {flyout && (() => {
           const item = RAIL.find((r) => r.t === flyout.t)!;
-          const t: Tool = flyout.t === 'shapes' ? (SHAPE_TOOLS.includes(tool) ? tool : lastShape.current)
+          const ft: Tool = flyout.t === 'shapes' ? (SHAPE_TOOLS.includes(tool) ? tool : lastShape.current)
             : flyout.t === 'markup' ? (MARK_TOOLS.includes(tool) ? tool : lastMark.current) : flyout.t as Tool;
           const tiles = flyout.t === 'shapes' ? SHAPES : flyout.t === 'markup' ? MARK_TILES : null;
           return (
-            <div className={`flyout2${mobile ? ' m' : ''}`} role="dialog" aria-label={`${item.label} options`}
+            <div className={`flyout2${mobile ? ' m' : ''}`} role="dialog" aria-label={t('{tool} options', { tool: t(item.label) })}
               style={mobile ? undefined : { top: Math.max(8, flyout.top) }}>
-              <div className="fh"><b>{item.label}</b>{!mobile && <kbd>{item.key}</kbd>}</div>
+              <div className="fh"><b>{t(item.label)}</b>{!mobile && <kbd>{item.key}</kbd>}</div>
               {tiles && (
-                <div className="ftiles" role="radiogroup" aria-label={flyout.t === 'shapes' ? 'Shape' : 'Mark'}>
+                <div className="ftiles" role="radiogroup" aria-label={flyout.t === 'shapes' ? t('Shape') : t('Mark')}>
                   {tiles.map(([st, label, ic]) => (
                     <button key={st} role="radio" aria-checked={tool === st} className={tool === st ? 'on' : ''} onClick={() => { const ft = flyout.t; pickTool(st); if (!mobile) openFlyout(ft); }}>
-                      <Icon name={ic} size={20} weight={tool === st ? 'fill' : 'regular'} />{label}
+                      <Icon name={ic} size={20} weight={tool === st ? 'fill' : 'regular'} />{t(label)}
                     </button>
                   ))}
                 </div>
               )}
-              {(!mobile || flyout.t === 'remove' || flyout.t === 'draw') && toolHasProps(t) && <ToolProps tool={t} style={style} compact onChange={(v) => setStyle((x) => ({ ...x, ...v }))} />}
+              {(!mobile || flyout.t === 'remove' || flyout.t === 'draw') && toolHasProps(ft) && <ToolProps tool={ft} style={style} compact onChange={(v) => setStyle((x) => ({ ...x, ...v }))} />}
             </div>
           );
         })()}
@@ -1747,15 +1749,15 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       {pasting && clip && (
         <div className={`pastepill${mobile ? '' : ' desk'}`} role="status">
           <Icon name="clipboard-text" size={18} />
-          <span className="pp-t">Tap where to paste “{clip.text.length > 24 ? clip.text.slice(0, 23) + '…' : clip.text}”</span>
-          <button onClick={() => setPasting(false)}>Cancel</button>
+          <span className="pp-t">{t('Tap where to paste “{s}”', { s: clip.text.length > 24 ? clip.text.slice(0, 23) + '…' : clip.text })}</span>
+          <button onClick={() => setPasting(false)}>{t('Cancel')}</button>
         </div>
       )}
       {moving && !pasting && (
         <div className={`pastepill${mobile ? '' : ' desk'}`} role="status">
           <Icon name="move" size={18} />
-          <span className="pp-t">{mobile ? 'Drag the line to move it' : 'Drag the line, or use the arrow keys'}</span>
-          <button onClick={() => { setMoving(null); setSelected(null); }}>Done</button>
+          <span className="pp-t">{mobile ? t('Drag the line to move it') : t('Drag the line, or use the arrow keys')}</span>
+          <button onClick={() => { setMoving(null); setSelected(null); }}>{t('Done')}</button>
         </div>
       )}
       {mobile && mobileEditing && (
@@ -1773,42 +1775,43 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         </SlimBar>
       )}
       {mobile && !mobileEditing && !(fieldNav) && (
-        <nav className="dock3" aria-label="Tools">
+        <nav className="dock3" aria-label={t('Tools')}>
           <div className="dk-scroll" ref={dockRef}>
-            {DOCK.map((t) => {
-              const r = RAIL.find((x) => x.t === t)!;
+            {DOCK.map((dt) => {
+              const r = RAIL.find((x) => x.t === dt)!;
               const on = railActive(r);
               return (
                 <button key={r.t} className={`dk3${on ? ' on' : ''}`} aria-pressed={on} onClick={() => railClick(r)} data-t={r.t}>
-                  <span className="ic"><Icon name={r.icon} size={22} weight={on ? 'fill' : 'regular'} /></span>{r.label}
+                  <span className="ic"><Icon name={r.icon} size={22} weight={on ? 'fill' : 'regular'} /></span>{t(r.label)}
                 </button>
               );
             })}
           </div>
           <span className="sep" aria-hidden />
           <button className={`dk3 more${moreOpen ? ' on' : ''}`} aria-haspopup="dialog" onClick={() => { setFlyout(null); setSelected(null); setMoreOpen(true); }}>
-            <span className="ic"><Icon name="dots-nine:bold" size={22} /></span>More
+            <span className="ic"><Icon name="dots-nine:bold" size={22} /></span>{t('More')}
           </button>
         </nav>
       )}
       {mobile && moreOpen && (
         <>
           <div className="sheet-scrim" onClick={() => setMoreOpen(false)} />
-          <div className="toolsheet" role="dialog" aria-label="All tools">
+          <div className="toolsheet" role="dialog" aria-label={t('All tools')}>
             <div className="grab" />
-            <div className="tsh"><h2>All tools</h2>
+            <div className="tsh"><h2>{t('All tools')}</h2>
+              <LangButton />
               <ThemeButton theme={theme} onToggle={onTheme} />
-              <button className="ibtn round" onClick={() => setMoreOpen(false)} aria-label="Close"><Icon name="x:bold" size={18} /></button></div>
+              <button className="ibtn round" onClick={() => setMoreOpen(false)} aria-label={t('Close')}><Icon name="x:bold" size={18} /></button></div>
             {GROUPS.map((g) => (
               <div key={g.name} className="tsg">
-                <span className="kicker">{g.name}</span>
+                <span className="kicker">{t(g.name)}</span>
                 <div className="tiles">
                   {g.items.map((r) => {
                     const on = railActive(r);
                     return (
                       <button key={r.t} className={`tile${on ? ' on' : ''}`} aria-pressed={on} onClick={() => railClick(r)}>
                         <span className="chip" style={{ background: on ? 'var(--marker)' : g.tint }}><Icon name={r.icon} size={21} weight={on ? 'fill' : 'duotone'} /></span>
-                        {r.label}
+                        {t(r.label)}
                       </button>
                     );
                   })}
@@ -1816,20 +1819,20 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
               </div>
             ))}
             <div className="tsg">
-              <span className="kicker">Check</span>
+              <span className="kicker">{t('Check')}</span>
               <div className="tiles">
-                <button className="tile" onClick={() => { setMoreOpen(false); setFindOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="magnifying-glass" size={21} weight="duotone" /></span>Find</button>
-                <button className="tile" onClick={() => { setMoreOpen(false); setPrivOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="shield-check" size={21} weight="duotone" /></span>Privacy</button>
+                <button className="tile" onClick={() => { setMoreOpen(false); setFindOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="magnifying-glass" size={21} weight="duotone" /></span>{t('Find')}</button>
+                <button className="tile" onClick={() => { setMoreOpen(false); setPrivOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="shield-check" size={21} weight="duotone" /></span>{t('Privacy')}</button>
               </div>
             </div>
-            <button className="more-tools" onClick={() => { setMoreOpen(false); onTools(); }}>More tools: compress, password, split…<Icon name="right" size={16} /></button>
+            <button className="more-tools" onClick={() => { setMoreOpen(false); onTools(); }}>{t('More tools: compress, password, split…')}<Icon name="right" size={16} /></button>
           </div>
         </>
       )}
       {mobile && sheetObj && (
         <>
           <div className="sheet-scrim" onClick={() => setSheetFor(null)} />
-          <div className="bsheet" role="dialog" aria-label="Object properties">
+          <div className="bsheet" role="dialog" aria-label={t('Object properties')}>
             <div className="grab" />
             <ObjProps o={sheetObj} docFonts={docFonts} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(sheetObj.id, p, false)} onDelete={() => removeObject(sheetObj.id)}
               onDuplicate={() => { duplicateObject(sheetObj.id); setSheetFor(null); }} onClose={() => setSheetFor(null)} />
@@ -1887,23 +1890,23 @@ function FileSheet({ name, original, mobile, native, pages, changes, onRename, o
   return (
     <>
       <div className="sheet-scrim filescrim" onClick={close} />
-      <div className={`bsheet filesheet${mobile ? '' : ' center'}`} role="dialog" aria-label="File">
+      <div className={`bsheet filesheet${mobile ? '' : ' center'}`} role="dialog" aria-label={t('File')}>
         {mobile && <div className="grab" />}
         <div className="fs-h"><span className="fs-ic"><Icon name="file-pdf:duotone" size={26} /></span>
-          <div><b>File</b><span>{pages} {pages === 1 ? 'page' : 'pages'}{changes ? ` · ${changes} ${changes === 1 ? 'change' : 'changes'}` : ''}</span></div>
-          <button className="ibtn round" onClick={close} aria-label="Close"><Icon name="x:bold" size={18} /></button>
+          <div><b>{t('File')}</b><span>{tn(pages, '{n} page', '{n} pages')}{changes ? ' · ' + tn(changes, '{n} change', '{n} changes') : ''}</span></div>
+          <button className="ibtn round" onClick={close} aria-label={t('Close')}><Icon name="x:bold" size={18} /></button>
         </div>
         <label className="fs-name">
-          <span className="kicker">Name</span>
+          <span className="kicker">{t('Name')}</span>
           <span className="sc-name"><input className="input" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { commit(); onClose(); } }}
-            aria-label="File name" autoComplete="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} /><em>.pdf</em></span>
-          <small>Opened as {original}</small>
+            aria-label={t('File name')} autoComplete="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} /><em>.pdf</em></span>
+          <small>{t('Opened as {f}', { f: original })}</small>
         </label>
         <div className="fs-acts">
-          <button onClick={() => act('share')}><span className="ic"><Icon name="share-network:duotone" size={22} /></span><b>Share</b><span>Send to an app, mail or chat</span></button>
-          {!native && <button onClick={() => act('print')}><span className="ic"><Icon name="printer:duotone" size={22} /></span><b>Print</b><span>Opens the print dialog</span></button>}
-          <button onClick={() => act('save')}><span className="ic"><Icon name="file-arrow-down:duotone" size={22} /></span><b>{native ? 'Save' : 'Download'}</b><span>{native ? 'To Files, Drive or another app' : 'To your downloads'}</span></button>
-          {mobile && <button onClick={() => act('find')}><span className="ic"><Icon name="magnifying-glass:duotone" size={22} /></span><b>Find</b><span>Search the text</span></button>}
+          <button onClick={() => act('share')}><span className="ic"><Icon name="share-network:duotone" size={22} /></span><b>{t('Share')}</b><span>{t('Send to an app, mail or chat')}</span></button>
+          {!native && <button onClick={() => act('print')}><span className="ic"><Icon name="printer:duotone" size={22} /></span><b>{t('Print')}</b><span>{t('Opens the print dialog')}</span></button>}
+          <button onClick={() => act('save')}><span className="ic"><Icon name="file-arrow-down:duotone" size={22} /></span><b>{native ? t('Save') : t('Download')}</b><span>{native ? t('To Files, Drive or another app') : t('To your downloads')}</span></button>
+          {mobile && <button onClick={() => act('find')}><span className="ic"><Icon name="magnifying-glass:duotone" size={22} /></span><b>{t('Find')}</b><span>{t('Search the text')}</span></button>}
         </div>
       </div>
     </>
@@ -1924,22 +1927,22 @@ function PageStrip({ pages, cur, overlay, pdfFor, onGo, onClose, onOrganize, onA
   return (
     <>
       {overlay && <div className="ps-scrim" onClick={onClose} />}
-      <aside className={`pstrip${overlay ? ' ov' : ''}`} aria-label="Pages">
+      <aside className={`pstrip${overlay ? ' ov' : ''}`} aria-label={t('Pages')}>
         <div className="ps-h">
-          <b>Pages</b><span className="ps-c">{pages.length}</span>
+          <b>{t('Pages')}</b><span className="ps-c">{pages.length}</span>
           <span style={{ flex: 1 }} />
-          <button className="ibtn" onClick={onOrganize} aria-label="Organize pages" title="Organize: reorder, rotate, delete"><Icon name="squares-four" size={18} /></button>
-          <button className="ibtn" onClick={onClose} aria-label="Hide pages" title="Hide"><Icon name="close" size={18} /></button>
+          <button className="ibtn" onClick={onOrganize} aria-label={t('Organize pages')} title={t('Organize: reorder, rotate, delete')}><Icon name="squares-four" size={18} /></button>
+          <button className="ibtn" onClick={onClose} aria-label={t('Hide pages')} title={t('Hide')}><Icon name="close" size={18} /></button>
         </div>
         <div className="ps-list" ref={list}>
           {pages.map((p, i) => (
-            <button key={p.src} className={`ps-it${p.src === cur ? ' on' : ''}`} onClick={() => onGo(p.src)} aria-label={`Page ${i + 1}`} aria-current={p.src === cur ? 'page' : undefined}>
+            <button key={p.src} className={`ps-it${p.src === cur ? ' on' : ''}`} onClick={() => onGo(p.src)} aria-label={t('Page {p}', { p: i + 1 })} aria-current={p.src === cur ? 'page' : undefined}>
               <span className="ps-th"><Thumb pdf={pdfFor(p.src)} src={p.src} rotation={p.rotation} size={130} /></span>
               <span className="ps-n">{i + 1}</span>
             </button>
           ))}
         </div>
-        {onAdd && <button className="ps-add" onClick={onAdd} title="Add pages after the current page"><Icon name="plus:bold" size={16} />Add page</button>}
+        {onAdd && <button className="ps-add" onClick={onAdd} title={t('Add pages after the current page')}><Icon name="plus:bold" size={16} />{t('Add page')}</button>}
       </aside>
     </>
   );
@@ -1982,25 +1985,25 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, to
       {open && <div className="more">{children}</div>}
       {tools && <div className="fmtrow">{tools}</div>}
       <div className="row">
-        {run && <button className="chipb" onClick={onToggle} aria-label={`Font ${run.label}`}><span style={{ fontFamily: run.css }}>Aa</span><span className="fn">{run.label}</span></button>}
+        {run && <button className="chipb" onClick={onToggle} aria-label={t('Font {f}', { f: run.label })}><span style={{ fontFamily: run.css }}>{t('Aa')}</span><span className="fn">{run.label}</span></button>}
         {obj && (
           obj.font || docFonts
             // the document's fonts: pick one in the options
-            ? <button className="chipb" aria-label={`Font ${obj.font?.label ?? famLabel[obj.family]}`} onClick={onToggle}>
-                <span style={{ fontFamily: obj.font?.css ?? famCss[obj.family], fontSynthesis: 'none' } as any}>Aa</span><span className="fn">{obj.font?.label ?? famLabel[obj.family]}</span>
+            ? <button className="chipb" aria-label={t('Font {f}', { f: obj.font?.label ?? t(famLabel[obj.family]) })} onClick={onToggle}>
+                <span style={{ fontFamily: obj.font?.css ?? famCss[obj.family], fontSynthesis: 'none' } as any}>{t('Aa')}</span><span className="fn">{obj.font?.label ?? famLabel[obj.family]}</span>
               </button>
-            : <button className="chipb" aria-label="Change font" onClick={() => onObj({ family: fams[(fams.indexOf(obj.family) + 1) % 3] })}>
-                <span style={{ fontFamily: famCss[obj.family] }}>Aa</span><span className="fn">{famLabel[obj.family]}</span>
+            : <button className="chipb" aria-label={t('Change font')} onClick={() => onObj({ family: fams[(fams.indexOf(obj.family) + 1) % 3] })}>
+                <span style={{ fontFamily: famCss[obj.family] }}>{t('Aa')}</span><span className="fn">{famLabel[obj.family]}</span>
               </button>
         )}
-        {run && <Stepper soft value={selSize ?? run.size} min={2} max={300} label={selSize !== null ? 'size of the selected letters' : 'size'}
+        {run && <Stepper soft value={selSize ?? run.size} min={2} max={300} label={selSize !== null ? t('size of the selected letters') : t('size')}
           onChange={(v) => { if (selSize !== null && lineEditor()?.setSelSize(v)) return; run.onSize(v); }} />}
-        {obj && <Stepper soft value={selSize ?? obj.size} min={selSize !== null ? 2 : 4} max={200} label={selSize !== null ? 'size of the selected letters' : 'size'}
+        {obj && <Stepper soft value={selSize ?? obj.size} min={selSize !== null ? 2 : 4} max={200} label={selSize !== null ? t('size of the selected letters') : t('size')}
           onChange={(size) => { if (selSize !== null && lineEditor()?.setSelSize(size)) return; onObj({ size }); }} />}
-        <button className="cdot" onClick={onToggle} aria-label="Colour"><i style={{ background: run?.color ?? obj?.color }} /></button>
-        <button className="ibtn muted" onClick={onToggle} aria-label={open ? 'Fewer options' : 'More options'} aria-expanded={open}><Icon name={open ? 'down' : 'up'} size={20} /></button>
+        <button className="cdot" onClick={onToggle} aria-label={t('Colour')}><i style={{ background: run?.color ?? obj?.color }} /></button>
+        <button className="ibtn muted" onClick={onToggle} aria-label={open ? t('Fewer options') : t('More options')} aria-expanded={open}><Icon name={open ? 'down' : 'up'} size={20} /></button>
         <div className="sp" />
-        <button className="btn primary" onClick={onDone}>Done</button>
+        <button className="btn primary" onClick={onDone}>{t('Done')}</button>
       </div>
     </div>
   );
@@ -2010,11 +2013,11 @@ function MobileFillBar({ fields, filled, mark, onMark, onStart }: { fields: numb
   return (
     <div className="slimbar fillfloat">
       <div className="row" style={{ overflowX: 'auto' }}>
-        {fields > 0 && <button className="btn primary" onClick={onStart}>Fill {fields} fields</button>}
+        {fields > 0 && <button className="btn primary" onClick={onStart}>{tn(fields, 'Fill {n} field', 'Fill {n} fields')}</button>}
         {fields > 0 && <span className="label num" style={{ whiteSpace: 'nowrap' }}>{filled}/{fields}</span>}
         <div className="sp" />
         {MARKS.map(([m, ic, label]) => (
-          <button key={m} className={`ibtn${mark === m ? ' primary' : ''}`} style={mark === m ? { width: 44, height: 44 } : { width: 44, height: 44 }} onClick={() => onMark(m)} aria-label={`Place ${label}`} aria-pressed={mark === m}>
+          <button key={m} className={`ibtn${mark === m ? ' primary' : ''}`} style={mark === m ? { width: 44, height: 44 } : { width: 44, height: 44 }} onClick={() => onMark(m)} aria-label={t('Place {m}', { m: t(label) })} aria-pressed={mark === m}>
             <Icon name={ic} size={19} />
           </button>
         ))}
@@ -2036,8 +2039,8 @@ function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMar
         <>
           <div className="field">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline' }}>
-              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>Form fields</h3>
-              <span className="label num">{filled} of {fields.length} filled</span>
+              <h3 style={{ margin: 0, fontSize: 17, fontWeight: 600 }}>{t('Form fields')}</h3>
+              <span className="label num">{t('{f} of {n} filled', { f: filled, n: fields.length })}</span>
             </div>
             <div className="progress" style={{ width: '100%' }}><div style={{ width: `${(filled / fields.length) * 100}%` }} /></div>
           </div>
@@ -2054,25 +2057,25 @@ function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMar
             })}
           </div>
           <div className="grid2" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-            <button className="btn outline" onClick={onPrev} disabled={index <= 0}><Icon name="caret-up:bold" size={16} />Previous</button>
-            <button className="btn outline" onClick={onNext} disabled={index >= fields.length - 1}>Next field<Icon name="caret-down:bold" size={16} /></button>
+            <button className="btn outline" onClick={onPrev} disabled={index <= 0}><Icon name="caret-up:bold" size={16} />{t('Previous')}</button>
+            <button className="btn outline" onClick={onNext} disabled={index >= fields.length - 1}>{t('Next field')}<Icon name="caret-down:bold" size={16} /></button>
           </div>
         </>
       ) : (
-        <div className="head"><div className="t"><div className="kicker">Fill form</div><h3 style={{ whiteSpace: 'normal' }}>No fillable fields found</h3>
-          <div className="hint" style={{ fontSize: 13.5, marginTop: 2 }}>Pick a mark below, then tap the page where it goes.</div></div></div>
+        <div className="head"><div className="t"><div className="kicker">{t('Fill form')}</div><h3 style={{ whiteSpace: 'normal' }}>{t('No fillable fields found')}</h3>
+          <div className="hint" style={{ fontSize: 13.5, marginTop: 2 }}>{t('Pick a mark below, then tap the page where it goes.')}</div></div></div>
       )}
       <div className="field">
-        <div className="kicker">{fields.length ? 'No field? Tap the page to add' : 'Marks'}</div>
+        <div className="kicker">{fields.length ? t('No field? Tap the page to add') : t('Marks')}</div>
         <div className="marks">
           {MARKS.map(([m, ic, label]) => (
-            <button key={m} className={mark === m ? 'on' : ''} onClick={() => onMark(m)} aria-pressed={mark === m}><Icon name={ic} size={18} />{label}</button>
+            <button key={m} className={mark === m ? 'on' : ''} onClick={() => onMark(m)} aria-pressed={mark === m}><Icon name={ic} size={18} />{t(label)}</button>
           ))}
         </div>
       </div>
-      {fields.length > 0 && <Toggle label="Flatten on download" hint="Answers become part of the page" checked={flatten} onChange={onFlatten} />}
+      {fields.length > 0 && <Toggle label={t('Flatten on download')} hint={t('Answers become part of the page')} checked={flatten} onChange={onFlatten} />}
       <div style={{ flex: 1 }} />
-      <button className="btn primary lg block" onClick={onDownload}><Icon name="download" size={18} />Download filled PDF</button>
+      <button className="btn primary lg block" onClick={onDownload}><Icon name="download" size={18} />{t('Download filled PDF')}</button>
     </div>
   );
 }

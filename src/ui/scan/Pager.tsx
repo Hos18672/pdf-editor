@@ -1,6 +1,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from '../icons';
 import type { ScanPage } from './engine';
+import { t, tn } from '../i18n';
 
 export interface PagerRender { key: string; url: string; w: number; h: number; quick?: boolean }
 
@@ -216,20 +217,20 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
           return (
             <div key={p.id} className="sc-slide" style={{ width: box.w }} aria-hidden={!on}>
               <div className="sc-pic" style={{ ...fit(sz.w, sz.h), ...(on && zoomed ? { transform: `translate(${z.x}px, ${z.y}px) scale(${z.k})`, zIndex: 2 } : null) }}>
-                {near && r ? <img src={r.url} alt={`Page ${i + 1}`} draggable={false} /> : <div className="sc-skel" />}
+                {near && r ? <img src={r.url} alt={t('Page {p}', { p: i + 1 })} draggable={false} /> : <div className="sc-skel" />}
                 {hi && <img className="sc-sharp" src={hi} alt="" draggable={false} />}
                 {on && compare && orig && (
                   <>
                     <img className="sc-orig" src={orig} alt="" draggable={false} style={{ clipPath: `inset(0 ${(1 - split) * 100}% 0 0)` }} />
-                    <span className="sc-tag l">Before</span><span className="sc-tag r">{label}</span>
-                    <div className="sc-split" style={{ left: `${split * 100}%` }} onPointerDown={splitDown} role="slider" aria-label="Compare with the original" aria-valuenow={Math.round(split * 100)}><i /></div>
+                    <span className="sc-tag l">{t('Before')}</span><span className="sc-tag r">{label}</span>
+                    <div className="sc-split" style={{ left: `${split * 100}%` }} onPointerDown={splitDown} role="slider" aria-label={t('Compare with the original')} aria-valuenow={Math.round(split * 100)}><i /></div>
                   </>
                 )}
-                {on && compare && !orig && <div className="sc-working sm"><span className="spinner" />Loading the photo…</div>}
-                {on && (!r || r.quick) && <div className="sc-working"><span className="spinner" />Straightening and cleaning…</div>}
-                {on && stale && !r!.quick && <div className="sc-working sm"><span className="spinner" />Applying…</div>}
+                {on && compare && !orig && <div className="sc-working sm"><span className="spinner" />{t('Loading the photo…')}</div>}
+                {on && (!r || r.quick) && <div className="sc-working"><span className="spinner" />{t('Straightening and cleaning…')}</div>}
+                {on && stale && !r!.quick && <div className="sc-working sm"><span className="spinner" />{t('Applying…')}</div>}
                 {on && !p.sure && r && !r.quick && !compare && !zoomed && (
-                  <button className="sc-check" onClick={() => onCheck(p.id)}><Icon name="crop" size={16} />Check the corners</button>
+                  <button className="sc-check" onClick={() => onCheck(p.id)}><Icon name="crop" size={16} />{t('Check the corners')}</button>
                 )}
               </div>
             </div>
@@ -238,16 +239,16 @@ export function Pager({ pages, renders, cur, onCur, onAdd, keyOf, compare, orig,
         {box.w > 0 && (
           <div className="sc-slide" style={{ width: box.w }}>
             <button className="sc-addslide" style={last ? fit(shapeOf(last).w, shapeOf(last).h) : undefined} onClick={onAdd} tabIndex={-1}>
-              <Icon name="camera-plus" size={30} /><b>Add a page</b><span>Swipe left or tap</span>
+              <Icon name="camera-plus" size={30} /><b>{t('Add a page')}</b><span>{t('Swipe left or tap')}</span>
             </button>
           </div>
         )}
       </div>
       {n > 0 && cur < n && (
         <div className="sc-zoom" onPointerDown={(e) => e.stopPropagation()}>
-          <button onClick={() => zoomAt(zRef.current.k / 1.6)} disabled={!zoomed} aria-label="Zoom out"><Icon name="minus" size={16} /></button>
-          <button className="pct" onClick={() => setZ(NOZ)} aria-label={`Zoom ${Math.round(z.k * 100)}%, fit page`}>{Math.round(z.k * 100)}%</button>
-          <button onClick={() => zoomAt(zRef.current.k * 1.6)} disabled={z.k >= MAX_Z - 0.01} aria-label="Zoom in"><Icon name="plus" size={16} /></button>
+          <button onClick={() => zoomAt(zRef.current.k / 1.6)} disabled={!zoomed} aria-label={t('Zoom out')}><Icon name="minus" size={16} /></button>
+          <button className="pct" onClick={() => setZ(NOZ)} aria-label={t('Zoom {z}%, fit page', { z: Math.round(z.k * 100) })}>{Math.round(z.k * 100)}%</button>
+          <button onClick={() => zoomAt(zRef.current.k * 1.6)} disabled={z.k >= MAX_Z - 0.01} aria-label={t('Zoom in')}><Icon name="plus" size={16} /></button>
         </div>
       )}
     </div>

@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { withCmap } from '../engine/sfnt';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { DocFont, FontFamily } from '../engine/types';
@@ -103,7 +104,7 @@ export function docFontOf(run: TextRun, fonts: Record<string, FontInfo>, pageRun
     }
   }
   return {
-    key: fontName, label: name || 'Document font', name: info.name, page: run.page, region: run.region,
+    key: fontName, label: name || t('Document font'), name: info.name, page: run.page, region: run.region,
     charMap: info.charMap, css, base: (1.2 - (a + d)) / 2 + a, chars: [...chars].join(''), match, matchScale,
   };
 }

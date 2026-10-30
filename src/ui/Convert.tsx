@@ -7,6 +7,7 @@ import { convertFile, ConvertOptions, kindOf, KINDS, ALL_ACCEPT } from './conver
 import { baseName, loadDoc, save } from './pdfops';
 import { SortableArea, useSortableItem } from './sortable';
 import { DropBox } from './drop';
+import { t, tn } from './i18n';
 
 interface Item { id: string; file: File; status: 'waiting' | 'busy' | 'ok' | 'err' | 'unsupported'; progress: number; bytes?: Uint8Array; pages?: number; error?: string }
 
@@ -55,7 +56,7 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
         const r = await convertFile(next.file, optRef.current, (f) => patch(next.id, { progress: f }));
         patch(next.id, { status: 'ok', bytes: r.bytes, pages: r.pages, progress: 1 });
       } catch (e: any) {
-        patch(next.id, e?.message === 'unsupported' ? { status: 'unsupported' } : { status: 'err', error: e?.message ?? 'Conversion failed' });
+        patch(next.id, e?.message === 'unsupported' ? { status: 'unsupported' } : { status: 'err', error: e?.message ?? t('Conversion failed') });
       } finally {
         running.current = false;
         setItems((cur) => cur.slice()); // look for the next one
@@ -88,7 +89,7 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
         for (const it of ready) { const d = await loadDoc(it.bytes!); (await out.copyPages(d, d.getPageIndices())).forEach((p) => out.addPage(p)); }
         const name = baseName(ready[0].file.name) + '-combined.pdf';
         const bytes = await save(out);
-        await saveFile(host, bytes, name, 'application/pdf', (t) => toast({ ...t, action: { label: 'Edit', run: () => onOpenInEditor(name, bytes) } }));
+        await saveFile(host, bytes, name, 'application/pdf', (m) => toast({ ...m, action: { label: t('Edit'), run: () => onOpenInEditor(name, bytes) } }));
       } else {
         const JSZip = (await import('jszip')).default;
         const zip = new JSZip();
@@ -102,28 +103,28 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
         await saveFile(host, await zip.generateAsync({ type: 'uint8array' }), 'converted-pdfs.zip', 'application/zip', toast);
       }
     } catch (e: any) {
-      toast({ msg: 'Couldn’t save: ' + (e?.message ?? 'unknown error'), kind: 'err' });
+      toast({ msg: t('Couldn’t save: {e}', { e: e?.message ?? t('unknown error') }), kind: 'err' });
     }
   };
 
   const accept = kind && KINDS[kind] ? KINDS[kind].accept : ALL_ACCEPT;
-  const ctaLabel = !ready.length ? 'Download' : combine ? 'Download combined PDF' : ready.length === 1 ? 'Download PDF' : `Download ${ready.length} PDFs (.zip)`;
-  const cta = <button className="btn primary lg block" disabled={!ready.length} onClick={download}><Icon name="download" size={18} />{desk ? ctaLabel : 'Download'}</button>;
+  const ctaLabel = !ready.length ? t('Download') : combine ? t('Download combined PDF') : ready.length === 1 ? t('Download PDF') : t('Download {n} PDFs (.zip)', { n: ready.length });
+  const cta = <button className="btn primary lg block" disabled={!ready.length} onClick={download}><Icon name="download" size={18} />{desk ? ctaLabel : t('Download')}</button>;
   const options = (
     <>
-      <div className="field"><span className="label">Page size</span><Seg value={opt.size} onChange={(size) => setOpt((o) => ({ ...o, size }))} options={[['fit', 'Fit content'], ['a4', 'A4'], ['letter', 'Letter']]} /></div>
-      <div className="field"><span className="label">Orientation</span><Seg value={opt.orient} onChange={(orient) => setOpt((o) => ({ ...o, orient }))} options={[['auto', 'Auto'], ['portrait', 'Portrait'], ['landscape', 'Landscape']]} /></div>
-      <div className="field"><span className="label">Margins</span><Seg value={opt.margin} onChange={(margin) => setOpt((o) => ({ ...o, margin }))} options={[['none', 'None'], ['small', 'Small'], ['normal', 'Normal']]} /></div>
-      <Toggle label="Combine into one PDF" hint="In the order listed" checked={combine} onChange={setCombine} />
-      <div className="note"><Icon name="info" size={16} /><span>Office files are laid out on your device. Complex layouts can shift slightly and pages are stored as images, so preview each result before sharing.</span></div>
+      <div className="field"><span className="label">{t('Page size')}</span><Seg value={opt.size} onChange={(size) => setOpt((o) => ({ ...o, size }))} options={[['fit', 'Fit content'], ['a4', 'A4'], ['letter', 'Letter']]} /></div>
+      <div className="field"><span className="label">{t('Orientation')}</span><Seg value={opt.orient} onChange={(orient) => setOpt((o) => ({ ...o, orient }))} options={[['auto', 'Auto'], ['portrait', 'Portrait'], ['landscape', 'Landscape']]} /></div>
+      <div className="field"><span className="label">{t('Margins')}</span><Seg value={opt.margin} onChange={(margin) => setOpt((o) => ({ ...o, margin }))} options={[['none', 'None'], ['small', 'Small'], ['normal', 'Normal']]} /></div>
+      <Toggle label={t('Combine into one PDF')} hint={t('In the order listed')} checked={combine} onChange={setCombine} />
+      <div className="note"><Icon name="info" size={16} /><span>{t('Office files are laid out on your device. Complex layouts can shift slightly and pages are stored as images, so preview each result before sharing.')}</span></div>
     </>
   );
   return (
     <div className="tbody" style={{ flexDirection: desk ? 'row' : 'column' }}>
       <div className="tmain">
         <div className="flist" style={{ maxWidth: 820, gap: 16 }}>
-          <DropBox row={!mobile} icon="file-arrow-up" title={mobile ? 'Turn files into PDFs' : 'Drop files to turn them into PDFs'} accept={accept} multiple
-            onFiles={add} button="Choose files">
+          <DropBox row={!mobile} icon="file-arrow-up" title={mobile ? t('Turn files into PDFs') : t('Drop files to turn them into PDFs')} accept={accept} multiple
+            onFiles={add} button={t('Choose files')}>
             <div className="types">{TYPES.map(([t, bg, fg]) => <span key={t} style={{ background: bg, color: fg }}>{t}</span>)}</div>
           </DropBox>
           {items.length > 0 && (
@@ -141,11 +142,11 @@ export function Convert({ host, toast, desk, mobile, kind, onOpenInEditor }: {
           {!desk && optsOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: 'var(--surface)', borderRadius: 14, boxShadow: 'var(--shadow-card)' }}>{options}</div>}
         </div>
       </div>
-      {desk && <aside className="tside"><div className="sb"><h3>Options</h3>{options}</div><div className="sf">{cta}</div></aside>}
+      {desk && <aside className="tside"><div className="sb"><h3>{t('Options')}</h3>{options}</div><div className="sf">{cta}</div></aside>}
       {!desk && (
         <div className="tbar">
-          <div className="t"><b>{ready.length} of {items.length} ready</b><span>{pending ? `${pending} converting or waiting` : items.length ? 'All done' : 'Add files to start'}</span></div>
-          <button className="ibtn" style={{ width: 48, height: 48, borderRadius: 12, boxShadow: 'inset 0 0 0 1.5px var(--line-2)' }} aria-label="Options" aria-expanded={optsOpen} onClick={() => setOptsOpen((v) => !v)}><Icon name="more" size={20} /></button>
+          <div className="t"><b>{t('{r} of {n} ready', { r: ready.length, n: items.length })}</b><span>{pending ? t('{n} converting or waiting', { n: pending }) : items.length ? t('All done') : t('Add files to start')}</span></div>
+          <button className="ibtn" style={{ width: 48, height: 48, borderRadius: 12, boxShadow: 'inset 0 0 0 1.5px var(--line-2)' }} aria-label={t('Options')} aria-expanded={optsOpen} onClick={() => setOptsOpen((v) => !v)}><Icon name="more" size={20} /></button>
           {cta}
         </div>
       )}
@@ -166,21 +167,21 @@ function QueueRow({ it, onPreview, onRetry, onRemove }: { it: Item; onPreview: (
 function QueueRowBody({ it, grip, onPreview, onRetry, onRemove }: { it: Item; grip?: Record<string, any>; onPreview?: () => void; onRetry?: () => void; onRemove?: () => void }) {
   const k = kindOf(it.file.name, it.file.type) ?? 'none';
   const look = LOOK[it.status === 'unsupported' ? 'none' : k];
-  const status = it.status === 'ok' ? `Ready · ${it.pages} ${it.pages === 1 ? 'page' : 'pages'}` : it.status === 'busy' ? 'Converting…'
-    : it.status === 'waiting' ? 'Waiting' : it.status === 'unsupported' ? 'This file type isn’t supported yet' : `Failed: ${it.error}`;
+  const status = it.status === 'ok' ? tn(it.pages ?? 0, 'Ready · {n} page', 'Ready · {n} pages') : it.status === 'busy' ? t('Converting…')
+    : it.status === 'waiting' ? t('Waiting') : it.status === 'unsupported' ? t('This file type isn’t supported yet') : t('Failed: {e}', { e: it.error ?? '' });
   const tab = grip ? 0 : -1;
   return (
     <>
-      <button className="fgrip" aria-label={`Move ${it.file.name}`} title="Drag to set the order (or press Space, then the arrow keys)" {...grip}>
+      <button className="fgrip" aria-label={t('Move {name}', { name: it.file.name })} title={t('Drag to set the order (or press Space, then the arrow keys)')} {...grip}>
         <Icon name="dots-six-vertical:bold" size={18} />
       </button>
       <span className="qi" style={{ background: look.bg, color: look.fg }}><Icon name={look.icon} size={20} /></span>
       <div className="qt"><b title={it.file.name}>{it.file.name}</b>
         {it.status === 'busy' && <div className="bar"><div style={{ width: `${Math.round(it.progress * 100)}%` }} /></div>}
         <span className={it.status === 'ok' ? 'ok' : it.status === 'err' || it.status === 'unsupported' ? 'err' : ''}>{status}</span></div>
-      {it.status === 'ok' && <button className="ibtn muted" aria-label={`Preview ${it.file.name}`} title="Preview" tabIndex={tab} onClick={onPreview}><Icon name="eye" size={18} /></button>}
-      {it.status === 'err' && <button className="ibtn danger" aria-label="Retry" title="Retry" tabIndex={tab} onClick={onRetry}><Icon name="rotate" size={18} /></button>}
-      <button className="ibtn muted" aria-label={`Remove ${it.file.name}`} title="Remove" tabIndex={tab} onClick={onRemove}><Icon name="close" size={17} /></button>
+      {it.status === 'ok' && <button className="ibtn muted" aria-label={t('Preview {name}', { name: it.file.name })} title={t('Preview')} tabIndex={tab} onClick={onPreview}><Icon name="eye" size={18} /></button>}
+      {it.status === 'err' && <button className="ibtn danger" aria-label={t('Retry')} title={t('Retry')} tabIndex={tab} onClick={onRetry}><Icon name="rotate" size={18} /></button>}
+      <button className="ibtn muted" aria-label={t('Remove {name}', { name: it.file.name })} title={t('Remove')} tabIndex={tab} onClick={onRemove}><Icon name="close" size={17} /></button>
     </>
   );
 }

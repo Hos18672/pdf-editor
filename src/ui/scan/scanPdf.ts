@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 // Turns scanned pages into a PDF: real paper sizes, ID cards at actual size (front and back on one
 // sheet, like a photocopy), optional invisible text so the scan can be searched and edited.
 import { FORMATS } from './geom';
@@ -59,7 +60,7 @@ export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Ui
   const sheets = sheetsOf(pages, opts);
   const ocr = opts.ocr ? await import('../ocr') : null;
   const layer = opts.ocr ? await import('../../engine/textLayer') : null;
-  const ocrWorker = ocr ? await ocr.loadOcr((f) => opts.progress?.(f * 0.05, 'Starting text recognition…')) : null;
+  const ocrWorker = ocr ? await ocr.loadOcr((f) => opts.progress?.(f * 0.05, t('Starting text recognition…'))) : null;
   const helv = opts.ocr ? await doc.embedFont(StandardFonts.Helvetica) : null;
   let done = 0;
   const total = pages.length;
@@ -91,7 +92,7 @@ export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Ui
     }
     for (let s = 0; s < sheet.length; s++) {
       const p = sheet[s];
-      opts.progress?.(0.05 + 0.9 * (done / total), `Page ${done + 1} of ${total}: straightening and cleaning…`);
+      opts.progress?.(0.05 + 0.9 * (done / total), t('Page {p} of {n}: straightening and cleaning…', { p: done + 1, n: total }));
       let blob = opts.ready?.(p);
       if (!blob) {
         const r = await renderPage(p, { quality: opts.quality, jpeg: jpegFor(opts.quality) });
@@ -104,7 +105,7 @@ export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Ui
       const x = sl.x * PT, y = (ph - sl.y - sl.h) * PT, w = sl.w * PT, h = sl.h * PT;
       page.drawImage(img, { x, y, width: w, height: h });
       if (ocrWorker && ocr && layer && helv) {
-        opts.progress?.(0.05 + 0.9 * ((done + 0.5) / total), `Page ${done + 1} of ${total}: recognising text…`);
+        opts.progress?.(0.05 + 0.9 * ((done + 0.5) / total), t('Page {p} of {n}: recognising text…', { p: done + 1, n: total }));
         const bmp = await createImageBitmap(r.blob);
         const c = document.createElement('canvas');
         c.width = bmp.width; c.height = bmp.height;
@@ -120,6 +121,6 @@ export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Ui
       done++;
     }
   }
-  opts.progress?.(0.97, 'Writing the PDF…');
+  opts.progress?.(0.97, t('Writing the PDF…'));
   return doc.save({ useObjectStreams: true });
 }

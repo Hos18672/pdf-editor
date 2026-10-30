@@ -11,6 +11,7 @@ import { Start, OpenState, type QuickAction } from './Start';
 import type { ToolId } from './Tools';
 import { recentBytes, saveRecent, type RecentKind } from './recent';
 import type { AddWhat } from './AddPages';
+import { t, tn, useLang } from './i18n';
 
 // Only the start screen loads up front; the editor, tools and scanner arrive as separate chunks
 // (fetched in the background right after start-up, so opening a file doesn't wait for them).
@@ -91,6 +92,8 @@ function registerServiceWorker() {
 }
 
 export default function EditorApp(host: HostProps) {
+  // the interface language: changing it re-renders everything below
+  useLang();
   // a file dropped where nothing takes it must not replace the app (and the work) in the browser
   useNoStrayDrops();
   const [file, setFile] = useState<{ name: string; bytes: Uint8Array } | null>(null);
@@ -134,11 +137,11 @@ export default function EditorApp(host: HostProps) {
   const [docId, setDocId] = useState(0);
   const open = useCallback(async (name: string, raw: Uint8Array, password?: string, kind: RecentKind = 'opened', id?: string) => {
     pending.current = { name, bytes: raw };
-    setOpenState({ kind: 'loading', name, progress: 0.05, detail: 'Loading the PDF engine…' });
+    setOpenState({ kind: 'loading', name, progress: 0.05, detail: t('Loading the PDF engine…') });
     try {
       // check the password (and that it is a PDF) with pdf.js first
       let doc = await openPdf(raw, password);
-      setOpenState({ kind: 'loading', name, progress: 0.2, detail: 'Checking the file…' });
+      setOpenState({ kind: 'loading', name, progress: 0.2, detail: t('Checking the file…') });
       let bytes = raw;
       try {
         const dec = await decryptIfNeeded(raw, password ?? '');
@@ -149,7 +152,7 @@ export default function EditorApp(host: HostProps) {
         const pg = await doc.getPage(i);
         const vp = pg.getViewport({ scale: 1 });
         list.push({ w: vp.width, h: vp.height, vm: vp.transform as M });
-        if (i % 2 === 0 || i === doc.numPages || doc.numPages < 20) setOpenState({ kind: 'loading', name, progress: 0.2 + 0.8 * (i / doc.numPages), detail: `Reading fonts and text on ${doc.numPages} ${doc.numPages === 1 ? 'page' : 'pages'}…`, done: i, total: doc.numPages });
+        if (i % 2 === 0 || i === doc.numPages || doc.numPages < 20) setOpenState({ kind: 'loading', name, progress: 0.2 + 0.8 * (i / doc.numPages), detail: tn(doc.numPages, 'Reading fonts and text on {n} page…', 'Reading fonts and text on {n} pages…'), done: i, total: doc.numPages });
       }
       setInfos(list);
       setPdf(doc);
@@ -167,7 +170,7 @@ export default function EditorApp(host: HostProps) {
         setOpenState({ kind: 'password', name, wrong: e.code === 2 });
         return;
       }
-      setOpenState({ kind: 'error', message: e?.message?.includes('PDF engine') ? e.message : 'It may be damaged, or not a PDF. Damaged files and other formats show this screen too.' });
+      setOpenState({ kind: 'error', message: e?.message?.includes('PDF engine') ? e.message : t('It may be damaged, or not a PDF. Damaged files and other formats show this screen too.') });
     }
   }, [hist]);
 
@@ -175,7 +178,7 @@ export default function EditorApp(host: HostProps) {
   // them, keep their numbers) and placed in the page order where they were asked for.
   const addPages = async (after: number, what: AddWhat): Promise<number | null> => {
     if (!file || !pdf) return null;
-    setBusy({ title: 'Adding pages', detail: 'On this device. Your edits stay.' });
+    setBusy({ title: t('Adding pages'), detail: t('On this device. Your edits stay.') });
     try {
       // pdf-lib is loaded only when needed
       const { loadDoc, addImagePage, imageBytes, save: saveDoc } = await import('./pdfops');
@@ -214,11 +217,11 @@ export default function EditorApp(host: HostProps) {
       });
       setTimeout(() => old.destroy?.(), 15000);
       setBusy(null);
-      setToastMsg({ msg: `Added ${added} ${added === 1 ? 'page' : 'pages'}` });
+      setToastMsg({ msg: tn(added, 'Added {n} page', 'Added {n} pages') });
       return before;
     } catch (e: any) {
       setBusy(null);
-      setToastMsg({ msg: 'Couldn’t add pages: ' + (e?.message?.includes('encrypt') ? 'that PDF is password-protected' : e?.message ?? 'unknown error'), kind: 'err' });
+      setToastMsg({ msg: t('Couldn’t add pages: {e}', { e: e?.message?.includes('encrypt') ? t('that PDF is password-protected') : e?.message ?? t('unknown error') }), kind: 'err' });
       return null;
     }
   };
@@ -230,14 +233,14 @@ export default function EditorApp(host: HostProps) {
   /** pictures, Office files or text dropped on the start screen: turned into one PDF and opened */
   const importFiles = async (files: File[]) => {
     const name = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '') + '.pdf' : 'Combined.pdf';
-    setOpenState({ kind: 'loading', name, progress: 0.05, detail: `Turning ${files.length === 1 ? 'the file' : `${files.length} files`} into a PDF…` });
+    setOpenState({ kind: 'loading', name, progress: 0.05, detail: tn(files.length, 'Turning the file into a PDF…', 'Turning {n} files into a PDF…') });
     try {
       const { convertFile } = await import('./convert');
       const { PDFDocument } = await import('pdf-lib');
       const opt = { size: 'a4', orient: 'auto', margin: 'small' } as const;
       const parts: Uint8Array[] = [];
       for (let i = 0; i < files.length; i++) {
-        parts.push((await convertFile(files[i], opt as any, (f) => setOpenState({ kind: 'loading', name, progress: 0.05 + 0.6 * (i + f) / files.length, detail: `Turning ${files[i].name} into a PDF…` }))).bytes);
+        parts.push((await convertFile(files[i], opt as any, (f) => setOpenState({ kind: 'loading', name, progress: 0.05 + 0.6 * (i + f) / files.length, detail: t('Turning {name} into a PDF…', { name: files[i].name }) }))).bytes);
       }
       let bytes = parts[0];
       if (parts.length > 1) {
@@ -247,7 +250,7 @@ export default function EditorApp(host: HostProps) {
       }
       open(name, bytes);
     } catch (e: any) {
-      setOpenState({ kind: 'error', message: e?.message === 'unsupported' ? 'That file type isn’t supported. Use a PDF, a picture, a Word, Excel or PowerPoint file, or text.' : `That file couldn’t be turned into a PDF${e?.message ? ` (${e.message})` : ''}.` } as any);
+      setOpenState({ kind: 'error', message: e?.message === 'unsupported' ? t('That file type isn’t supported. Use a PDF, a picture, a Word, Excel or PowerPoint file, or text.') : e?.message ? t('That file couldn’t be turned into a PDF ({e}).', { e: e.message }) : t('That file couldn’t be turned into a PDF.') } as any);
     }
   };
   const pick = async () => {
@@ -284,7 +287,7 @@ export default function EditorApp(host: HostProps) {
       return;
     }
     const convert = inc.mode === 'convert';
-    setBusy({ title: convert ? 'Making your PDF' : 'Opening', detail: `${files.length > 1 ? files.length + ' files' : files[0]?.name ?? 'Shared text'} · on this device, nothing is uploaded` });
+    setBusy({ title: convert ? t('Making your PDF') : t('Opening'), detail: t('{what} · on this device, nothing is uploaded', { what: files.length > 1 ? t('{n} files', { n: files.length }) : files[0]?.name ?? t('Shared text') }) });
     try {
       const read = await Promise.all(files.map(async (f) => ({ ...f, bytes: fromB64(await host.readShared!(f.uri)) })));
       if (inc.mode === 'open' && read.length === 1) { setBusy(null); open(read[0].name, read[0].bytes); return; }
@@ -297,10 +300,10 @@ export default function EditorApp(host: HostProps) {
       await savePdfFile(host, out.bytes, out.name);
       // opened only to convert: go back to the app the files came from
       if (launch && !file && host.exitApp) setTimeout(() => host.exitApp!(), 400);
-      else setToastMsg({ msg: `${out.name} is ready`, action: { label: 'Edit', run: () => open(out.name, out.bytes) } });
+      else setToastMsg({ msg: t('{name} is ready', { name: out.name }), action: { label: t('Edit'), run: () => open(out.name, out.bytes) } });
     } catch (e: any) {
       setBusy(null);
-      setToastMsg({ msg: 'Couldn’t open what was shared: ' + (e?.message ?? 'unknown error'), kind: 'err' });
+      setToastMsg({ msg: t('Couldn’t open what was shared: {e}', { e: e?.message ?? t('unknown error') }), kind: 'err' });
     }
   };
   // Android: a Google scan that finished while the page was restarted (low memory): its pages
@@ -321,7 +324,7 @@ export default function EditorApp(host: HostProps) {
   return (
     <>
       <style>{fontFaces() + css}</style>
-      <Suspense fallback={<div className="lazy-wait" role="status" aria-label="Loading"><span className="spinner" /></div>}>
+      <Suspense fallback={<div className="lazy-wait" role="status" aria-label={t('Loading')}><span className="spinner" /></div>}>
       {route.name === 'editor' && file && pdf ? (
         <Editor key={docId} onAddPages={addPages} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
@@ -348,11 +351,11 @@ export default function EditorApp(host: HostProps) {
             const b = await recentBytes(d.id);
             startAfterOpen.current = undefined; // a cancelled "Sign" must not leak into this file
             if (b) open(d.name, b, undefined, d.kind, d.id);
-            else setToastMsg({ msg: 'That file is no longer stored here', kind: 'err' });
+            else setToastMsg({ msg: t('That file is no longer stored here'), kind: 'err' });
           }}
           onShareRecent={async (d) => {
             const b = await recentBytes(d.id);
-            if (!b) { setToastMsg({ msg: 'That file is no longer stored here', kind: 'err' }); return; }
+            if (!b) { setToastMsg({ msg: t('That file is no longer stored here'), kind: 'err' }); return; }
             const { shareFile } = await import('./share');
             await shareFile(host, b, /\.pdf$/i.test(d.name) ? d.name : d.name + '.pdf', 'application/pdf', setToastMsg);
           }} />

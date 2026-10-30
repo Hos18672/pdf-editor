@@ -2,6 +2,7 @@
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
 import { findText, privacyScan, KIND_LABEL, type DocRef, type Hit, type Kind } from './search';
+import { t, tn } from './i18n';
 
 export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile }: {
   doc: () => DocRef; onHits: (h: Hit[], cur: number) => void; onGo: (h: Hit) => void;
@@ -53,13 +54,13 @@ export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile }: {
   return (
     <div ref={bar} className={`findbar${mobile ? ' m' : ''}`} role="search" style={place}>
       <Icon name="magnifying-glass" size={18} />
-      <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find in document" aria-label="Find in document"
+      <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Find in document')} aria-label={t('Find in document')}
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') step(e.shiftKey ? -1 : 1); if (e.key === 'Escape') onClose(); }} />
       <span className="fcount" aria-live="polite">{busy ? '…' : q.trim() ? (hits.length ? `${cur + 1}/${hits.length}` : '0') : ''}</span>
-      <button className="ibtn" onClick={() => step(-1)} disabled={!hits.length} aria-label="Previous match"><Icon name="caret-up:bold" size={16} /></button>
-      <button className="ibtn" onClick={() => step(1)} disabled={!hits.length} aria-label="Next match"><Icon name="caret-down:bold" size={16} /></button>
-      <button className="ibtn" onClick={() => onRedact(hits)} disabled={!hits.length} aria-label="Black out all matches" title="Black out all matches (redact)"><Icon name="eye-slash" size={18} /></button>
-      <button className="ibtn" onClick={onClose} aria-label="Close search"><Icon name="close" size={17} /></button>
+      <button className="ibtn" onClick={() => step(-1)} disabled={!hits.length} aria-label={t('Previous match')}><Icon name="caret-up:bold" size={16} /></button>
+      <button className="ibtn" onClick={() => step(1)} disabled={!hits.length} aria-label={t('Next match')}><Icon name="caret-down:bold" size={16} /></button>
+      <button className="ibtn" onClick={() => onRedact(hits)} disabled={!hits.length} aria-label={t('Black out all matches')} title={t('Black out all matches (redact)')}><Icon name="eye-slash" size={18} /></button>
+      <button className="ibtn" onClick={onClose} aria-label={t('Close search')}><Icon name="close" size={17} /></button>
     </div>
   );
 }
@@ -88,26 +89,26 @@ export function PrivacyCheck({ doc, scannedLeft, onHits, onGo, onRedact, onClose
   return (
     <>
       {mobile && <div className="sheet-scrim" onClick={onClose} />}
-      <div className={mobile ? 'bsheet privsheet' : 'privpanel'} role="dialog" aria-label="Privacy check">
+      <div className={mobile ? 'bsheet privsheet' : 'privpanel'} role="dialog" aria-label={t('Privacy check')}>
         {mobile && <div className="grab" />}
         <div className="props">
           <div className="ap-h">
-            <div><h3><Icon name="shield-check:duotone" size={22} />Privacy check</h3><span className="label">Personal data in this document, found on this device</span></div>
-            <button className="ibtn muted" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+            <div><h3><Icon name="shield-check:duotone" size={22} />{t('Privacy check')}</h3><span className="label">{t('Personal data in this document, found on this device')}</span></div>
+            <button className="ibtn muted" onClick={onClose} aria-label={t('Close')}><Icon name="close" size={18} /></button>
           </div>
-          {hits === null ? <div className="pc-wait"><span className="spinner" />Looking through the pages…</div> : !kinds.length ? (
-            <div className="note"><Icon name="check" size={16} /><span>Nothing found: no bank accounts, ID or social security numbers, birth dates, phone numbers or e-mail addresses.</span></div>
+          {hits === null ? <div className="pc-wait"><span className="spinner" />{t('Looking through the pages…')}</div> : !kinds.length ? (
+            <div className="note"><Icon name="check" size={16} /><span>{t('Nothing found: no bank accounts, ID or social security numbers, birth dates, phone numbers or e-mail addresses.')}</span></div>
           ) : (
             <div className="pc-list">
               {kinds.map(({ k, list }) => (
                 <div key={k} className={`pc-k${off.has(k) ? ' off' : ''}`}>
                   <label className="pc-top">
                     <input type="checkbox" checked={!off.has(k)} onChange={() => toggle(k)} />
-                    <span className="pc-t"><b>{KIND_LABEL[k][0]}</b>{KIND_LABEL[k][1] && <span>{KIND_LABEL[k][1]}</span>}</span>
+                    <span className="pc-t"><b>{t(KIND_LABEL[k][0])}</b>{KIND_LABEL[k][1] && <span>{t(KIND_LABEL[k][1])}</span>}</span>
                     <span className="pc-n">{list.length}</span>
                   </label>
                   <div className="pc-vals">
-                    {list.slice(0, 4).map((h, i) => <button key={i} onClick={() => onGo(h)} title="Show on the page">{mask(h.text)}<small>p.{h.page + 1}</small></button>)}
+                    {list.slice(0, 4).map((h, i) => <button key={i} onClick={() => onGo(h)} title={t('Show on the page')}>{mask(h.text)}<small>p.{h.page + 1}</small></button>)}
                     {list.length > 4 && <span>+{list.length - 4}</span>}
                   </div>
                 </div>
@@ -115,12 +116,12 @@ export function PrivacyCheck({ doc, scannedLeft, onHits, onGo, onRedact, onClose
             </div>
           )}
           {scannedLeft > 0 && (
-            <div className="note warn"><Icon name="info" size={16} /><span>{scannedLeft} scanned {scannedLeft === 1 ? 'page has' : 'pages have'} not been read yet, so they weren’t checked.{onReadScans && <> <button className="linkbtn" onClick={onReadScans}>Read them now</button></>}</span></div>
+            <div className="note warn"><Icon name="info" size={16} /><span>{tn(scannedLeft, '{n} scanned page has not been read yet, so it wasn’t checked.', '{n} scanned pages have not been read yet, so they weren’t checked.')}{onReadScans && <> <button className="linkbtn" onClick={onReadScans}>{t('Read them now')}</button></>}</span></div>
           )}
           <button className="btn primary lg block" disabled={!chosen.length} onClick={() => onRedact(chosen)}>
-            <Icon name="eye-slash" size={18} />{chosen.length ? `Black out ${chosen.length} ${chosen.length === 1 ? 'item' : 'items'}` : 'Nothing to black out'}
+            <Icon name="eye-slash" size={18} />{chosen.length ? tn(chosen.length, 'Black out {n} item', 'Black out {n} items') : t('Nothing to black out')}
           </button>
-          <span className="hint">Blacked-out parts are deleted from the file when you download it: they can’t be copied, searched or uncovered. You can still remove a box before that.</span>
+          <span className="hint">{t('Blacked-out parts are deleted from the file when you download it: they can’t be copied, searched or uncovered. You can still remove a box before that.')}</span>
         </div>
       </div>
     </>

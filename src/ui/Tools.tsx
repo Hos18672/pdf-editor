@@ -14,6 +14,7 @@ import { SortableArea, useSortableItem } from './sortable';
 import type { Bp } from './hooks';
 import type { PageState } from '../engine/types';
 import { PDFDocument } from 'pdf-lib';
+import { t, tn, tj } from './i18n';
 
 export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert' | 'compress' | 'password' | 'numbers' | 'watermark' | 'split' | 'images' | 'text' | 'deadlines' | 'safecopy';
 
@@ -61,56 +62,56 @@ export function Tools(p: Props) {
   // one entry per screen: kinds of the same job (file types, scan modes, extract/remove) are chosen inside the tool
   const groups: { name: string; items: HubItem[] }[] = [
     { name: 'Edit & sign', items: [
-      { name: 'Edit PDF', desc: 'Retype text, add text, images, shapes', icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
-      { name: 'Fill a form', desc: 'Type in fields, tick boxes', icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
-      { name: 'Sign', desc: 'Draw, type or upload a signature', icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
-      { name: 'Privacy check', desc: 'Find personal data, black it out', icon: 'shield-check:duotone', tile: TILE.edit, go: () => p.onEdit('privacy') },
-      { name: 'Safe ID copy', desc: '“COPY – only for …” on ID scans', icon: 'identification-badge:duotone', tile: TILE.edit, go: () => setTool('safecopy') },
-      { name: 'Deadline finder', desc: 'Dates in a letter, to your calendar', icon: 'calendar-plus:duotone', tile: TILE.edit, go: () => setTool('deadlines') },
+      { name: 'Edit PDF', desc: t('Retype text, add text, images, shapes'), icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
+      { name: 'Fill a form', desc: t('Type in fields, tick boxes'), icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
+      { name: 'Sign', desc: t('Draw, type or upload a signature'), icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
+      { name: 'Privacy check', desc: t('Find personal data, black it out'), icon: 'shield-check:duotone', tile: TILE.edit, go: () => p.onEdit('privacy') },
+      { name: 'Safe ID copy', desc: t('“COPY – only for …” on ID scans'), icon: 'identification-badge:duotone', tile: TILE.edit, go: () => setTool('safecopy') },
+      { name: 'Deadline finder', desc: t('Dates in a letter, to your calendar'), icon: 'calendar-plus:duotone', tile: TILE.edit, go: () => setTool('deadlines') },
     ] },
     { name: 'Pages', items: [
-      { name: 'Combine PDFs', desc: 'Merge files and images into one', icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },
-      { name: 'Split PDF', desc: 'By ranges, every few pages or per page', icon: 'scissors:duotone', tile: TILE.org, go: () => setTool('split') },
-      { name: 'Extract or remove pages', desc: 'Pick pages to keep or delete', icon: 'export:duotone', tile: TILE.org, go: () => setTool('extract') },
-      { name: 'Insert pages', desc: 'Blank pages, images or another PDF', icon: 'file-plus:duotone', tile: TILE.org, go: () => setTool('insert') },
-      { name: 'Reorder & rotate', desc: 'Drag pages into place, turn them', icon: 'squares-four:duotone', tile: TILE.org, go: () => p.onEdit('pages') },
+      { name: 'Combine PDFs', desc: t('Merge files and images into one'), icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },
+      { name: 'Split PDF', desc: t('By ranges, every few pages or per page'), icon: 'scissors:duotone', tile: TILE.org, go: () => setTool('split') },
+      { name: 'Extract or remove pages', desc: t('Pick pages to keep or delete'), icon: 'export:duotone', tile: TILE.org, go: () => setTool('extract') },
+      { name: 'Insert pages', desc: t('Blank pages, images or another PDF'), icon: 'file-plus:duotone', tile: TILE.org, go: () => setTool('insert') },
+      { name: 'Reorder & rotate', desc: t('Drag pages into place, turn them'), icon: 'squares-four:duotone', tile: TILE.org, go: () => p.onEdit('pages') },
     ] },
     { name: 'Convert', items: [
-      { name: 'Convert to PDF', desc: 'Images, Word, Excel, PowerPoint, text, web', icon: 'file-arrow-down:duotone', tile: TILE.conv, go: conv('') },
-      { name: 'Scan to PDF', desc: 'Documents, ID cards, receipts', icon: 'scan:duotone', tile: TILE.conv, go: p.onScan },
-      { name: 'PDF to pictures', desc: 'Every page as a JPG or PNG', icon: 'images:duotone', tile: TILE.conv, go: () => setTool('images') },
-      { name: 'Extract text', desc: 'All the text, also from scans', icon: 'article:duotone', tile: TILE.conv, go: () => setTool('text') },
+      { name: 'Convert to PDF', desc: t('Images, Word, Excel, PowerPoint, text, web'), icon: 'file-arrow-down:duotone', tile: TILE.conv, go: conv('') },
+      { name: 'Scan to PDF', desc: t('Documents, ID cards, receipts'), icon: 'scan:duotone', tile: TILE.conv, go: p.onScan },
+      { name: 'PDF to pictures', desc: t('Every page as a JPG or PNG'), icon: 'images:duotone', tile: TILE.conv, go: () => setTool('images') },
+      { name: 'Extract text', desc: t('All the text, also from scans'), icon: 'article:duotone', tile: TILE.conv, go: () => setTool('text') },
     ] },
     { name: 'Optimize & protect', items: [
-      { name: 'Compress PDF', desc: 'Smaller files, also under a size limit', icon: 'arrows-in-line-vertical:duotone', tile: '#FFE3D6', go: () => setTool('compress') },
-      { name: 'Password', desc: 'Protect a PDF or remove its password', icon: 'lock-key:duotone', tile: '#FFE3D6', go: () => setTool('password') },
-      { name: 'Page numbers', desc: '1, 2, 3 or “Seite 1 von 9”', icon: 'list-numbers:duotone', tile: '#FFE3D6', go: () => setTool('numbers') },
-      { name: 'Watermark', desc: 'CONFIDENTIAL, COPY or your own text', icon: 'stamp:duotone', tile: '#FFE3D6', go: () => setTool('watermark') },
+      { name: 'Compress PDF', desc: t('Smaller files, also under a size limit'), icon: 'arrows-in-line-vertical:duotone', tile: '#FFE3D6', go: () => setTool('compress') },
+      { name: 'Password', desc: t('Protect a PDF or remove its password'), icon: 'lock-key:duotone', tile: '#FFE3D6', go: () => setTool('password') },
+      { name: 'Page numbers', desc: t('1, 2, 3 or “Seite 1 von 9”'), icon: 'list-numbers:duotone', tile: '#FFE3D6', go: () => setTool('numbers') },
+      { name: 'Watermark', desc: t('CONFIDENTIAL, COPY or your own text'), icon: 'stamp:duotone', tile: '#FFE3D6', go: () => setTool('watermark') },
     ] },
   ];
 
   return (
     <div className="tscreen">
       <header className="topbar">
-        <button className="ibtn" onClick={back} aria-label="Back"><Icon name="back" /></button>
-        <div className="doc"><div className="names"><div className="fname">{meta[tool][0]}</div><div className="fmeta">{meta[tool][1]}</div></div></div>
-        {!mobile && <div className="privacy-pill"><Icon name="lock" size={14} />Processed on this device</div>}
+        <button className="ibtn" onClick={back} aria-label={t('Back')}><Icon name="back" /></button>
+        <div className="doc"><div className="names"><div className="fname">{t(meta[tool][0])}</div><div className="fmeta">{t(meta[tool][1])}</div></div></div>
+        {!mobile && <div className="privacy-pill"><Icon name="lock" size={14} />{t('Processed on this device')}</div>}
       </header>
       {tool === 'hub' && (
         <div className="tmain">
           <div className="hub">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              <h1>What do you want to do?</h1>
-              <div className="sub">{p.host.isNative ? 'Every tool runs on your phone.' : 'Every tool runs in your browser.'} Files never leave this device.</div>
+              <h1>{t('What do you want to do?')}</h1>
+              <div className="sub">{p.host.isNative ? t('Every tool runs on your phone.') : t('Every tool runs in your browser.')} {t('Files never leave this device.')}</div>
             </div>
             {groups.map((g) => (
               <section key={g.name} className="grp">
-                <div className="kicker">{g.name}</div>
+                <div className="kicker">{t(g.name)}</div>
                 <div className="cards">
-                  {g.items.map((t) => (
-                    <button key={t.name} className="hcard" onClick={t.go} title={`${t.name}: ${t.desc}`}>
-                      <span className="ti" style={{ background: t.tile }}><Icon name={t.icon} size={21} /></span>
-                      <span className="tt"><b>{t.name}</b><span>{t.desc}</span></span>
+                  {g.items.map((it) => (
+                    <button key={it.name} className="hcard" onClick={it.go} title={`${t(it.name)}: ${it.desc}`}>
+                      <span className="ti" style={{ background: it.tile }}><Icon name={it.icon} size={21} /></span>
+                      <span className="tt"><b>{t(it.name)}</b><span>{it.desc}</span></span>
                       <Icon name="right" size={16} />
                     </button>
                   ))}
@@ -151,7 +152,7 @@ export function useSource(current: Current | null) {
       const pdf = await openPdf(bytes);
       setSrc({ name: f.name, bytes, pdf, pages: Array.from({ length: pdf.numPages }, (_, i) => ({ src: i, rotation: 0 })), fromEditor: false });
     } catch (e: any) {
-      setErr(e?.name === 'PasswordException' ? 'This PDF is password-protected. Open it in the editor first to unlock it.' : 'That file couldn’t be opened as a PDF.');
+      setErr(e?.name === 'PasswordException' ? t('This PDF is password-protected. Open it in the editor first to unlock it.') : t('That file couldn’t be opened as a PDF.'));
     }
   };
   return { src, load, err, setSrc };
@@ -162,9 +163,9 @@ export function PickPdf({ onFile, err, title }: { onFile: (f: File) => void; err
   return (
     <div className="tmain">
       <div className="flist" style={{ maxWidth: 560, marginTop: '6vh' }}>
-        <DropBox icon="file-pdf:duotone" title={title} sub="Drop a PDF here or choose one" accept={ACCEPT.pdf} filter={isPdf}
-          onFiles={(f) => { setWrong(false); onFile(f[0]); }} onReject={() => setWrong(true)} button="Choose PDF"
-          err={wrong ? 'That isn’t a PDF. Convert it to PDF first.' : err} />
+        <DropBox icon="file-pdf:duotone" title={title} sub={t('Drop a PDF here or choose one')} accept={ACCEPT.pdf} filter={isPdf}
+          onFiles={(f) => { setWrong(false); onFile(f[0]); }} onReject={() => setWrong(true)} button={t('Choose PDF')}
+          err={wrong ? t('That isn’t a PDF. Convert it to PDF first.') : err} />
       </div>
     </div>
   );
@@ -191,7 +192,7 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   const started = useRef(false);
 
-  const drop = useFileDrop((f) => add(f), { accept: (f) => isPdf(f) || isImage(f), onReject: () => p.toast({ msg: 'Only PDFs and images can be combined. Use “Convert to PDF” for other files.', kind: 'err' }) });
+  const drop = useFileDrop((f) => add(f), { accept: (f) => isPdf(f) || isImage(f), onReject: () => p.toast({ msg: t('Only PDFs and images can be combined. Use “Convert to PDF” for other files.'), kind: 'err' }) });
   const add = async (list: FileList | File[]) => {
     const added: CFile[] = [];
     for (const f of Array.from(list)) {
@@ -201,7 +202,7 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
           const bytes = new Uint8Array(await f.arrayBuffer());
           const pdf = await openPdf(bytes);
           added.push({ id, name: f.name, kind: 'pdf', file: f, pages: pdf.numPages, size: f.size, range: '', pdf });
-        } catch (e: any) { p.toast({ msg: e?.name === 'PasswordException' ? `${f.name} is password-protected. Unlock it first (Password tool).` : `Couldn’t read ${f.name}`, kind: 'err' }); }
+        } catch (e: any) { p.toast({ msg: e?.name === 'PasswordException' ? t('{name} is password-protected. Unlock it first (Password tool).', { name: f.name }) : t('Couldn’t read {name}', { name: f.name }), kind: 'err' }); }
       } else if (isImage(f)) {
         added.push({ id, name: f.name, kind: 'image', file: f, pages: 1, size: f.size, range: '', thumb: URL.createObjectURL(f) });
       }
@@ -227,8 +228,8 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
     if (!files.length) return;
     // a range that matches no page of its file would silently leave the file out
     const badRange = files.find((f) => f.kind === 'pdf' && f.range.trim() && !parseRange(f.range, f.pages).length);
-    if (badRange) { p.toast({ msg: `“${badRange.range}” matches no page of ${badRange.name} (${badRange.pages} pages)`, kind: 'err' }); return; }
-    p.setBusy({ title: 'Combining files', detail: `${files.length} files · ${total} pages. Nothing is uploaded.` });
+    if (badRange) { p.toast({ msg: t('“{range}” matches no page of {name} ({n} pages)', { range: badRange.range, name: badRange.name, n: badRange.pages }), kind: 'err' }); return; }
+    p.setBusy({ title: t('Combining files'), detail: t('{f} files · {n} pages. Nothing is uploaded.', { f: files.length, n: total }) });
     try {
       const out = await PDFDocument.create();
       const outline: { title: string; page: number }[] = [];
@@ -247,26 +248,26 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
       const bytes = await save(out);
       p.setBusy(null);
       const name = /\.pdf$/i.test(outName) ? outName : outName + '.pdf';
-      await saveFile(p.host, bytes, name, 'application/pdf', (t) => p.toast({ ...t, action: { label: 'Edit', run: () => p.onOpenInEditor(name, bytes) } }));
+      await saveFile(p.host, bytes, name, 'application/pdf', (m) => p.toast({ ...m, action: { label: t('Edit'), run: () => p.onOpenInEditor(name, bytes) } }));
     } catch (e: any) {
       p.setBusy(null);
-      p.toast({ msg: 'Combining failed: ' + (e?.message ?? 'unknown error'), kind: 'err' });
+      p.toast({ msg: t('Combining failed: {e}', { e: e?.message ?? t('unknown error') }), kind: 'err' });
     }
   };
 
-  const cta = <button className="btn primary lg block" disabled={files.length < 1} onClick={run}><Icon name="stack:bold" size={18} />{p.desk ? `Combine ${files.length} ${files.length === 1 ? 'file' : 'files'}` : 'Combine'}</button>;
+  const cta = <button className="btn primary lg block" disabled={files.length < 1} onClick={run}><Icon name="stack:bold" size={18} />{p.desk ? tn(files.length, 'Combine {n} file', 'Combine {n} files') : t('Combine')}</button>;
   const options = (
     <>
-      <div className="field"><span className="label">File name</span><input className="input" value={outName} onChange={(e) => setOutName(e.target.value)} /></div>
-      <Toggle label="Bookmark each file" hint="Adds an outline entry per document" checked={marks} onChange={setMarks} />
+      <div className="field"><span className="label">{t('File name')}</span><input className="input" value={outName} onChange={(e) => setOutName(e.target.value)} /></div>
+      <Toggle label={t('Bookmark each file')} hint={t('Adds an outline entry per document')} checked={marks} onChange={setMarks} />
     </>
   );
   return (
     <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column' }} {...drop.bind}>
-      <DropOverlay show={drop.over} title="Drop to add" sub="PDFs and images join the list at the end" />
+      <DropOverlay show={drop.over} title={t('Drop to add')} sub={t('PDFs and images join the list at the end')} />
       <div className="tmain">
         <div className="flist">
-          <div className="label" style={{ padding: '0 4px 4px' }}>{p.mobile ? 'Hold a file to drag it into place.' : 'Drag to set the order.'} Type a range like “1–3” to use only some pages.</div>
+          <div className="label" style={{ padding: '0 4px 4px' }}>{p.mobile ? t('Hold a file to drag it into place.') : t('Drag to set the order.')} {t('Type a range like “1–3” to use only some pages.')}</div>
           <SortableArea items={files} idOf={(f) => f.id} onReorder={setFiles} layout="list"
             overlay={(f) => <div className="frow"><FileRowBody f={f} /></div>}>
             {files.map((f) => (
@@ -275,14 +276,14 @@ function Combine(p: Props & { desk: boolean; mobile: boolean }) {
                 onRemove={() => setFiles((cur) => cur.filter((x) => x.id !== f.id))} />
             ))}
           </SortableArea>
-          <button className="adddash" onClick={() => input.current?.click()}><Icon name="plus:bold" size={16} />Add PDFs or images</button>
+          <button className="adddash" onClick={() => input.current?.click()}><Icon name="plus:bold" size={16} />{t('Add PDFs or images')}</button>
           {!p.desk && optsOpen && <div style={{ display: 'flex', flexDirection: 'column', gap: 16, padding: 16, background: 'var(--surface)', borderRadius: 14, boxShadow: 'var(--shadow-card)' }}>{options}</div>}
         </div>
         <input ref={input} type="file" multiple accept="application/pdf,.pdf,image/*,.heic,.heif" hidden onChange={(e) => { if (e.target.files) add(e.target.files); e.target.value = ''; }} />
       </div>
-      <Side desk={p.desk} cta={cta} bar={{ title: '', sub: '' }}><h3>Output</h3>{options}</Side>
-      <Bar desk={p.desk} cta={cta} bar={{ title: `${total} ${total === 1 ? 'page' : 'pages'} in total`, sub: outName,
-        extra: <button className="ibtn" style={{ width: 48, height: 48, borderRadius: 12, boxShadow: 'inset 0 0 0 1.5px var(--line-2)' }} aria-label="Options" aria-expanded={optsOpen} onClick={() => setOptsOpen((v) => !v)}><Icon name="more" size={20} /></button> }} />
+      <Side desk={p.desk} cta={cta} bar={{ title: '', sub: '' }}><h3>{t('Output')}</h3>{options}</Side>
+      <Bar desk={p.desk} cta={cta} bar={{ title: tn(total, '{n} page in total', '{n} pages in total'), sub: outName,
+        extra: <button className="ibtn" style={{ width: 48, height: 48, borderRadius: 12, boxShadow: 'inset 0 0 0 1.5px var(--line-2)' }} aria-label={t('Options')} aria-expanded={optsOpen} onClick={() => setOptsOpen((v) => !v)}><Icon name="more" size={20} /></button> }} />
     </div>
   );
 }
@@ -300,16 +301,16 @@ function FileRow({ f, onRange, onRemove }: { f: CFile; onRange: (r: string) => v
 function FileRowBody({ f, grip, onRange, onRemove }: { f: CFile; grip?: Record<string, any>; onRange?: (r: string) => void; onRemove?: () => void }) {
   return (
     <>
-      <button className="fgrip" aria-label={`Move ${f.name}`} title="Drag to reorder (or press Space, then the arrow keys)" {...grip}>
+      <button className="fgrip" aria-label={t('Move {name}', { name: f.name })} title={t('Drag to reorder (or press Space, then the arrow keys)')} {...grip}>
         <Icon name="dots-six-vertical:bold" size={18} />
       </button>
       <div className="fthumb">{f.pdf ? <Thumb pdf={f.pdf} src={0} size={60} /> : <img src={f.thumb} alt="" draggable={false} />}</div>
-      <div className="fi"><b title={f.name}>{f.name}</b><span>{f.kind === 'pdf' ? `${f.pages} ${f.pages === 1 ? 'page' : 'pages'}` : 'Image · 1 page'} · {fmtSize(f.size)}</span></div>
+      <div className="fi"><b title={f.name}>{f.name}</b><span>{f.kind === 'pdf' ? tn(f.pages, '{n} page', '{n} pages') : t('Image · 1 page')} · {fmtSize(f.size)}</span></div>
       {f.kind === 'pdf' && f.pages > 1 && (
-        <input className="range-in" value={f.range} placeholder="All pages" aria-label={`Pages of ${f.name}`} readOnly={!onRange}
+        <input className="range-in" value={f.range} placeholder={t('All pages')} aria-label={`Pages of ${f.name}`} readOnly={!onRange}
           onChange={(e) => onRange?.(e.target.value)} />
       )}
-      <button className="ibtn muted" aria-label={`Remove ${f.name}`} tabIndex={grip ? 0 : -1} onClick={onRemove}><Icon name="close" size={17} /></button>
+      <button className="ibtn muted" aria-label={t('Remove {name}', { name: f.name })} tabIndex={grip ? 0 : -1} onClick={onRemove}><Icon name="close" size={17} /></button>
     </>
   );
 }
@@ -321,7 +322,7 @@ function PagePick(p: Props & { desk: boolean; mobile: boolean; mode: 'extract' |
   const [sel, setSel] = useState<number[]>([]); // positions in src.pages
   const [rangeText, setRangeText] = useState('');
   const [perPage, setPerPage] = useState(false);
-  if (!src) return <PickPdf onFile={load} err={err} title={p.mode === 'extract' ? 'Choose a PDF to extract pages from' : 'Choose a PDF to remove pages from'} />;
+  if (!src) return <PickPdf onFile={load} err={err} title={p.mode === 'extract' ? t('Choose a PDF to extract pages from') : t('Choose a PDF to remove pages from')} />;
   const n = src.pages.length;
   const extract = p.mode === 'extract';
   const toggle = (i: number) => { const next = sel.includes(i) ? sel.filter((x) => x !== i) : [...sel, i].sort((a, b) => a - b); setSel(next); setRangeText(formatRange(next)); };
@@ -329,7 +330,7 @@ function PagePick(p: Props & { desk: boolean; mobile: boolean; mode: 'extract' |
     if (!sel.length) return;
     try {
       if (extract) {
-        p.setBusy({ title: 'Extracting pages', detail: `${sel.length} of ${n} pages. The original stays unchanged.` });
+        p.setBusy({ title: t('Extracting pages'), detail: t('{s} of {n} pages. The original stays unchanged.', { s: sel.length, n }) });
         const chosen = sel.map((i) => src.pages[i]);
         if (perPage && chosen.length > 1) {
           const JSZip = (await import('jszip')).default;
@@ -346,22 +347,22 @@ function PagePick(p: Props & { desk: boolean; mobile: boolean; mode: 'extract' |
         }
       } else {
         const keep = src.pages.filter((_, i) => !sel.includes(i));
-        if (!keep.length) { p.toast({ msg: 'A PDF needs at least one page', kind: 'err' }); return; }
-        if (src.fromEditor) { p.onApplyPages(keep); p.toast({ msg: `Removed ${sel.length} ${sel.length === 1 ? 'page' : 'pages'}`, action: { label: 'Undo', run: () => p.onApplyPages(src.pages) } }); return; }
-        p.setBusy({ title: 'Removing pages', detail: `${n} → ${keep.length} pages` });
+        if (!keep.length) { p.toast({ msg: t('A PDF needs at least one page'), kind: 'err' }); return; }
+        if (src.fromEditor) { p.onApplyPages(keep); p.toast({ msg: tn(sel.length, 'Removed {n} page', 'Removed {n} pages'), action: { label: t('Undo'), run: () => p.onApplyPages(src.pages) } }); return; }
+        p.setBusy({ title: t('Removing pages'), detail: t('{a} → {b} pages', { a: n, b: keep.length }) });
         const bytes = await save(await pickPages(src.bytes, keep));
         p.setBusy(null);
         await saveFile(p.host, bytes, `${baseName(src.name)}-${keep.length}-pages.pdf`, 'application/pdf', p.toast);
       }
     } catch (e: any) {
       p.setBusy(null);
-      p.toast({ msg: 'That didn’t work: ' + (e?.message ?? 'unknown error'), kind: 'err' });
+      p.toast({ msg: t('That didn’t work: {e}', { e: e?.message ?? t('unknown error') }), kind: 'err' });
     }
   };
-  const ctaLabel = extract ? `Extract ${sel.length || ''} ${sel.length === 1 ? 'page' : 'pages'}` : `Remove ${sel.length || ''} ${sel.length === 1 ? 'page' : 'pages'}`;
+  const ctaLabel = !sel.length ? (extract ? t('Extract pages') : t('Remove pages')) : extract ? tn(sel.length, 'Extract {n} page', 'Extract {n} pages') : tn(sel.length, 'Remove {n} page', 'Remove {n} pages');
   const cta = (
     <button className={`btn lg block ${extract ? 'primary' : 'danger solid'}`} disabled={!sel.length || (!extract && sel.length >= n)} onClick={run}>
-      <Icon name={extract ? 'export:bold' : 'trash:bold'} size={18} />{p.desk ? ctaLabel.replace(/\s+/g, ' ') : `${extract ? 'Extract' : 'Remove'}${sel.length ? ' ' + sel.length : ''}`}
+      <Icon name={extract ? 'export:bold' : 'trash:bold'} size={18} />{p.desk ? ctaLabel : `${extract ? t('Extract') : t('Remove')}${sel.length ? ' ' + sel.length : ''}`}
     </button>
   );
   return (
@@ -369,20 +370,20 @@ function PagePick(p: Props & { desk: boolean; mobile: boolean; mode: 'extract' |
       <div className="tmain">
         <div className="pgrid">
           <div className="bar">
-            <Seg value={p.mode} onChange={(m) => { p.onMode(m); }} options={[['extract', <><Icon name="export" size={16} />Extract</>], ['remove', <><Icon name="trash" size={16} />Remove</>]]} />
+            <Seg value={p.mode} onChange={(m) => { p.onMode(m); }} options={[['extract', <><Icon name="export" size={16} />{t('Extract')}</>], ['remove', <><Icon name="trash" size={16} />{t('Remove')}</>]]} />
             <div style={{ flex: 1 }} />
-            <label className="rangebox"><span className="label">Pages</span>
-              <input value={rangeText} placeholder="e.g. 1–2, 5" aria-label="Page range"
+            <label className="rangebox"><span className="label">{t('Pages')}</span>
+              <input value={rangeText} placeholder="e.g. 1–2, 5" aria-label={t('Page range')}
                 onChange={(e) => { setRangeText(e.target.value); setSel(parseRange(e.target.value, n)); }} /></label>
             <button className="btn ghost" style={{ color: 'var(--ink)' }} onClick={() => { const all = sel.length === n ? [] : src.pages.map((_, i) => i); setSel(all); setRangeText(formatRange(all)); }}>
-              {sel.length === n ? 'Select none' : 'Select all'}
+              {sel.length === n ? t('Select none') : t('Select all')}
             </button>
           </div>
-          {src.fromEditor && p.current?.changed && <div className="note"><Icon name="info" size={16} /><span>Uses the pages of the open document; text and objects you added are included only after you download from the editor.</span></div>}
+          {src.fromEditor && p.current?.changed && <div className="note"><Icon name="info" size={16} /><span>{t('Uses the pages of the open document; text and objects you added are included only after you download from the editor.')}</span></div>}
           <div className="cells">
             {src.pages.map((pg, i) => (
               <div key={pg.src + ':' + i} className={`pcell${!extract ? ' rm' : ''}${sel.includes(i) ? ' on' : ''}`}>
-                <button className="pc" onClick={() => toggle(i)} aria-pressed={sel.includes(i)} aria-label={`Page ${i + 1}`}>
+                <button className="pc" onClick={() => toggle(i)} aria-pressed={sel.includes(i)} aria-label={t('Page {p}', { p: i + 1 })}>
                   <span className="ck"><Icon name="check" size={14} /></span>
                   <Thumb pdf={src.pdf} src={pg.src} rotation={pg.rotation} size={200} />
                   {!extract && sel.includes(i) && <span className="rmx"><span><Icon name="trash:bold" size={20} /></span></span>}
@@ -396,27 +397,27 @@ function PagePick(p: Props & { desk: boolean; mobile: boolean; mode: 'extract' |
       <Side desk={p.desk} cta={cta} bar={{ title: '', sub: '' }}>
         {extract ? (
           <>
-            <h3>Extract pages</h3>
+            <h3>{t('Extract pages')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <button className={`opt radio-opt${!perPage ? ' on' : ''}`} onClick={() => setPerPage(false)}><span className="rd" /><span className="ot"><b>One PDF</b><span>All selected pages, in order</span></span></button>
-              <button className={`opt radio-opt${perPage ? ' on' : ''}`} onClick={() => setPerPage(true)}><span className="rd" /><span className="ot"><b>A PDF per page</b><span>Downloads as a .zip</span></span></button>
+              <button className={`opt radio-opt${!perPage ? ' on' : ''}`} onClick={() => setPerPage(false)}><span className="rd" /><span className="ot"><b>{t('One PDF')}</b><span>{t('All selected pages, in order')}</span></span></button>
+              <button className={`opt radio-opt${perPage ? ' on' : ''}`} onClick={() => setPerPage(true)}><span className="rd" /><span className="ot"><b>{t('A PDF per page')}</b><span>{t('Downloads as a .zip')}</span></span></button>
             </div>
-            <div className="hint" style={{ fontSize: 13, color: 'var(--muted)' }}>The original stays unchanged.</div>
+            <div className="hint" style={{ fontSize: 13, color: 'var(--muted)' }}>{t('The original stays unchanged.')}</div>
           </>
         ) : (
           <>
-            <h3>Remove pages</h3>
+            <h3>{t('Remove pages')}</h3>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span className="big">{n} → {n - sel.length} pages</span>
-              <span className="label" style={{ fontWeight: 400 }}>{sel.length ? `${sel.length === 1 ? 'Page' : 'Pages'} ${formatRange(sel)} will be removed.` : 'Tap the pages to remove.'}{src.fromEditor ? ' You can undo this in the editor.' : ''}</span>
+              <span className="big">{t('{a} → {b} pages', { a: n, b: n - sel.length })}</span>
+              <span className="label" style={{ fontWeight: 400 }}>{sel.length ? tn(sel.length, 'Page {r} will be removed.', 'Pages {r} will be removed.', { r: formatRange(sel) }) : t('Tap the pages to remove.')}{src.fromEditor ? t(' You can undo this in the editor.') : ''}</span>
             </div>
           </>
         )}
       </Side>
       <Bar desk={p.desk} cta={cta} bar={{
-        title: `${sel.length} ${sel.length === 1 ? 'page' : 'pages'} selected`,
-        sub: extract ? (perPage ? 'One PDF per page (.zip)' : 'Saved as one new PDF') : `${n - sel.length} pages will remain`,
-        extra: extract ? <button className="ibtn" style={{ width: 48, height: 48, borderRadius: 12, boxShadow: 'inset 0 0 0 1.5px var(--line-2)' }} aria-label={perPage ? 'Save as one PDF' : 'Save a PDF per page'} title={perPage ? 'One PDF per page' : 'One PDF'} onClick={() => setPerPage((v) => !v)}><Icon name={perPage ? 'files:duotone' : 'file-pdf:duotone'} size={20} /></button> : undefined,
+        title: tn(sel.length, '{n} page selected', '{n} pages selected'),
+        sub: extract ? (perPage ? t('One PDF per page (.zip)') : t('Saved as one new PDF')) : tn(n - sel.length, '{n} page will remain', '{n} pages will remain'),
+        extra: extract ? <button className="ibtn" style={{ width: 48, height: 48, borderRadius: 12, boxShadow: 'inset 0 0 0 1.5px var(--line-2)' }} aria-label={perPage ? t('Save as one PDF') : t('Save a PDF per page')} title={perPage ? t('One PDF per page') : t('One PDF')} onClick={() => setPerPage((v) => !v)}><Icon name={perPage ? 'files:duotone' : 'file-pdf:duotone'} size={20} /></button> : undefined,
       }} />
     </div>
   );
@@ -442,10 +443,10 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
   // PDFs and images dropped on the pages go in at the chosen place
   const dropTo = useRef<(f: File[]) => void>(() => {});
   const drop = useFileDrop((f) => dropTo.current(f), { accept: (f) => isPdf(f) || isImage(f) });
-  if (!src) return <PickPdf onFile={load} err={err} title="Choose a PDF to add pages to" />;
+  if (!src) return <PickPdf onFile={load} err={err} title={t('Choose a PDF to add pages to')} />;
 
   const build = async (fill: (doc: PDFDocument, index: number) => Promise<number>) => {
-    p.setBusy({ title: 'Inserting pages', detail: 'Building the new PDF on this device…' });
+    p.setBusy({ title: t('Inserting pages'), detail: t('Building the new PDF on this device…') });
     try {
       const doc = await pickPages(src.bytes, src.pages);
       const added = await fill(doc, at + 1);
@@ -455,11 +456,11 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
       setFresh((f) => [...f.map((i) => (i > at ? i + added : i)), ...Array.from({ length: added }, (_, k) => at + 1 + k)]);
       setAfter(at + added); // the next pages go after these
       p.setBusy(null);
-      p.toast({ msg: `Added ${added} ${added === 1 ? 'page' : 'pages'} after page ${at + 1}` });
+      p.toast({ msg: tn(added, 'Added {n} page after page {p}', 'Added {n} pages after page {p}', { p: at + 1 }) });
     } catch (e: any) {
       p.setBusy(null);
       const m = String(e?.message ?? '');
-      p.toast({ msg: /encrypt|password/i.test(m) ? 'That PDF is password-protected. Unlock it first (Password tool).' : /PDF header|parse|Invalid|corrupt/i.test(m) ? 'That file isn’t a readable PDF.' : 'Couldn’t insert: ' + (m || 'unknown error'), kind: 'err' });
+      p.toast({ msg: /encrypt|password/i.test(m) ? t('That PDF is password-protected. Unlock it first (Password tool).') : /PDF header|parse|Invalid|corrupt/i.test(m) ? t('That file isn’t a readable PDF.') : t('Couldn’t insert: {e}', { e: m || t('unknown error') }), kind: 'err' });
     }
   };
   const insertBlank = () => build(async (doc, i) => {
@@ -502,7 +503,7 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {opts.map(([k, name, desc, ic]) => (
         <button key={k} className={`opt${kind === k ? ' on' : ''}`} onClick={() => { setKind(k); onPick?.(k); }}>
-          <span className="oi"><Icon name={ic} size={20} /></span><span className="ot"><b>{name}</b><span>{desc}</span></span>
+          <span className="oi"><Icon name={ic} size={20} /></span><span className="ot"><b>{t(name)}</b><span>{t(desc)}</span></span>
           {onPick && <Icon name="right" size={16} style={{ color: 'var(--faint)' }} />}
         </button>
       ))}
@@ -510,61 +511,61 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
   );
   const blankOpts = (
     <div className="field">
-      <span className="label">{kind === 'image' ? 'Page size' : 'Blank page size'}</span>
+      <span className="label">{kind === 'image' ? t('Page size') : t('Blank page size')}</span>
       <Seg value={size} onChange={setSize} options={[['match', kind === 'image' ? 'Fit' : 'Match'], ['a4', 'A4'], ['letter', 'Letter']]} />
       {kind === 'blank' && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 }}>
-          <span style={{ fontWeight: 500 }}>How many</span>
-          <div style={{ width: 140 }}><Stepper value={count} min={1} max={50} onChange={setCount} label="pages" /></div>
+          <span style={{ fontWeight: 500 }}>{t('How many')}</span>
+          <div style={{ width: 140 }}><Stepper value={count} min={1} max={50} onChange={setCount} label={t('pages')} /></div>
         </div>
       )}
     </div>
   );
-  const ctaText = kind === 'blank' ? `Insert ${count > 1 ? count + ' blank pages' : 'blank page'}` : kind === 'pdf' ? 'Choose a PDF' : kind === 'image' ? 'Choose images' : 'Open camera';
+  const ctaText = kind === 'blank' ? tn(count, 'Insert blank page', 'Insert {n} blank pages') : kind === 'pdf' ? t('Choose a PDF') : kind === 'image' ? t('Choose images') : t('Open camera');
   const finish = () => p.onOpenInEditor(src.name, src.bytes);
-  const done = fresh.length > 0 && <button className={`btn ${p.desk ? 'outline lg block' : 'primary lg'}`} onClick={finish}><Icon name="check:bold" size={18} />{p.desk ? `Done · open in editor` : 'Done'}</button>;
+  const done = fresh.length > 0 && <button className={`btn ${p.desk ? 'outline lg block' : 'primary lg'}`} onClick={finish}><Icon name="check:bold" size={18} />{p.desk ? t('Done · open in editor') : t('Done')}</button>;
   const cta = (
     <>
-      <button className={`btn ${fresh.length && !p.desk ? 'outline' : 'primary'} lg${p.desk ? ' block' : ''}`} onClick={() => (p.desk ? run() : setSheet(true))}><Icon name="plus:bold" size={18} />{p.desk ? ctaText : fresh.length ? 'Add' : 'Insert'}</button>
+      <button className={`btn ${fresh.length && !p.desk ? 'outline' : 'primary'} lg${p.desk ? ' block' : ''}`} onClick={() => (p.desk ? run() : setSheet(true))}><Icon name="plus:bold" size={18} />{p.desk ? ctaText : fresh.length ? t('Add') : t('Insert')}</button>
       {done}
     </>
   );
   return (
     <div className="tbody" style={{ flexDirection: p.desk ? 'row' : 'column', position: 'relative' }} {...drop.bind}>
-      <DropOverlay show={drop.over} title={`Drop to insert after page ${at + 1}`} sub="All pages of a PDF, or one page per image" />
+      <DropOverlay show={drop.over} title={t('Drop to insert after page {p}', { p: at + 1 })} sub={t('All pages of a PDF, or one page per image')} />
       <div className="tmain">
         <div className="pgrid">
-          <div className="bar"><div className="label" style={{ fontWeight: 400, color: 'var(--muted-2)' }}>Tap a <b style={{ display: 'inline-flex', width: 20, height: 20, borderRadius: '50%', background: '#1E2559', color: '#fff', alignItems: 'center', justifyContent: 'center', verticalAlign: -4 }}><Icon name="plus:bold" size={11} /></b> between pages to choose where new pages go.</div></div>
-          {fresh.length > 0 && <div className="note"><Icon name="info" size={16} /><span>{fresh.length} new {fresh.length === 1 ? 'page' : 'pages'}. Tap another <b>+</b> to add more, then <b>Done</b> to open the result.</span></div>}
-          {src.fromEditor && p.current?.changed && <div className="note"><Icon name="info" size={16} /><span>The result opens in the editor. Download your current edits first if you want to keep them.</span></div>}
+          <div className="bar"><div className="label" style={{ fontWeight: 400, color: 'var(--muted-2)' }}>{tj('Tap a {plus} between pages to choose where new pages go.', { plus: <b style={{ display: 'inline-flex', width: 20, height: 20, borderRadius: '50%', background: '#1E2559', color: '#fff', alignItems: 'center', justifyContent: 'center', verticalAlign: -4 }}><Icon name="plus:bold" size={11} /></b> })}</div></div>
+          {fresh.length > 0 && <div className="note"><Icon name="info" size={16} /><span>{tj(fresh.length === 1 ? '{n} new page. Tap another {plus} to add more, then {done} to open the result.' : '{n} new pages. Tap another {plus} to add more, then {done} to open the result.', { n: fresh.length, plus: <b>+</b>, done: <b>{t('Done')}</b> })}</span></div>}
+          {src.fromEditor && p.current?.changed && <div className="note"><Icon name="info" size={16} /><span>{t('The result opens in the editor. Download your current edits first if you want to keep them.')}</span></div>}
           <div className="cells">
             {src.pages.map((pg, i) => (
               <React.Fragment key={pg.src + ':' + i}>
                 <div className={`pcell${fresh.includes(i) ? ' fresh' : ''}`}>
-                  {fresh.includes(i) && <span className="newtag">New</span>}
+                  {fresh.includes(i) && <span className="newtag">{t('New')}</span>}
                   <div className="pc"><Thumb pdf={src.pdf} src={pg.src} rotation={pg.rotation} size={200} /></div>
                   <div className="lb">{i + 1}</div>
-                  {at !== i && <button className="gap" onClick={() => setAfter(i)} aria-label={`Insert after page ${i + 1}`}><Icon name="plus:bold" size={13} /></button>}
+                  {at !== i && <button className="gap" onClick={() => setAfter(i)} aria-label={t('Insert after page {p}', { p: i + 1 })}><Icon name="plus:bold" size={13} /></button>}
                 </div>
-                {at === i && <InsertSlot active label={kind === 'blank' ? (count > 1 ? `${count} blank pages` : 'Blank page') : kind === 'pdf' ? 'Pages from a PDF' : kind === 'image' ? 'Images' : 'Camera'} onClick={() => (p.desk ? run() : setSheet(true))} />}
+                {at === i && <InsertSlot active label={kind === 'blank' ? (count > 1 ? t('{n} blank pages', { n: count }) : t('Blank page')) : kind === 'pdf' ? t('Pages from a PDF') : kind === 'image' ? t('Images') : t('Camera')} onClick={() => (p.desk ? run() : setSheet(true))} />}
               </React.Fragment>
             ))}
           </div>
         </div>
       </div>
       <Side desk={p.desk} cta={cta} bar={{ title: '', sub: '' }}>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><h3>{`Insert after page ${at + 1}`}</h3><span className="label" style={{ fontWeight: 400 }}>Choose what to add</span></div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><h3>{t('Insert after page {p}', { p: at + 1 })}</h3><span className="label" style={{ fontWeight: 400 }}>{t('Choose what to add')}</span></div>
         {optionList()}
         {(kind === 'blank' || kind === 'image') && blankOpts}
       </Side>
-      <Bar desk={p.desk} cta={cta} bar={{ title: `After page ${at + 1}`, sub: fresh.length ? `${src.pages.length} pages · ${fresh.length} new` : `${src.pages.length} pages now` }} />
+      <Bar desk={p.desk} cta={cta} bar={{ title: t('After page {p}', { p: at + 1 }), sub: fresh.length ? t('{n} pages · {k} new', { n: src.pages.length, k: fresh.length }) : t('{n} pages now', { n: src.pages.length }) }} />
       {sheet && !p.desk && (
         <>
           <div className="sheet-scrim" onClick={() => setSheet(false)} />
-          <div className="bsheet" role="dialog" aria-label="Insert pages" style={p.mobile ? undefined : { left: 120, right: 120, bottom: 32, borderRadius: 20 }}>
+          <div className="bsheet" role="dialog" aria-label={t('Insert pages')} style={p.mobile ? undefined : { left: 120, right: 120, bottom: 32, borderRadius: 20 }}>
             <div className="grab" />
             <div className="props">
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{`Insert after page ${at + 1}`}</h3><span className="label" style={{ fontWeight: 400 }}>Choose what to add</span></div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}><h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>{t('Insert after page {p}', { p: at + 1 })}</h3><span className="label" style={{ fontWeight: 400 }}>{t('Choose what to add')}</span></div>
               {optionList((k) => { if (k !== 'blank') { setSheet(false); run(k); } })}
               {kind === 'blank' && <>{blankOpts}<button className="btn primary lg block" onClick={() => { setSheet(false); insertBlank(); }}><Icon name="plus:bold" size={18} />{ctaText}</button></>}
             </div>
@@ -581,8 +582,8 @@ function Insert(p: Props & { desk: boolean; mobile: boolean }) {
 function InsertSlot({ active, label, onClick }: { active: boolean; label: string; onClick: () => void }) {
   return (
     <div className="pcell" aria-current={active}>
-      <button className="newslot" onClick={onClick} aria-label={`Insert here: ${label}`}><Icon name="plus:bold" size={22} /><span>{label}</span><small>Tap to add</small></button>
-      <div className="lb" style={{ color: 'var(--sel)', fontWeight: 700 }}>New</div>
+      <button className="newslot" onClick={onClick} aria-label={`Insert here: ${label}`}><Icon name="plus:bold" size={22} /><span>{label}</span><small>{t('Tap to add')}</small></button>
+      <div className="lb" style={{ color: 'var(--sel)', fontWeight: 700 }}>{t('New')}</div>
     </div>
   );
 }

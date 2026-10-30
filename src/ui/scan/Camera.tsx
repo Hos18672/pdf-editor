@@ -3,6 +3,7 @@ import { Icon } from '../icons';
 import { FORMATS, quadArea, type Pt, type Quad } from './geom';
 import { liveDetect, stopLive } from './live';
 import { MODE_RATIOS, sharpness, type ScanMode } from './engine';
+import { t, tn } from '../i18n';
 
 export const MODES: { id: ScanMode; label: string; icon: string }[] = [
   { id: 'doc', label: 'Document', icon: 'file-text' },
@@ -354,7 +355,7 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
     <div className="scam" onKeyDown={(e) => { if (e.key === 'Escape') onClose(); }}>
       <div className="scam-view" ref={view}>
         <div className="scam-frame" ref={box}>
-          <video ref={video} playsInline muted autoPlay aria-label="Camera preview" />
+          <video ref={video} playsInline muted autoPlay aria-label={t('Camera preview')} />
           <svg className="scam-svg" aria-hidden="true" style={ratio ? { display: 'none' } : undefined}>
             <g ref={poly} style={{ display: 'none' }}>
               <polygon className={hold >= 1 ? 'go' : ''} />
@@ -372,19 +373,19 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
         {status !== 'live' && status !== 'starting' && (
           <div className="scam-msg">
             <div className="tile"><Icon name={status === 'denied' ? 'camera-slash' : 'camera:duotone'} size={30} /></div>
-            <b>{status === 'denied' ? 'Camera access is blocked' : status === 'none' ? 'No camera found' : 'The camera couldn’t start'}</b>
-            <span>{status === 'denied' ? 'Allow the camera for this app in your browser or phone settings, or scan photos you already have.' : 'You can still scan photos of documents you already have.'}</span>
+            <b>{status === 'denied' ? t('Camera access is blocked') : status === 'none' ? t('No camera found') : t('The camera couldn’t start')}</b>
+            <span>{status === 'denied' ? t('Allow the camera for this app in your browser or phone settings, or scan photos you already have.') : t('You can still scan photos of documents you already have.')}</span>
             <div className="acts">
-              <button className="btn primary lg" onClick={() => fileIn.current?.click()}><Icon name="image" size={18} />Choose photos</button>
-              <button className="btn lg on-dark" onClick={() => camIn.current?.click()}><Icon name="camera" size={18} />Use the camera app</button>
+              <button className="btn primary lg" onClick={() => fileIn.current?.click()}><Icon name="image" size={18} />{t('Choose photos')}</button>
+              <button className="btn lg on-dark" onClick={() => camIn.current?.click()}><Icon name="camera" size={18} />{t('Use the camera app')}</button>
             </div>
           </div>
         )}
-        {status === 'starting' && <div className="scam-msg quiet"><span className="spinner" />Starting the camera…</div>}
+        {status === 'starting' && <div className="scam-msg quiet"><span className="spinner" />{t('Starting the camera…')}</div>}
       </div>
 
       <div className="scam-top">
-        <button className="scam-round" onClick={onClose} aria-label="Close scanner"><Icon name="x:bold" size={20} /></button>
+        <button className="scam-round" onClick={onClose} aria-label={t('Close scanner')}><Icon name="x:bold" size={20} /></button>
         <span className="sp" />
         {status === 'live' && (
           <button className={`scam-pill${auto ? ' on' : ''}`} onClick={() => { setAuto(!auto); saveAuto(!auto); }} aria-pressed={auto}>
@@ -392,26 +393,26 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
           </button>
         )}
         {status === 'live' && coarse && (
-          <button className="scam-pill" onClick={() => camIn.current?.click()} title="Take the photo with your phone's camera app: its full quality">
-            <Icon name="camera" size={15} />HD photo
+          <button className="scam-pill" onClick={() => camIn.current?.click()} title={t('Take the photo with your phone\'s camera app: its full quality')}>
+            <Icon name="camera" size={15} />{t('HD photo')}
           </button>
         )}
         {status === 'live' && zooms.length === 0 && lenses.length > 1 && (
-          <button className="scam-round" onClick={nextLens} aria-label="Switch camera lens" title="Switch lens"><Icon name="aperture" size={20} /></button>
+          <button className="scam-round" onClick={nextLens} aria-label={t('Switch camera lens')} title={t('Switch lens')}><Icon name="aperture" size={20} /></button>
         )}
-        {torch.can && <button className={`scam-round${torch.on ? ' on' : ''}`} onClick={toggleTorch} aria-label={torch.on ? 'Turn torch off' : 'Turn torch on'} aria-pressed={torch.on}><Icon name={torch.on ? 'flashlight:fill' : 'flashlight'} size={20} /></button>}
+        {torch.can && <button className={`scam-round${torch.on ? ' on' : ''}`} onClick={toggleTorch} aria-label={torch.on ? t('Turn torch off') : t('Turn torch on')} aria-pressed={torch.on}><Icon name={torch.on ? 'flashlight:fill' : 'flashlight'} size={20} /></button>}
       </div>
 
       {status === 'live' && (
         <div className="scam-hint" role="status" aria-live="polite">
-          {step && <b>{step}</b>}
-          <span>{hint}</span>
+          {step && <b>{t(step)}</b>}
+          <span>{t(hint)}</span>
         </div>
       )}
 
       <div className="scam-bottom">
         {status === 'live' && zooms.length > 1 && (
-          <div className="scam-zoom" role="radiogroup" aria-label="Zoom">
+          <div className="scam-zoom" role="radiogroup" aria-label={t('Zoom')}>
             {zooms.map((z) => (
               <button key={z} role="radio" aria-checked={Math.abs(zoom - z) < 0.05} className={Math.abs(zoom - z) < 0.05 ? 'on' : ''} onClick={() => setZoomTo(z)}>
                 {String(z).replace(/^0\./, '.')}{Math.abs(zoom - z) < 0.05 ? '×' : ''}
@@ -419,25 +420,25 @@ export function Camera({ mode, onMode, count, lastThumb, step, waiting, onShot, 
             ))}
           </div>
         )}
-        <div className="scam-modes" role="radiogroup" aria-label="What are you scanning?">
+        <div className="scam-modes" role="radiogroup" aria-label={t('What are you scanning?')}>
           {MODES.map((m) => (
-            <button key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => onMode(m.id)}>{m.label}</button>
+            <button key={m.id} role="radio" aria-checked={mode === m.id} className={mode === m.id ? 'on' : ''} onClick={() => onMode(m.id)}>{t(m.label)}</button>
           ))}
         </div>
         <div className="scam-row">
-          <button className="scam-side" onClick={() => fileIn.current?.click()} aria-label="Import photos">
-            <span className="ic"><Icon name="image" size={22} /></span><span className="lb">Import</span>
+          <button className="scam-side" onClick={() => fileIn.current?.click()} aria-label={t('Import photos')}>
+            <span className="ic"><Icon name="image" size={22} /></span><span className="lb">{t('Import')}</span>
           </button>
-          <button className={`scam-shutter${busy ? ' busy' : ''}`} onClick={shoot} disabled={status !== 'live' || busy} aria-label="Take photo">
+          <button className={`scam-shutter${busy ? ' busy' : ''}`} onClick={shoot} disabled={status !== 'live' || busy} aria-label={t('Take photo')}>
             <svg viewBox="0 0 80 80" aria-hidden="true">
               <circle cx="40" cy="40" r="37" className="track" />
               <circle cx="40" cy="40" r="37" className="prog" style={{ strokeDasharray: ring, strokeDashoffset: ring * (1 - hold) }} />
             </svg>
             <i />
           </button>
-          <button className={`scam-side done${waiting || doneWait ? ' wait' : ''}`} onClick={done} disabled={!count && !busy} aria-label={count ? `Review ${count} ${count === 1 ? 'page' : 'pages'}` : 'No pages yet'}>
+          <button className={`scam-side done${waiting || doneWait ? ' wait' : ''}`} onClick={done} disabled={!count && !busy} aria-label={count ? tn(count, 'Review {n} page', 'Review {n} pages') : t('No pages yet')}>
             <span className="stack">{lastThumb ? <img src={lastThumb} alt="" /> : <Icon name="files:duotone" size={22} />}{count > 0 && <em>{count}</em>}{(waiting || doneWait) && <span className="spinner" />}</span>
-            <span className="lb">{count ? 'Done' : 'Pages'}</span>
+            <span className="lb">{count ? t('Done') : t('Pages')}</span>
           </button>
         </div>
       </div>

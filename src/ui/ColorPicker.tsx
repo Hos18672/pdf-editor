@@ -4,6 +4,7 @@ import { useBack } from './back';
 import { HexColorInput, HexColorPicker } from 'react-colorful';
 import { Icon } from './icons';
 import { holdEditing } from './hooks';
+import { t, tn } from './i18n';
 
 export const PALETTE = [
   '#000000', '#3A3F4B', '#6B7280', '#A3A8B4', '#FFFFFF', '#1E2559', '#2F5BD3', '#0EA5E9', '#14A3A3', '#1E7A4C',
@@ -63,7 +64,7 @@ export function ColorPicker({ value, onApply, onClose, sheet, title = 'Colour' }
   const keepFocus = (e: React.MouseEvent) => { if (!(e.target as HTMLElement).closest('input')) e.preventDefault(); };
   const chip = (c: string) => (
     <button key={c} type="button" className={`cp-chip${c.toLowerCase() === draft ? ' on' : ''}`} style={{ '--c': c } as React.CSSProperties}
-      onClick={() => setDraft(norm(c))} aria-label={`Colour ${c}`} title={c} />
+      onClick={() => setDraft(norm(c))} aria-label={t('Colour {c}', { c })} title={c} />
   );
 
   return createPortal(
@@ -72,23 +73,23 @@ export function ColorPicker({ value, onApply, onClose, sheet, title = 'Colour' }
         {sheet && <div className="grab" />}
         <div className="cp-head">
           <h3>{title}</h3>
-          <button type="button" className="ibtn muted" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+          <button type="button" className="ibtn muted" onClick={onClose} aria-label={t('Close')}><Icon name="close" size={18} /></button>
         </div>
         <HexColorPicker color={draft} onChange={setDraft} />
         <div className="cp-row">
-          <div className="cp-compare" aria-hidden="true"><i style={{ background: start }} title="Current" /><i style={{ background: draft }} title="New" /></div>
+          <div className="cp-compare" aria-hidden="true"><i style={{ background: start }} title={t('Current')} /><i style={{ background: draft }} title={t('New')} /></div>
           <label className="cp-hex"><span>#</span>
-            <HexColorInput color={draft} onChange={(c) => setDraft(norm(c))} aria-label="Hex colour" spellCheck={false} />
+            <HexColorInput color={draft} onChange={(c) => setDraft(norm(c))} aria-label={t('Hex colour')} spellCheck={false} />
           </label>
-          {eyedropper && <button type="button" className="ibtn" onClick={pickFromScreen} aria-label="Pick a colour from the screen" title="Pick from screen"><Icon name="eyedropper" size={19} /></button>}
+          {eyedropper && <button type="button" className="ibtn" onClick={pickFromScreen} aria-label={t('Pick a colour from the screen')} title={t('Pick from screen')}><Icon name="eyedropper" size={19} /></button>}
         </div>
         <div className="cp-grid">{PALETTE.map(chip)}</div>
         {recent.length > 0 && (
-          <div className="cp-recent"><span className="label">Recent</span><div className="cp-grid">{recent.map(chip)}</div></div>
+          <div className="cp-recent"><span className="label">{t('Recent')}</span><div className="cp-grid">{recent.map(chip)}</div></div>
         )}
         <div className="cp-acts">
-          <button type="button" className="btn outline" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn primary" onClick={apply}>Apply</button>
+          <button type="button" className="btn outline" onClick={onClose}>{t('Cancel')}</button>
+          <button type="button" className="btn primary" onClick={apply}>{t('Apply')}</button>
         </div>
       </div>
     </div>,

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useBack } from './back';
 import { Icon } from './icons';
+import { t, tn } from './i18n';
 
 export interface Stamp { src: string; w: number; h: number; }
 
@@ -147,21 +148,21 @@ export function SignatureModal({ onClose, onPick, sheet }: { onClose: () => void
   };
   return (
     <div className={`scrim${sheet ? ' sheet' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="modal sigmodal" role="dialog" aria-modal="true" aria-label="Add signature">
+      <div className="modal sigmodal" role="dialog" aria-modal="true" aria-label={t('Add signature')}>
         <div className="grab" />
         <div className="mhead">
-          <h2>Add signature</h2>
-          <button className="ibtn" onClick={onClose} aria-label="Close"><Icon name="close" /></button>
+          <h2>{t('Add signature')}</h2>
+          <button className="ibtn" onClick={onClose} aria-label={t('Close')}><Icon name="close" /></button>
         </div>
         {saved.length > 0 && (
           <section className="field">
-            <div className="label">Saved on this device · tap to place</div>
+            <div className="label">{t('Saved on this device · tap to place')}</div>
             <div className="saved">
               {saved.map((s) => (
-                <div key={s} className="s" role="button" tabIndex={0} aria-label="Place saved signature"
+                <div key={s} className="s" role="button" tabIndex={0} aria-label={t('Place saved signature')}
                   onClick={() => stampFromSrc(s).then(onPick)} onKeyDown={(e) => e.key === 'Enter' && stampFromSrc(s).then(onPick)}>
                   <img src={s} alt="" draggable={false} />
-                  <button className="x" aria-label="Remove saved signature" onClick={(e) => {
+                  <button className="x" aria-label={t('Remove saved signature')} onClick={(e) => {
                     e.stopPropagation();
                     const list = saved.filter((x) => x !== s); setSaved(list); save(list);
                   }}><Icon name="close" size={13} /></button>
@@ -181,16 +182,16 @@ export function SignatureModal({ onClose, onPick, sheet }: { onClose: () => void
           <div className="sigpad">
             <canvas ref={padRef} onPointerDown={down} onPointerMove={moveP} onPointerUp={upP} onPointerCancel={upP} />
             <div className="base" /><div className="xm"><Icon name="close" size={16} /></div>
-            {!hasInk && <div className="ph">Sign with finger, pen or mouse</div>}
+            {!hasInk && <div className="ph">{t('Sign with finger, pen or mouse')}</div>}
           </div>
         )}
         {tab === 'type' && (
           <div className="typed">
-            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder="Type your name" autoFocus />
+            <input className="input" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('Type your name')} autoFocus />
             <div className="opts">
               {SIG_FONTS.map((f) => (
                 <button key={f} className={font === f ? 'on' : ''} style={{ fontFamily: `"${f}"`, color: ink }} onClick={() => setFont(f)}>
-                  {name || 'Your name'}
+                  {name || t('Your name')}
                 </button>
               ))}
             </div>
@@ -199,29 +200,29 @@ export function SignatureModal({ onClose, onPick, sheet }: { onClose: () => void
         {tab === 'upload' && (
           <label className="sigpad upload">
             <input type="file" accept="image/*" hidden onChange={(e) => onFile(e.target.files?.[0])} />
-            <div><Icon name="upload" size={28} /><div style={{ marginTop: 8, fontWeight: 600 }}>Choose a photo of your signature</div>
-              <div style={{ color: 'var(--muted)', fontSize: 13 }}>A white background is removed automatically</div></div>
+            <div><Icon name="upload" size={28} /><div style={{ marginTop: 8, fontWeight: 600 }}>{t('Choose a photo of your signature')}</div>
+              <div style={{ color: 'var(--muted)', fontSize: 13 }}>{t('A white background is removed automatically')}</div></div>
           </label>
         )}
         <div className="inkrow">
           {tab !== 'upload' && (
-            <div className="inks"><span className="label">Ink</span>
+            <div className="inks"><span className="label">{t('Ink')}</span>
               <div className="swatches">
-                {INKS.map((c) => <button key={c} className={`swatch${ink === c ? ' on' : ''}`} onClick={() => setInk(c)} aria-label={`Ink ${c}`}><i style={{ background: c, width: 28, height: 28 }} /></button>)}
+                {INKS.map((c) => <button key={c} className={`swatch${ink === c ? ' on' : ''}`} onClick={() => setInk(c)} aria-label={t('Ink {c}', { c })}><i style={{ background: c, width: 28, height: 28 }} /></button>)}
               </div>
             </div>
           )}
           <div style={{ flex: 1 }} />
           <label className="check">
             <input type="checkbox" checked={keep} onChange={(e) => setKeep(e.target.checked)} />
-            <span className="box"><Icon name="check" size={14} /></span>Save on this device
+            <span className="box"><Icon name="check" size={14} /></span>{t('Save on this device')}
           </label>
         </div>
         {tab !== 'upload' && (
           <div className="foot">
-            {tab === 'draw' && <button className="btn outline lg" onClick={clear} disabled={!hasInk}><Icon name="restore" size={17} />Clear</button>}
+            {tab === 'draw' && <button className="btn outline lg" onClick={clear} disabled={!hasInk}><Icon name="restore" size={17} />{t('Clear')}</button>}
             <button className="btn primary lg" disabled={tab === 'draw' ? !hasInk : !name.trim()} onClick={place}>
-              <Icon name="signature:bold" size={18} />Place signature
+              <Icon name="signature:bold" size={18} />{t('Place signature')}
             </button>
           </div>
         )}

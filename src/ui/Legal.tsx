@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Icon } from './icons';
 import { appBase } from './assets';
 import { useBack } from './back';
+import { t, tn } from './i18n';
 
 export type LegalPage = 'impressum' | 'privacy' | 'terms' | 'licenses';
 const PAGES: [LegalPage, string][] = [['impressum', 'Impressum'], ['privacy', 'Privacy'], ['terms', 'Terms'], ['licenses', 'Licenses']];
@@ -13,11 +14,11 @@ export const legalUrl = (p: LegalPage) => `${appBase()}legal/${p}.html`;
 /** A small row of links to the legal pages (start screen, all tools). */
 export function LegalLinks({ onOpen, className = '' }: { onOpen: (p: LegalPage) => void; className?: string }) {
   return (
-    <nav className={`legal-links ${className}`} aria-label="Legal">
+    <nav className={`legal-links ${className}`} aria-label={t('Legal')}>
       {PAGES.map(([p, label], i) => (
         <React.Fragment key={p}>
           {i > 0 && <span aria-hidden="true">·</span>}
-          <a href={legalUrl(p)} onClick={(e) => { e.preventDefault(); onOpen(p); }}>{label}</a>
+          <a href={legalUrl(p)} onClick={(e) => { e.preventDefault(); onOpen(p); }}>{t(label)}</a>
         </React.Fragment>
       ))}
     </nav>
@@ -34,13 +35,13 @@ export function LegalSheet({ page, onClose }: { page: LegalPage; onClose: () => 
     return () => window.removeEventListener('keydown', k);
   }, [onClose]);
   return (
-    <div className="legal-sheet" role="dialog" aria-modal="true" aria-label={TITLE[cur]}>
+    <div className="legal-sheet" role="dialog" aria-modal="true" aria-label={t(TITLE[cur])}>
       <header className="ls-h">
-        <button className="ibtn" onClick={onClose} aria-label="Close"><Icon name="back" /></button>
-        <b>Legal</b>
+        <button className="ibtn" onClick={onClose} aria-label={t('Close')}><Icon name="back" /></button>
+        <b>{t('Legal')}</b>
         <span style={{ width: 40 }} />
       </header>
-      <iframe title={TITLE[cur]} src={legalUrl(cur)} />
+      <iframe title={t(TITLE[cur])} src={legalUrl(cur)} />
     </div>
   );
 }

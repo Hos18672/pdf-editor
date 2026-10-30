@@ -1333,4 +1333,12 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 .legal-sheet .ls-h { flex: none; display: flex; align-items: center; gap: 8px; height: calc(56px + var(--safe-t)); padding: var(--safe-t) 8px 0; background: var(--surface); border-bottom: 1px solid var(--line); }
 .legal-sheet .ls-h b { flex: 1; text-align: center; font-size: 16px; }
 .legal-sheet iframe { flex: 1; width: 100%; border: 0; background: var(--desk); }
+/* language switch: the code of the other language */
+.lang .lang-code { font-size: 12.5px; font-weight: 800; letter-spacing: .04em; }
+/* German runs longer: the headline scales to the column, nav labels give way to icons, tool items widen */
+:root[lang="de"] .start h1 { font-size: min(36px, 8.4cqw); }
+@container (min-width: 700px) { :root[lang="de"] .start h1 { font-size: min(66px, 7.4cqw); } }
+@container (min-width: 1100px) { :root[lang="de"] .start h1 { font-size: min(80px, 4.15cqw); } }
+@container (max-width: 429px) { :root[lang="de"] .s2-navbtn .lbl { display: none; } :root[lang="de"] .s2-navbtn { padding: 0 11px; } }
+:root[lang="de"] .dk3 { width: auto; min-width: 60px; padding: 0 9px; font-size: 11px; }
 `;

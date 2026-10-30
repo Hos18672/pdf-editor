@@ -4,6 +4,7 @@ import { Icon } from '../icons';
 import { fullQuad, isConvex, type Pt, type Quad } from './geom';
 import { decode, type ScanPage } from './engine';
 import { useBack } from '../back';
+import { t, tn } from '../i18n';
 
 const LOUPE = 128, ZOOM = 2.6;
 
@@ -110,11 +111,11 @@ export function CropEditor({ page, onApply, onCancel }: { page: ScanPage; onAppl
   const loupeLeft = dp ? dp.x > size.w / 2 : true;
 
   return createPortal(
-    <div className="scrop" role="dialog" aria-modal="true" aria-label="Adjust the corners">
+    <div className="scrop" role="dialog" aria-modal="true" aria-label={t('Adjust the corners')}>
       <header className="scrop-top">
-        <button className="btn lg on-dark" onClick={onCancel}>Cancel</button>
-        <div className="t"><b>Adjust the corners</b><span>Drag a corner or a side onto the page’s edge</span></div>
-        <button className="btn primary lg" onClick={() => onApply(q)} disabled={!ok}><Icon name="check" size={18} />Done</button>
+        <button className="btn lg on-dark" onClick={onCancel}>{t('Cancel')}</button>
+        <div className="t"><b>{t('Adjust the corners')}</b><span>{t('Drag a corner or a side onto the page’s edge')}</span></div>
+        <button className="btn primary lg" onClick={() => onApply(q)} disabled={!ok}><Icon name="check" size={18} />{t('Done')}</button>
       </header>
       <div className="scrop-stage" ref={stage} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
         {s > 0 && <canvas ref={canvas} style={{ position: 'absolute', left: ox, top: oy, width: page.w * s, height: page.h * s }} />}
@@ -132,21 +133,21 @@ export function CropEditor({ page, onApply, onCancel }: { page: ScanPage; onAppl
         )}
         {/* generous invisible touch targets */}
         {s > 0 && pts.map((p, i) => (
-          <button key={'hc' + i} className="scrop-hit" style={{ left: p.x - 24, top: p.y - 24 }} onPointerDown={down(i)} aria-label={`Corner ${i + 1}`}
+          <button key={'hc' + i} className="scrop-hit" style={{ left: p.x - 24, top: p.y - 24 }} onPointerDown={down(i)} aria-label={t('Corner {n}', { n: i + 1 })}
             onKeyDown={(e) => nudge(e, i)} />
         ))}
         {s > 0 && pts.map((p, i) => {
           const nb = pts[(i + 1) % 4];
-          return <button key={'he' + i} className="scrop-hit mid" style={{ left: (p.x + nb.x) / 2 - 20, top: (p.y + nb.y) / 2 - 20 }} onPointerDown={down(4 + i)} aria-label={`Side ${i + 1}`} tabIndex={-1} />;
+          return <button key={'he' + i} className="scrop-hit mid" style={{ left: (p.x + nb.x) / 2 - 20, top: (p.y + nb.y) / 2 - 20 }} onPointerDown={down(4 + i)} aria-label={t('Side {n}', { n: i + 1 })} tabIndex={-1} />;
         })}
         {drag && <canvas ref={loupe} className="scrop-loupe" style={{ width: LOUPE, height: LOUPE, [loupeLeft ? 'left' : 'right']: 16 }} />}
-        {!ok && <div className="scrop-warn"><Icon name="warning-circle" size={16} />The corners cross. Move them back onto the page’s edges.</div>}
+        {!ok && <div className="scrop-warn"><Icon name="warning-circle" size={16} />{t('The corners cross. Move them back onto the page’s edges.')}</div>}
         {!bmp && <div className="scrop-wait"><span className="spinner" /></div>}
       </div>
       <footer className="scrop-bar">
-        <button className="scrop-tool" onClick={() => page.auto && setQ(page.auto)} disabled={!page.auto}><Icon name="magic-wand" size={22} /><span>Auto-detect</span></button>
-        <button className="scrop-tool" onClick={() => setQ(fullQuad(page.w, page.h))}><Icon name="corners-out" size={22} /><span>Whole photo</span></button>
-        <button className="scrop-tool" onClick={() => setQ(page.quad)}><Icon name="restore" size={22} /><span>Reset</span></button>
+        <button className="scrop-tool" onClick={() => page.auto && setQ(page.auto)} disabled={!page.auto}><Icon name="magic-wand" size={22} /><span>{t('Auto-detect')}</span></button>
+        <button className="scrop-tool" onClick={() => setQ(fullQuad(page.w, page.h))}><Icon name="corners-out" size={22} /><span>{t('Whole photo')}</span></button>
+        <button className="scrop-tool" onClick={() => setQ(page.quad)}><Icon name="restore" size={22} /><span>{t('Reset')}</span></button>
       </footer>
     </div>,
     document.body,

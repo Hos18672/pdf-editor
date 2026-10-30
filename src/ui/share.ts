@@ -1,4 +1,5 @@
 // Handing a finished file over: download / share sheet / print. Small, so the start screen can use it too.
+import { t } from './i18n';
 import type { HostProps, ToastMsg } from './Editor';
 
 export const toB64 = (bytes: Uint8Array) => {
@@ -20,8 +21,8 @@ export async function saveFile(host: HostProps, bytes: Uint8Array, name: string,
   setTimeout(() => URL.revokeObjectURL(url), 120000);
   // phones (and browsers that can share files): offer to send it on; otherwise to open it
   const file = canShareFiles() ? new File([bytes as Uint8Array<ArrayBuffer>], name, { type }) : null;
-  toast({ msg: `Saved ${name}`, action: file ? { label: 'Share', run: () => { (navigator as any).share({ files: [file], title: name }).catch(() => null); } }
-    : type === 'application/pdf' ? { label: 'Open', run: () => window.open(url, '_blank') } : undefined });
+  toast({ msg: t('Saved {name}', { name }), action: file ? { label: t('Share'), run: () => { (navigator as any).share({ files: [file], title: name }).catch(() => null); } }
+    : type === 'application/pdf' ? { label: t('Open'), run: () => window.open(url, '_blank') } : undefined });
 }
 
 /** the browser can hand files to other apps (Web Share with files) */
@@ -39,11 +40,11 @@ export async function shareFile(host: HostProps, bytes: Uint8Array, name: string
     catch (e: any) {
       if (e?.name === 'AbortError') return;
       // the moment of the tap passed while the file was made: one more tap shares it
-      if (e?.name === 'NotAllowedError') { toast({ msg: `${name} is ready`, action: { label: 'Share', run: () => { nav.share({ files: [f], title: name }).catch(() => null); } } }); return; }
+      if (e?.name === 'NotAllowedError') { toast({ msg: t('{name} is ready', { name }), action: { label: t('Share'), run: () => { nav.share({ files: [f], title: name }).catch(() => null); } } }); return; }
     }
   }
   await saveFile(host, bytes, name, type, toast);
-  toast({ msg: `This browser can’t share files, so ${name} was downloaded.` });
+  toast({ msg: t('This browser can’t share files, so {name} was downloaded.', { name }) });
 }
 
 /** Print a PDF (web): the browser's print dialog for the file itself. */

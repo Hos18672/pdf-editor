@@ -4,6 +4,7 @@ import { Icon } from '../icons';
 import { useBack } from '../back';
 import type { Stroke } from './kernels';
 import { renderLook, turnStrokes, type ScanPage } from './engine';
+import { t, tn } from '../i18n';
 
 /** brush sizes, as a share of the page's longer side */
 const SIZES = [{ id: 's', r: 0.012, label: 'Small' }, { id: 'm', r: 0.025, label: 'Medium' }, { id: 'l', r: 0.05, label: 'Large' }] as const;
@@ -249,11 +250,11 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
   const pct = Math.round(z.k * 100);
 
   return createPortal(
-    <div className={`scrop serase${moving ? ' moving' : ''}${grabbing ? ' grabbing' : ''}`} role="dialog" aria-modal="true" aria-label="Remove marks">
+    <div className={`scrop serase${moving ? ' moving' : ''}${grabbing ? ' grabbing' : ''}`} role="dialog" aria-modal="true" aria-label={t('Remove marks')}>
       <header className="scrop-top">
-        <button className="btn lg on-dark" onClick={onCancel}>Cancel</button>
-        <div className="t"><b>Remove</b><span>{hint}</span></div>
-        <button className="btn primary lg" onClick={() => onApply(strokes)}><Icon name="check" size={18} />Done</button>
+        <button className="btn lg on-dark" onClick={onCancel}>{t('Cancel')}</button>
+        <div className="t"><b>{t('Remove')}</b><span>{t(hint)}</span></div>
+        <button className="btn primary lg" onClick={() => onApply(strokes)}><Icon name="check" size={18} />{t('Done')}</button>
       </header>
       <div className="scrop-stage" ref={stage} onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}
         onPointerLeave={() => setCursor(null)} onContextMenu={(e) => e.preventDefault()} onWheel={wheel}>
@@ -265,27 +266,27 @@ export function RemovePainter({ plain, aspect, initial, render, onApply, onCance
         )}
         {cursor && s > 0 && !moving && !panning.current && <i className="serase-brush" style={{ left: cursor.x - (stage.current?.getBoundingClientRect().left ?? 0), top: cursor.y - (stage.current?.getBoundingClientRect().top ?? 0), width: brushPx * 2, height: brushPx * 2 }} />}
         {!plain && <div className="scrop-wait"><span className="spinner" /></div>}
-        {busy && plain && <div className="serase-busy" role="status"><span className="spinner" />Removing…</div>}
+        {busy && plain && <div className="serase-busy" role="status"><span className="spinner" />{t('Removing…')}</div>}
         <div className="serase-zoom" onPointerDown={(e) => e.stopPropagation()}>  {/* not a brush stroke, and the click must reach the buttons */}
-          <button onClick={() => zoomBy(1 / 1.4)} disabled={z.k <= 1.001} aria-label="Zoom out" title="Zoom out (−)"><Icon name="minus" size={16} /></button>
-          <button className="pct" onClick={() => setZ(NOZ)} disabled={z.k <= 1.001} title="Fit the page (0)">{pct}%</button>
-          <button onClick={() => zoomBy(1.4)} disabled={z.k >= MAXZ - 0.01} aria-label="Zoom in" title="Zoom in (+)"><Icon name="plus" size={16} /></button>
+          <button onClick={() => zoomBy(1 / 1.4)} disabled={z.k <= 1.001} aria-label={t('Zoom out')} title={t('Zoom out (−)')}><Icon name="minus" size={16} /></button>
+          <button className="pct" onClick={() => setZ(NOZ)} disabled={z.k <= 1.001} title={t('Fit the page (0)')}>{pct}%</button>
+          <button onClick={() => zoomBy(1.4)} disabled={z.k >= MAXZ - 0.01} aria-label={t('Zoom in')} title={t('Zoom in (+)')}><Icon name="plus" size={16} /></button>
         </div>
       </div>
       <footer className="scrop-bar serase-bar">
-        <div className="serase-modes" role="radiogroup" aria-label="Tool">
-          <button role="radio" aria-checked={!hand} className={!hand ? 'on' : ''} onClick={() => setHand(false)} title="Paint (B)"><Icon name="paint-brush" size={20} /><span>Paint</span></button>
-          <button role="radio" aria-checked={hand} className={hand ? 'on' : ''} onClick={() => setHand(true)} title="Move the page (H, or hold Space)"><Icon name="hand" size={20} /><span>Move</span></button>
+        <div className="serase-modes" role="radiogroup" aria-label={t('Tool')}>
+          <button role="radio" aria-checked={!hand} className={!hand ? 'on' : ''} onClick={() => setHand(false)} title={t('Paint (B)')}><Icon name="paint-brush" size={20} /><span>{t('Paint')}</span></button>
+          <button role="radio" aria-checked={hand} className={hand ? 'on' : ''} onClick={() => setHand(true)} title={t('Move the page (H, or hold Space)')}><Icon name="hand" size={20} /><span>{t('Move')}</span></button>
         </div>
-        <div className="serase-sizes" role="radiogroup" aria-label="Brush size">
+        <div className="serase-sizes" role="radiogroup" aria-label={t('Brush size')}>
           {SIZES.map((b) => (
-            <button key={b.id} role="radio" aria-checked={brush === b.id} aria-label={b.label} title={`${b.label} brush ([ and ])`} className={brush === b.id ? 'on' : ''} onClick={() => { setBrush(b.id); setHand(false); }}>
+            <button key={b.id} role="radio" aria-checked={brush === b.id} aria-label={t(b.label)} title={t('{size} brush ([ and ])', { size: t(b.label) })} className={brush === b.id ? 'on' : ''} onClick={() => { setBrush(b.id); setHand(false); }}>
               <i style={{ width: 6 + SIZES.indexOf(b) * 7, height: 6 + SIZES.indexOf(b) * 7 }} />
             </button>
           ))}
         </div>
-        <button className="scrop-tool" onClick={() => setStrokes((ss) => ss.slice(0, -1))} disabled={!strokes.length} title="Undo (Ctrl+Z)"><Icon name="undo" size={22} /><span>Undo</span></button>
-        <button className="scrop-tool" onClick={() => setStrokes([])} disabled={!strokes.length}><Icon name="restore" size={22} /><span>Clear</span></button>
+        <button className="scrop-tool" onClick={() => setStrokes((ss) => ss.slice(0, -1))} disabled={!strokes.length} title={t('Undo (Ctrl+Z)')}><Icon name="undo" size={22} /><span>{t('Undo')}</span></button>
+        <button className="scrop-tool" onClick={() => setStrokes([])} disabled={!strokes.length}><Icon name="restore" size={22} /><span>{t('Clear')}</span></button>
       </footer>
     </div>,
     document.body,

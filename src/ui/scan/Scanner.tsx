@@ -18,6 +18,7 @@ import { Pager } from './Pager';
 import { aiKey, eraseTag, stopAi, DEFAULT_FILTER, decode, findDocument, flattenPage, forget, forgetBases, gridOf, looksCurved, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
 import { findGutter, splitSpread } from './book';
 import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
+import { t, tn } from '../i18n';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'original', label: 'Original' }, { id: 'lighten', label: 'Lighten' }, { id: 'enhance', label: 'Enhance' }, { id: 'auto', label: 'Magic' },
@@ -124,7 +125,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       return page;
     } catch (e) {
       console.warn('scan: photo not usable', e);
-      toast({ msg: 'That photo couldn’t be read.', kind: 'err' });
+      toast({ msg: t('That photo couldn’t be read.'), kind: 'err' });
       return null;
     } finally { findingRef.current--; setFinding((n) => n - 1); }
   }, [toast]);
@@ -178,7 +179,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       } catch (e: any) {
         console.warn('Google scanner not available', e);
         setGFailed(true);
-        toast({ msg: e?.code === 'UNSUPPORTED' ? 'Google’s scanner doesn’t run on this phone. Using the built-in camera.' : `Google’s scanner isn’t available (${String(e?.code ?? e?.message ?? 'error').slice(0, 60)}). Using the built-in camera.` });
+        toast({ msg: e?.code === 'UNSUPPORTED' ? t('Google’s scanner doesn’t run on this phone. Using the built-in camera.') : t('Google’s scanner isn’t available ({why}). Using the built-in camera.', { why: String(e?.code ?? e?.message ?? 'error').slice(0, 60) }) });
       } finally { gRunning.current = false; }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,7 +232,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     setCur(start);
   }, [add, mode]);
   // photos dragged in from the computer: more pages
-  const photoDrop = useFileDrop((f) => onImport(f), { accept: isImage, onReject: () => toast({ msg: 'Drop photos (JPG, PNG, HEIC) to add pages', kind: 'err' }) });
+  const photoDrop = useFileDrop((f) => onImport(f), { accept: isImage, onReject: () => toast({ msg: t('Drop photos (JPG, PNG, HEIC) to add pages'), kind: 'err' }) });
 
   // ---- rendering. The page on screen first: a quick look within a moment, then the cleaned page. The
   // straightened page is kept, so changing the look or turning only redoes the last step. Then the
@@ -398,8 +399,8 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   }, [pages, quality]);
   const fileName = (name.trim() || 'Scan').replace(/[\\/:*?"<>|]+/g, '-') + '.pdf';
   const build = async () => {
-    const title = 'Making your PDF';
-    setBusy({ title, detail: 'Preparing…', progress: 0 });
+    const title = t('Making your PDF');
+    setBusy({ title, detail: t('Preparing…'), progress: 0 });
     try {
       return await buildScanPdf(pages, {
         quality, paper, ocr, cardLayout: cardSheet ? 'sheet' : 'card',
@@ -419,13 +420,13 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       return true;
     } catch (e) {
       console.warn('scan export failed', e);
-      toast({ msg: 'The PDF couldn’t be made on this device.', kind: 'err' });
+      toast({ msg: t('The PDF couldn’t be made on this device.'), kind: 'err' });
       return false;
     }
   };
   const edit = async () => {
     try { const bytes = await build(); setSaved(true); onOpenInEditor(fileName, bytes); }
-    catch (e) { console.warn(e); toast({ msg: 'The PDF couldn’t be made on this device.', kind: 'err' }); }
+    catch (e) { console.warn(e); toast({ msg: t('The PDF couldn’t be made on this device.'), kind: 'err' }); }
   };
   const close = () => (pages.length && !saved ? setAskClose(true) : onClose());
 
@@ -461,9 +462,9 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
         onApply={(st) => { const id = erasing; setErasing(null); patch(id, () => ({ erase: st.length ? st : undefined })); }} onCancel={() => setErasing(null)} />}
       {crop && pages.find((p) => p.id === crop) && <CropEditor page={pages.find((p) => p.id === crop)!} onApply={applyCrop} onCancel={() => setCrop(null)} />}
       {askClose && (
-        <ConfirmClose changes={pages.length} sheet={mobile} title="Leave the scan?"
-          body={`${pages.length} scanned ${pages.length === 1 ? 'page isn’t' : 'pages aren’t'} saved yet. Save them as a PDF, or they’ll be lost.`}
-          saveLabel="Save PDF and close" keepLabel="Keep scanning"
+        <ConfirmClose changes={pages.length} sheet={mobile} title={t('Leave the scan?')}
+          body={tn(pages.length, '{n} scanned page isn’t saved yet. Save it as a PDF, or it’ll be lost.', '{n} scanned pages aren’t saved yet. Save them as a PDF, or they’ll be lost.')}
+          saveLabel={t('Save PDF and close')} keepLabel={t('Keep scanning')}
           onCancel={() => setAskClose(false)} onDiscard={() => { setAskClose(false); onClose(); }}
           onDownload={async () => { setAskClose(false); if (await save()) onClose(); }} />
       )}
@@ -473,7 +474,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   if (view === 'camera' && google) {
     return (
       <>
-        <div className="scam gscan" role="status"><span className="spinner" /><span>{finding ? 'Adding the pages…' : 'Opening Google’s scanner…'}</span></div>
+        <div className="scam gscan" role="status"><span className="spinner" /><span>{finding ? t('Adding the pages…') : t('Opening Google’s scanner…')}</span></div>
         {crumbs}
       </>
     );
@@ -483,7 +484,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
       <>
         <Camera mode={mode} onMode={setMode} count={pages.length + finding} lastThumb={lastThumb} step={step} waiting={toReview}
           onShot={onShot} onImport={onImport} onDone={goReview} onClose={pages.length ? () => setView('review') : close} />
-        {finding > 0 && <div className="scam-finding" role="status"><span className="spinner" />{toReview ? 'Finishing the last page…' : 'Finding the page…'}</div>}
+        {finding > 0 && <div className="scam-finding" role="status"><span className="spinner" />{toReview ? t('Finishing the last page…') : t('Finding the page…')}</div>}
         {crumbs}
       </>
     );
@@ -494,81 +495,81 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   const settings = (
     <div className="sc-settings">
       <label className="sc-field">
-        <span className="kicker">File name</span>
-        <span className="sc-name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} aria-label="File name" /><em>.pdf</em></span>
+        <span className="kicker">{t('File name')}</span>
+        <span className="sc-name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} aria-label={t('File name')} /><em>.pdf</em></span>
       </label>
       <div className="sc-field">
-        <span className="kicker">Page size</span>
+        <span className="kicker">{t('Page size')}</span>
         <Seg value={paper} onChange={(v) => setPaper(v as PaperOpt)} options={[['auto', 'Auto'], ['a4', 'A4'], ['letter', 'Letter'], ['fit', 'Fit']]} />
       </div>
       <div className="sc-field">
-        <span className="kicker">Quality <small>· about {estimate}</small></span>
+        <span className="kicker">{t('Quality')}{' '}<small>· about {estimate}</small></span>
         <Seg value={quality} onChange={(v) => setQuality(v as Quality)} options={[['small', 'Small'], ['standard', 'Standard'], ['high', 'Best']]} />
       </div>
-      {hasCards && <Toggle label="Cards at actual size on A4" hint="Front and back together, like a photocopy" checked={cardSheet} onChange={setCardSheet} />}
-      <Toggle label="Searchable text" hint="Recognises the text so you can search, copy and edit it" checked={ocr} onChange={setOcr} />
+      {hasCards && <Toggle label={t('Cards at actual size on A4')} hint={t('Front and back together, like a photocopy')} checked={cardSheet} onChange={setCardSheet} />}
+      <Toggle label={t('Searchable text')} hint={t('Recognises the text so you can search, copy and edit it')} checked={ocr} onChange={setOcr} />
     </div>
   );
 
   return (
     <div className="scr" {...photoDrop.bind}>
-      <DropOverlay show={photoDrop.over} title="Drop photos to add pages" sub="Each photo is straightened and cleaned like a scan" icon="image" />
+      <DropOverlay show={photoDrop.over} title={t('Drop photos to add pages')} sub={t('Each photo is straightened and cleaned like a scan')} icon="image" />
       <header className="topbar">
-        <button className="ibtn" onClick={close} aria-label="Close scanner"><Icon name="back" /></button>
+        <button className="ibtn" onClick={close} aria-label={t('Close scanner')}><Icon name="back" /></button>
         <div className="doc"><div className="names">
-          <div className="fname">{mobile ? 'Scan' : name}</div>
-          <div className="fmeta">{pages.length} {pages.length === 1 ? 'page' : 'pages'}{sheets.length !== pages.length ? ` · ${sheets.length} ${sheets.length === 1 ? 'sheet' : 'sheets'}` : ''}{finding ? ' · finding the page…' : ''}</div>
+          <div className="fname">{mobile ? t('Scan') : name}</div>
+          <div className="fmeta">{tn(pages.length, '{n} page', '{n} pages')}{sheets.length !== pages.length ? ' · ' + tn(sheets.length, '{n} sheet', '{n} sheets') : ''}{finding ? ' · ' + t('finding the page…') : ''}</div>
         </div></div>
-        {!mobile && <div className="privacy-pill"><Icon name="lock" size={14} />Processed on this device</div>}
+        {!mobile && <div className="privacy-pill"><Icon name="lock" size={14} />{t('Processed on this device')}</div>}
         {mobile
-          ? <button className="btn primary dl" onClick={() => setSheetOpen(true)} disabled={!pages.length}><Icon name="download" size={18} />Save</button>
-          : <button className="btn primary dl" onClick={() => save()} disabled={!pages.length}><Icon name="download" size={18} />Save PDF</button>}
+          ? <button className="btn primary dl" onClick={() => setSheetOpen(true)} disabled={!pages.length}><Icon name="download" size={18} />{t('Save')}</button>
+          : <button className="btn primary dl" onClick={() => save()} disabled={!pages.length}><Icon name="download" size={18} />{t('Save PDF')}</button>}
       </header>
       <div className="sc-body">
         <main className="sc-main">
           {page ? (
             <div className="sc-view">
-              <button className="sc-nav l" onClick={() => setCur(Math.max(0, cur - 1))} disabled={cur === 0} aria-label="Previous page"><Icon name="left" size={20} /></button>
+              <button className="sc-nav l" onClick={() => setCur(Math.max(0, cur - 1))} disabled={cur === 0} aria-label={t('Previous page')}><Icon name="left" size={20} /></button>
               <Pager pages={pages} renders={renders} cur={Math.min(cur, pages.length - 1)} onCur={setCur} onAdd={toCamera} keyOf={keyOf}
                 compare={compare} orig={origs[geoKey(page)] || undefined} label={FILTERS.find((f) => f.id === page.filter)?.label ?? ''} onCheck={setCrop}
                 sharp={sharp} onSharp={wantSharp} />
-              <button className="sc-nav r" onClick={() => setCur(Math.min(pages.length - 1, cur + 1))} disabled={cur >= pages.length - 1} aria-label="Next page"><Icon name="right" size={20} /></button>
+              <button className="sc-nav r" onClick={() => setCur(Math.min(pages.length - 1, cur + 1))} disabled={cur >= pages.length - 1} aria-label={t('Next page')}><Icon name="right" size={20} /></button>
             </div>
-          ) : <div className="sc-empty">No pages yet</div>}
+          ) : <div className="sc-empty">{t('No pages yet')}</div>}
 
           {page && (
             <div className="sc-under">
-              <span className="sc-count num">{cur + 1} / {pages.length}{page.format ? ` · ${FORMAT_LABEL[page.format]}` : ''}{page.side ? ` · ${page.side === 'front' ? 'Front' : 'Back'}` : ''}</span>
+              <span className="sc-count num">{cur + 1} / {pages.length}{page.format ? ` · ${t(FORMAT_LABEL[page.format])}` : ''}{page.side ? ` · ${page.side === 'front' ? t('Front side') : t('Back side')}` : ''}</span>
               {page.ai?.key === aiKey(page) && page.ai.grid
                 ? <button className={`sc-cmp${page.aiOff ? '' : ' on'}`} onClick={() => patch(page.id, (p) => ({ aiOff: !p.aiOff }))} aria-pressed={!page.aiOff}
-                  title={page.aiOff ? 'Flatten the curved page with AI (on this device)' : 'Curved page flattened with AI (on this device). Tap to undo'}><Icon name="sparkle" size={17} />{page.aiOff ? 'Flatten' : 'Flattened'}</button>
-                : flattening > 0 && !page.ai ? <span className="sc-count" role="status"><span className="spinner" /> Flattening…</span> : null}
-              <button className={`sc-cmp${compare ? ' on' : ''}`} onClick={() => setCompare(!compare)} aria-pressed={compare}><Icon name="split-horizontal" size={17} />Compare</button>
+                  title={page.aiOff ? t('Flatten the curved page with AI (on this device)') : t('Curved page flattened with AI (on this device). Tap to undo')}><Icon name="sparkle" size={17} />{page.aiOff ? t('Flatten') : t('Flattened')}</button>
+                : flattening > 0 && !page.ai ? <span className="sc-count" role="status"><span className="spinner" /> {' '}{t('Flattening…')}</span> : null}
+              <button className={`sc-cmp${compare ? ' on' : ''}`} onClick={() => setCompare(!compare)} aria-pressed={compare}><Icon name="split-horizontal" size={17} />{t('Compare')}</button>
             </div>
           )}
 
           {page && (
-            <div className="sc-filters" role="radiogroup" aria-label="Look">
+            <div className="sc-filters" role="radiogroup" aria-label={t('Look')}>
               {FILTERS.map((f) => {
                 const u = previews[geoKey(page)]?.[f.id];
                 return (
                   <button key={f.id} role="radio" aria-checked={page.filter === f.id} className={`sc-ft${page.filter === f.id ? ' on' : ''}`} onClick={() => setFilter(f.id)}>
-                    <span className="im">{u ? <img src={u} alt="" /> : <span className="spinner" />}<span className="lb">{f.label}</span></span>
+                    <span className="im">{u ? <img src={u} alt="" /> : <span className="spinner" />}<span className="lb">{t(f.label)}</span></span>
                   </button>
                 );
               })}
-              {pages.length > 1 && <button className="sc-all" onClick={() => setFilter(page.filter, true)}>Use on all pages</button>}
+              {pages.length > 1 && <button className="sc-all" onClick={() => setFilter(page.filter, true)}>{t('Use on all pages')}</button>}
             </div>
           )}
 
           {page && (
             <div className="sc-acts">
-              <button onClick={() => setCrop(page.id)}><Icon name="crop" size={21} /><span>Crop</span></button>
-              <button onClick={() => setErasing(page.id)} className={page.erase?.length ? 'on' : ''}><Icon name="eraser" size={21} /><span>Remove</span></button>
-              <button onClick={() => rotate(-1)}><Icon name="restore" size={21} /><span>Left</span></button>
-              <button onClick={() => rotate(1)}><Icon name="rotate" size={21} /><span>Right</span></button>
-              <button onClick={() => remove(page.id)} className="danger"><Icon name="trash" size={21} /><span>Delete</span></button>
-              <button onClick={toCamera} className="add"><Icon name="camera-plus" size={21} /><span>Add page</span></button>
+              <button onClick={() => setCrop(page.id)}><Icon name="crop" size={21} /><span>{t('Crop')}</span></button>
+              <button onClick={() => setErasing(page.id)} className={page.erase?.length ? 'on' : ''}><Icon name="eraser" size={21} /><span>{t('Remove')}</span></button>
+              <button onClick={() => rotate(-1)}><Icon name="restore" size={21} /><span>{t('Left')}</span></button>
+              <button onClick={() => rotate(1)}><Icon name="rotate" size={21} /><span>{t('Right')}</span></button>
+              <button onClick={() => remove(page.id)} className="danger"><Icon name="trash" size={21} /><span>{t('Delete')}</span></button>
+              <button onClick={toCamera} className="add"><Icon name="camera-plus" size={21} /><span>{t('Add page')}</span></button>
             </div>
           )}
 
@@ -577,32 +578,32 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
               overlay={(p) => <Thumb p={p} r={renders[p.id]} i={pages.indexOf(p)} on={false} />}>
               {pages.map((p, i) => <SortThumb key={p.id} p={p} r={renders[p.id]} i={i} on={i === cur} onClick={() => setCur(i)} />)}
             </SortableArea>
-            <button className="sc-addtile" onClick={toCamera} aria-label="Add a page"><Icon name="plus" size={22} /></button>
+            <button className="sc-addtile" onClick={toCamera} aria-label={t('Add a page')}><Icon name="plus" size={22} /></button>
           </div>
         </main>
         {!mobile && (
           <aside className="sc-side">
-            <h3>Save as PDF</h3>
+            <h3>{t('Save as PDF')}</h3>
             {settings}
             <div className="sc-go">
-              <button className="btn primary lg block" onClick={() => save()} disabled={!pages.length}><Icon name="download" size={18} />Save PDF</button>
-              {canShare && <button className="btn secondary lg block" onClick={() => save(true)} disabled={!pages.length}><Icon name="share-network" size={18} />Share PDF</button>}
-              <button className="btn secondary lg block" onClick={edit} disabled={!pages.length}><Icon name="pencil-simple" size={18} />Open in the editor</button>
+              <button className="btn primary lg block" onClick={() => save()} disabled={!pages.length}><Icon name="download" size={18} />{t('Save PDF')}</button>
+              {canShare && <button className="btn secondary lg block" onClick={() => save(true)} disabled={!pages.length}><Icon name="share-network" size={18} />{t('Share PDF')}</button>}
+              <button className="btn secondary lg block" onClick={edit} disabled={!pages.length}><Icon name="pencil-simple" size={18} />{t('Open in the editor')}</button>
             </div>
-            <p className="sc-note"><Icon name="lock" size={13} />Photos and PDF stay on this device.</p>
+            <p className="sc-note"><Icon name="lock" size={13} />{t('Photos and PDF stay on this device.')}</p>
           </aside>
         )}
       </div>
       {mobile && sheetOpen && createPortal(
         <div className="scrim sheet" onPointerDown={(e) => e.target === e.currentTarget && setSheetOpen(false)}>
-          <div className="modal sc-sheet" role="dialog" aria-modal="true" aria-label="Save as PDF">
+          <div className="modal sc-sheet" role="dialog" aria-modal="true" aria-label={t('Save as PDF')}>
             <div className="grab" />
-            <h2>Save as PDF</h2>
+            <h2>{t('Save as PDF')}</h2>
             {settings}
             <div className="sc-go">
-              <button className="btn primary lg block" onClick={() => save()}><Icon name="download" size={18} />{host.isNative ? 'Save or share PDF' : 'Save PDF'}</button>
-              {canShare && <button className="btn secondary lg block" onClick={() => save(true)}><Icon name="share-network" size={18} />Share PDF</button>}
-              <button className="btn secondary lg block" onClick={edit}><Icon name="pencil-simple" size={18} />Open in the editor</button>
+              <button className="btn primary lg block" onClick={() => save()}><Icon name="download" size={18} />{host.isNative ? t('Save or share PDF') : t('Save PDF')}</button>
+              {canShare && <button className="btn secondary lg block" onClick={() => save(true)}><Icon name="share-network" size={18} />{t('Share PDF')}</button>}
+              <button className="btn secondary lg block" onClick={edit}><Icon name="pencil-simple" size={18} />{t('Open in the editor')}</button>
             </div>
           </div>
         </div>, document.body)}
@@ -616,7 +617,7 @@ function Thumb({ p, r, i, on }: { p: ScanPage; r?: Render; i: number; on: boolea
     <span className={`sc-th${on ? ' on' : ''}`}>
       {r ? <img src={r.url} alt="" /> : <span className="spinner" />}
       <em className="num">{i + 1}</em>
-      {!p.sure && <i className="warn" aria-label="Check the corners" />}
+      {!p.sure && <i className="warn" aria-label={t('Check the corners')} />}
     </span>
   );
 }
@@ -624,7 +625,7 @@ function Thumb({ p, r, i, on }: { p: ScanPage; r?: Render; i: number; on: boolea
 function SortThumb({ p, r, i, on, onClick }: { p: ScanPage; r?: Render; i: number; on: boolean; onClick: () => void }) {
   const { ref, style, pointer, grip, dragging } = useSortableItem(p.id);
   return (
-    <button {...pointer} {...grip} ref={(el) => { ref(el); grip.ref(el); }} style={{ ...style, opacity: dragging ? 0.3 : 1 }} className="sc-thb" onClick={onClick} aria-label={`Page ${i + 1}`} aria-current={on}>
+    <button {...pointer} {...grip} ref={(el) => { ref(el); grip.ref(el); }} style={{ ...style, opacity: dragging ? 0.3 : 1 }} className="sc-thb" onClick={onClick} aria-label={t('Page {p}', { p: i + 1 })} aria-current={on}>
       <Thumb p={p} r={r} i={i} on={on} />
     </button>
   );

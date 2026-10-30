@@ -6,6 +6,7 @@ import type { RunEdit, Tool, ToolStyle } from './store';
 import { cleanLooks } from './store';
 import { Icon } from './icons';
 import { ColorPicker } from './ColorPicker';
+import { t, tn } from './i18n';
 
 export const COLORS = ['#000000', '#1E2559', '#3446C9', '#B83227', '#1E7A4C'];
 export const INKS = ['#14161F', '#1E2559', '#2F5BD3', '#B83227'];
@@ -25,16 +26,16 @@ export function Swatches({ value, onPick, list = COLORS, allowNone, original, cu
     // pressing a swatch must not end the text edit (that would move the panel under the pointer)
     <div className="swatches" onMouseDown={(e) => e.preventDefault()}>
       {original !== undefined && (
-        <button className={`swatch${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label="Original colour" title="Original">
+        <button className={`swatch${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label={t('Original colour')} title={t('Original')}>
           <i style={{ background: original }} />
         </button>
       )}
-      {allowNone && <button className={`swatch none${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label="No fill" title="None"><i /></button>}
+      {allowNone && <button className={`swatch none${value === null ? ' on' : ''}`} onClick={() => onPick(null)} aria-label={t('No fill')} title={t('None')}><i /></button>}
       {list.filter((c) => !(original && near(c, original))).map((c) => (
-        <button key={c} className={`swatch${same(value, c) ? ' on' : ''}`} onClick={() => onPick(c)} aria-label={`Colour ${c}`}><i style={{ background: c }} /></button>
+        <button key={c} className={`swatch${same(value, c) ? ' on' : ''}`} onClick={() => onPick(c)} aria-label={t('Colour {c}', { c })}><i style={{ background: c }} /></button>
       ))}
       {custom && (
-        <button type="button" className={`swatch custom${isCustom ? ' on' : ''}`} onClick={() => setPicking(true)} aria-label="More colours" title="More colours" aria-haspopup="dialog">
+        <button type="button" className={`swatch custom${isCustom ? ' on' : ''}`} onClick={() => setPicking(true)} aria-label={t('More colours')} title={t('More colours')} aria-haspopup="dialog">
           <i style={isCustom ? { background: value!, border: 0 } : undefined}>{!isCustom && <Icon name="plus" size={14} />}</i>
         </button>
       )}
@@ -47,11 +48,12 @@ export const Stepper = ({ value, onChange, min, max, label, unit, soft, step = 1
   value: number; onChange: (v: number) => void; min: number; max: number; label: string; unit?: string; soft?: boolean; step?: number;
 }) => {
   const r = (v: number) => Math.round(v / step) * step;
+  label = t(label);
   return (
     <div className={`stepper${soft ? ' soft' : ''}`} role="group" aria-label={label}>
-      <button type="button" onClick={() => onChange(Math.max(min, r(value) - step))} aria-label={`Decrease ${label}`}><Icon name="minus" size={16} /></button>
+      <button type="button" onClick={() => onChange(Math.max(min, r(value) - step))} aria-label={t('Decrease {what}', { what: label })}><Icon name="minus" size={16} /></button>
       <span className="v">{Math.round(value * 10) / 10}{unit && <small> {unit}</small>}</span>
-      <button type="button" onClick={() => onChange(Math.min(max, r(value) + step))} aria-label={`Increase ${label}`}><Icon name="plus" size={16} /></button>
+      <button type="button" onClick={() => onChange(Math.min(max, r(value) + step))} aria-label={t('Increase {what}', { what: label })}><Icon name="plus" size={16} /></button>
     </div>
   );
 };
@@ -70,7 +72,7 @@ export function Seg<T extends string>({ value, options, onChange, lg }: { value:
   return (
     <div className={`seg${lg ? ' lg' : ''}`} role="radiogroup">
       {options.map(([v, label]) => (
-        <button key={v} type="button" role="radio" aria-checked={value === v} className={value === v ? 'on' : ''} onClick={() => onChange(v)}>{label}</button>
+        <button key={v} type="button" role="radio" aria-checked={value === v} className={value === v ? 'on' : ''} onClick={() => onChange(v)}>{typeof label === 'string' ? t(label) : label}</button>
       ))}
     </div>
   );
@@ -86,15 +88,15 @@ const Family = ({ value, onChange }: { value: FontFamily; onChange: (f: FontFami
 function Head({ kicker, title, onClose }: { kicker: string; title: string; onClose?: () => void }) {
   return (
     <div className="head">
-      <div className="t"><div className="kicker">{kicker}</div><h3>{title}</h3></div>
-      {onClose && <button className="ibtn" onClick={onClose} aria-label="Close panel"><Icon name="close" size={18} /></button>}
+      <div className="t"><div className="kicker">{t(kicker)}</div><h3>{title}</h3></div>
+      {onClose && <button className="ibtn" onClick={onClose} aria-label={t('Close panel')}><Icon name="close" size={18} /></button>}
     </div>
   );
 }
 
 export const fontLabel = (font?: FontInfo) => {
   const n = (font?.name || '').replace(/^[A-Z]{6}\+/, '').replace(/[-,](Regular|Roman)$/i, '').replace(/([a-z])([A-Z])/g, '$1 $2').replace(/[-_]/g, ' ');
-  return n || 'Embedded font';
+  return n || t('Embedded font');
 };
 
 const LOOK_BTNS: [keyof CharLook, string, string][] = [['b', 'text-b:bold', 'Bold'], ['i', 'text-italic', 'Italic'], ['u', 'text-underline', 'Underline'], ['s', 'text-strikethrough', 'Strike-through']];
@@ -125,7 +127,7 @@ export function TextTools({ editKey, whole, onWhole, disabled, align, onAlign }:
   };
   return (
     // the text being typed keeps the focus (and its selected letters)
-    <div className="ttools" role="toolbar" aria-label={sel ? 'Style of the selected letters' : 'Text style'} onMouseDown={(e) => e.preventDefault()}>
+    <div className="ttools" role="toolbar" aria-label={sel ? t('Style of the selected letters') : t('Text style')} onMouseDown={(e) => e.preventDefault()}>
       {LOOK_BTNS.map(([k, icon, label]) => {
         const off = !sel && disabled?.[k];
         return (
@@ -139,7 +141,7 @@ export function TextTools({ editKey, whole, onWhole, disabled, align, onAlign }:
         <>
           <span className="sep" aria-hidden />
           {ALIGNS.map(([a, label]) => (
-            <button key={a} type="button" className={(align ?? 'left') === a ? 'on' : ''} aria-pressed={(align ?? 'left') === a} aria-label={label} title={label} onClick={() => onAlign(a)}>
+            <button key={a} type="button" className={(align ?? 'left') === a ? 'on' : ''} aria-pressed={(align ?? 'left') === a} aria-label={t(label)} title={t(label)} onClick={() => onAlign(a)}>
               <Icon name={`text-align-${a}`} size={19} />
             </button>
           ))}
@@ -218,38 +220,38 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
     <div className="props">
       {!compact && <Head kicker="Existing text" title={line} onClose={onClose} />}
       <div className="field">
-        <div className="label">Font</div>
+        <div className="label">{t('Font')}</div>
         <div className="fontbox" title={font?.name}>
-          <span className="aa" style={{ fontFamily: font?.editFamily ? `"${font.editFamily}", ${font.cssFallback}` : font?.cssFallback }}>Aa</span>
-          <span className="fn">{fontLabel(font)}</span><span className="badge">Original</span>
+          <span className="aa" style={{ fontFamily: font?.editFamily ? `"${font.editFamily}", ${font.cssFallback}` : font?.cssFallback }}>{t('Aa')}</span>
+          <span className="fn">{fontLabel(font)}</span><span className="badge">{t('Original')}</span>
         </div>
       </div>
       {missing.length > 0 && (
         <div className="note warn"><Icon name="info" size={16} />
-          <span>The embedded font has no {missing.slice(0, 10).join(' ')}{missing.length > 10 ? '…' : ''}. Those characters use a similar standard font.</span>
+          <span>{t('The embedded font has no {chars}. Those characters use a similar standard font.', { chars: missing.slice(0, 10).join(' ') + (missing.length > 10 ? '…' : '') })}</span>
         </div>
       )}
-      {!hideTools && <div className="field"><div className="label">{selLook ? 'Style of the selected letters' : 'Style'}</div><RunTextTools run={run} edit={edit} onEdit={onEdit} /></div>}
-      <div className="field"><div className="label">{selSize !== null ? 'Size of the selected letters' : 'Size'}</div>
+      {!hideTools && <div className="field"><div className="label">{selLook ? t('Style of the selected letters') : t('Style')}</div><RunTextTools run={run} edit={edit} onEdit={onEdit} /></div>}
+      <div className="field"><div className="label">{selSize !== null ? t('Size of the selected letters') : t('Size')}</div>
         {/* the line being typed keeps the focus (and its selected letters) */}
         <div onMouseDown={(e) => e.preventDefault()}><Stepper value={size} min={2} max={300} onChange={setSize} label="size" unit="pt" /></div>
-        {selSize === null && !compact && <div className="hint">Select a word or letters while typing to change just them.</div>}
+        {selSize === null && !compact && <div className="hint">{t('Select a word or letters while typing to change just them.')}</div>}
       </div>
-      <div className="field"><div className="label">{selLook ? 'Colour of the selected letters' : 'Colour'}</div>
-        <Swatches value={selLook ? selLook.c ?? cur.color : cur.color} original={origColor} title="Text colour" onPick={pickColor} />
+      <div className="field"><div className="label">{selLook ? t('Colour of the selected letters') : t('Colour')}</div>
+        <Swatches value={selLook ? selLook.c ?? cur.color : cur.color} original={origColor} title={t('Text colour')} onPick={pickColor} />
       </div>
       {(onCopy || onCut || onMove) && (
-        <div className="lineacts" role="group" aria-label="Line">
-          {onCopy && <button className="btn outline" onClick={onCopy}><Icon name="copy" size={17} />Copy</button>}
-          {onCut && <button className="btn outline" onClick={onCut}><Icon name="scissors" size={17} />Cut</button>}
-          {onMove && <button className="btn outline" onClick={onMove}><Icon name="move" size={17} />Move</button>}
+        <div className="lineacts" role="group" aria-label={t('Text line')}>
+          {onCopy && <button className="btn outline" onClick={onCopy}><Icon name="copy" size={17} />{t('Copy')}</button>}
+          {onCut && <button className="btn outline" onClick={onCut}><Icon name="scissors" size={17} />{t('Cut')}</button>}
+          {onMove && <button className="btn outline" onClick={onMove}><Icon name="move" size={17} />{t('Move')}</button>}
         </div>
       )}
       <div className="acts">
-        {edit && <button className="btn outline" onClick={onReset}><Icon name="restore" size={17} />Restore original</button>}
-        <button className="btn danger" onClick={() => onEdit({ ...cur, text: '' })}><Icon name="trash" size={17} />Delete line</button>
+        {edit && <button className="btn outline" onClick={onReset}><Icon name="restore" size={17} />{t('Restore original')}</button>}
+        <button className="btn danger" onClick={() => onEdit({ ...cur, text: '' })}><Icon name="trash" size={17} />{t('Delete line')}</button>
       </div>
-      {!compact && <div className="keys"><span><b>Enter</b> confirm</span><span><b>Esc</b> cancel</span><span><b>Tab</b> next line</span></div>}
+      {!compact && <div className="keys"><span><b>{t('Enter')}</b> {t('confirm')}</span><span><b>{t('Esc')}</b> {t('cancel')}</span><span><b>{t('Tab')}</b> {t('next line')}</span></div>}
     </div>
   );
 }
@@ -259,18 +261,18 @@ export const OBJ_TITLE: Record<EditorObject['type'], string> = {
   whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark', link: 'Link', erase: 'Removed area',
 };
 /** the name of an object as shown (an underline is a "highlight" with a style) */
-export const objTitle = (o: EditorObject) => o.type === 'highlight' && o.style ? (o.style === 'underline' ? 'Underline' : 'Strike-through')
-  : o.type === 'line' && o.arrow ? 'Arrow' : OBJ_TITLE[o.type];
+export const objTitle = (o: EditorObject) => t(o.type === 'highlight' && o.style ? (o.style === 'underline' ? 'Underline' : 'Strike-through')
+  : o.type === 'line' && o.arrow ? 'Arrow' : OBJ_TITLE[o.type]);
 export const MARK_INKS = ['#D93025', '#1E2559', '#2F5BD3', '#14161F', '#1E7A4C'];
 
 /** Fonts for typed text: the document's own (as they look) and the standard ones */
 function FontPick({ o, docFonts, onChange }: { o: Extract<EditorObject, { type: 'text' }>; docFonts: DocFont[]; onChange: (p: any) => void }) {
   const list = o.font && !docFonts.some((f) => f.key === o.font!.key) ? [o.font, ...docFonts] : docFonts;
   return (
-    <div className="fontpick" role="radiogroup" aria-label="Font">
+    <div className="fontpick" role="radiogroup" aria-label={t('Font')}>
       {list.map((f) => (
         <button key={f.key} role="radio" aria-checked={o.font?.key === f.key} className={o.font?.key === f.key ? 'on' : ''}
-          onClick={() => onChange({ font: f, ...styleOf(f) })} style={{ fontFamily: f.css, fontSynthesis: 'none' } as any} title="A font of this document">
+          onClick={() => onChange({ font: f, ...styleOf(f) })} style={{ fontFamily: f.css, fontSynthesis: 'none' } as any} title={t('A font of this document')}>
           {f.label}
         </button>
       ))}
@@ -313,60 +315,60 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact,
       {o.type === 'link' && <LinkProps o={o} order={order ?? []} onChange={set} />}
       {o.type === 'text' && (
         <>
-          <div className="field"><div className="label">Font</div>
+          <div className="field"><div className="label">{t('Font')}</div>
             {docFonts.length || o.font ? <FontPick o={o} docFonts={docFonts} onChange={set} /> : <Family value={o.family} onChange={(family) => set({ family })} />}
           </div>
-          {!hideTools && <div className="field"><div className="label">{selLook ? 'Style of the selected letters' : 'Style'}</div><ObjTextTools o={o} docFonts={docFonts} onChange={set} /></div>}
-          <div className="field"><div className="label">{selSize !== null ? 'Size of the selected letters' : 'Size'}</div>
+          {!hideTools && <div className="field"><div className="label">{selLook ? t('Style of the selected letters') : t('Style')}</div><ObjTextTools o={o} docFonts={docFonts} onChange={set} /></div>}
+          <div className="field"><div className="label">{selSize !== null ? t('Size of the selected letters') : t('Size')}</div>
             <div onMouseDown={(e) => e.preventDefault()}>
               <Stepper value={selSize ?? o.size} min={selSize !== null ? 2 : 4} max={200} step={0.5} label="size"
                 onChange={(size) => { if (selSize !== null && lineEditor()?.setSelSize(size)) return; set({ size }); }} />
             </div>
           </div>
-          <div className="field"><div className="label">{selLook ? 'Colour of the selected letters' : 'Colour'}</div>
+          <div className="field"><div className="label">{selLook ? t('Colour of the selected letters') : t('Colour')}</div>
             <Swatches value={selLook ? selLook.c ?? o.color : o.color} onPick={(color) => {
               if (selLook && lineEditor()?.setSelLook({ c: color ?? undefined })) return;
               set({ color: color ?? '#000000', looks: dropLook(o.text, o.looks, 'c', { b: o.bold, i: o.italic, u: !!o.underline, s: !!o.strike }) });
             }} />
           </div>
-          {!compact && <div className="hint">Select words while typing to style just them.</div>}
+          {!compact && <div className="hint">{t('Select words while typing to style just them.')}</div>}
         </>
       )}
       {(o.type === 'rect' || o.type === 'ellipse') && (
         <>
-          <div className="field"><div className="label">Outline</div><Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></div>
-          <div className="field"><div className="label">Fill</div><Swatches value={o.fill} allowNone onPick={(fill) => set({ fill })} /></div>
-          <div className="field"><div className="label">Outline width</div><Stepper value={o.strokeWidth} min={0} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} label="outline width" unit="pt" /></div>
+          <div className="field"><div className="label">{t('Outline')}</div><Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></div>
+          <div className="field"><div className="label">{t('Fill colour')}</div><Swatches value={o.fill} allowNone onPick={(fill) => set({ fill })} /></div>
+          <div className="field"><div className="label">{t('Outline width')}</div><Stepper value={o.strokeWidth} min={0} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} label="outline width" unit="pt" /></div>
         </>
       )}
       {(o.type === 'line' || o.type === 'draw') && (
         <>
-          <div className="field"><div className="label">Colour</div><Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></div>
-          <div className="field"><div className="label">Width</div><Stepper value={o.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} label="width" unit="pt" /></div>
-          {o.type === 'line' && <Toggle label="Arrow head" checked={!!o.arrow} onChange={(arrow) => set({ arrow })} />}
+          <div className="field"><div className="label">{t('Colour')}</div><Swatches value={o.stroke} onPick={(stroke) => set({ stroke: stroke ?? '#000000' })} /></div>
+          <div className="field"><div className="label">{t('Width')}</div><Stepper value={o.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => set({ strokeWidth })} label="width" unit="pt" /></div>
+          {o.type === 'line' && <Toggle label={t('Arrow head')} checked={!!o.arrow} onChange={(arrow) => set({ arrow })} />}
         </>
       )}
       {o.type === 'mark' && (
         <>
-          <div className="field"><div className="label">Colour</div><Swatches value={o.color} onPick={(color) => set({ color: color ?? '#000000' })} /></div>
-          <div className="field"><div className="label">Size</div><Stepper value={o.w} min={4} max={60} onChange={(w) => set({ w, h: w })} label="size" unit="pt" /></div>
+          <div className="field"><div className="label">{t('Colour')}</div><Swatches value={o.color} onPick={(color) => set({ color: color ?? '#000000' })} /></div>
+          <div className="field"><div className="label">{t('Size')}</div><Stepper value={o.w} min={4} max={60} onChange={(w) => set({ w, h: w })} label="size" unit="pt" /></div>
         </>
       )}
       {o.type === 'whiteout' && (
-        <div className="field"><div className="label">Colour</div><Swatches value={o.fill} list={['#ffffff', '#f4f4f4', '#000000']} onPick={(fill) => set({ fill: fill ?? '#ffffff' })} /></div>
+        <div className="field"><div className="label">{t('Colour')}</div><Swatches value={o.fill} list={['#ffffff', '#f4f4f4', '#000000']} onPick={(fill) => set({ fill: fill ?? '#ffffff' })} /></div>
       )}
       {o.type === 'redact' && (
-        <div className="note"><Icon name="eye-slash" size={16} /><span>When you download, the text and picture parts under this box are deleted from the file, not just covered. They can’t be copied or found any more.</span></div>
+        <div className="note"><Icon name="eye-slash" size={16} /><span>{t('When you download, the text and picture parts under this box are deleted from the file, not just covered. They can’t be copied or found any more.')}</span></div>
       )}
       {o.type === 'highlight' && (
         <>
-          <div className="field"><div className="label">Style</div>
+          <div className="field"><div className="label">{t('Style')}</div>
             <Seg value={o.style ?? 'highlight'} options={[['highlight', 'Highlight'], ['underline', 'Underline'], ['strike', 'Strike']]}
               onChange={(v) => set(v === 'highlight'
                 ? { style: undefined, fill: HIGHLIGHTS.includes(o.fill) ? o.fill : HIGHLIGHTS[0], opacity: 0.4 }
                 : { style: v, fill: HIGHLIGHTS.includes(o.fill) ? MARK_INKS[0] : o.fill, opacity: 1 })} />
           </div>
-          <div className="field"><div className="label">Colour</div>
+          <div className="field"><div className="label">{t('Colour')}</div>
             {o.style
               ? <Swatches value={o.fill} list={MARK_INKS} onPick={(fill) => set({ fill: fill ?? MARK_INKS[0] })} />
               : <Swatches value={o.fill} list={HIGHLIGHTS} custom={false} onPick={(fill) => set({ fill: fill ?? HIGHLIGHTS[0] })} />}
@@ -374,15 +376,15 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact,
         </>
       )}
       {(o.type === 'image' || o.type === 'signature') && (
-        <div className="field"><div className="label">Opacity</div>
+        <div className="field"><div className="label">{t('Opacity')}</div>
           <Stepper value={Math.round((o.opacity ?? 1) * 100)} min={10} max={100} step={10} unit="%" onChange={(v) => set({ opacity: v / 100 })} label="opacity" />
         </div>
       )}
       <div className="acts2">
-        <button className="btn outline" onClick={onDuplicate}><Icon name="copy" size={17} />Duplicate</button>
-        <button className="btn outline danger" onClick={onDelete}><Icon name="trash" size={17} />Delete</button>
+        <button className="btn outline" onClick={onDuplicate}><Icon name="copy" size={17} />{t('Duplicate')}</button>
+        <button className="btn outline danger" onClick={onDelete}><Icon name="trash" size={17} />{t('Delete')}</button>
       </div>
-      {!compact && <div className="hint">Drag to move. Drag the corner to resize{o.type === 'image' || o.type === 'signature' ? ' (Alt frees the proportions)' : ''}. Arrow keys nudge 1 pt, Shift+arrow 10 pt.</div>}
+      {!compact && <div className="hint">{o.type === 'image' || o.type === 'signature' ? t('Drag to move. Drag the corner to resize (Alt frees the proportions). Arrow keys nudge 1 pt, Shift+arrow 10 pt.') : t('Drag to move. Drag the corner to resize. Arrow keys nudge 1 pt, Shift+arrow 10 pt.')}</div>}
     </div>
   );
 }
@@ -393,21 +395,21 @@ function LinkProps({ o, order, onChange }: { o: Extract<EditorObject, { type: 'l
   const pageNo = o.target !== undefined ? Math.max(1, order.indexOf(o.target) + 1) : 1;
   return (
     <>
-      <div className="field"><div className="label">Opens</div>
+      <div className="field"><div className="label">{t('Opens')}</div>
         <Seg value={kind} options={[['web', 'Web address'], ['page', 'A page']]}
           onChange={(v) => onChange(v === 'page' ? { target: order[0] ?? 0 } : { target: undefined })} />
       </div>
       {kind === 'web' ? (
-        <div className="field"><div className="label">Address</div>
+        <div className="field"><div className="label">{t('Address')}</div>
           <input className="input" type="url" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="https://example.com or name@mail.com"
-            value={o.url} onChange={(e) => onChange({ url: e.target.value })} onKeyDown={(e) => e.stopPropagation()} aria-label="Web address" />
+            value={o.url} onChange={(e) => onChange({ url: e.target.value })} onKeyDown={(e) => e.stopPropagation()} aria-label={t('Web address')} />
         </div>
       ) : (
-        <div className="field"><div className="label">Page</div>
+        <div className="field"><div className="label">{t('Page')}</div>
           <Stepper value={pageNo} min={1} max={Math.max(1, order.length)} onChange={(n) => onChange({ target: order[Math.max(0, Math.min(order.length - 1, n - 1))] })} label="page" />
         </div>
       )}
-      <div className="hint">The box is invisible in the saved PDF; tapping it there opens the {kind === 'web' ? 'address' : 'page'}.</div>
+      <div className="hint">{kind === 'web' ? t('The box is invisible in the saved PDF; tapping it there opens the address.') : t('The box is invisible in the saved PDF; tapping it there opens the page.')}</div>
     </>
   );
 }
@@ -427,33 +429,33 @@ export const toolHasProps = (t: Tool) => !!TOOL_NAMES[t];
 export function ToolProps({ tool, style, onChange, compact }: { tool: Tool; style: ToolStyle; onChange: (s: Partial<ToolStyle>) => void; compact?: boolean }) {
   return (
     <div className={`props${compact ? ' compact' : ''}`}>
-      {!compact && <div className="head"><div className="t"><div className="kicker">Tool</div><h3>{TOOL_NAMES[tool]}</h3>
-        <div className="hint" style={{ marginTop: 2 }}>{TOOL_HINTS[tool]}</div></div></div>}
+      {!compact && <div className="head"><div className="t"><div className="kicker">{t('Tool')}</div><h3>{t(TOOL_NAMES[tool] ?? '')}</h3>
+        <div className="hint" style={{ marginTop: 2 }}>{t(TOOL_HINTS[tool] ?? '')}</div></div></div>}
       {tool === 'text' && (
         <>
-          <Toggle label="Match the page’s text" hint="Font, size and colour of the nearest line" checked={style.match} onChange={(match) => onChange({ match })} />
+          <Toggle label={t('Match the page’s text')} hint={t('Font, size and colour of the nearest line')} checked={style.match} onChange={(match) => onChange({ match })} />
           {!style.match && (
             <>
-              <div className="field"><div className="label">Font</div><Family value={style.family} onChange={(family) => onChange({ family })} /></div>
-              <div className="field"><div className="label">Size</div><Stepper value={style.fontSize} min={4} max={200} onChange={(fontSize) => onChange({ fontSize })} label="size" unit="pt" /></div>
-              <div className="field"><div className="label">Colour</div><Swatches value={style.color} onPick={(color) => onChange({ color: color ?? '#000000' })} /></div>
+              <div className="field"><div className="label">{t('Font')}</div><Family value={style.family} onChange={(family) => onChange({ family })} /></div>
+              <div className="field"><div className="label">{t('Size')}</div><Stepper value={style.fontSize} min={4} max={200} onChange={(fontSize) => onChange({ fontSize })} label="size" unit="pt" /></div>
+              <div className="field"><div className="label">{t('Colour')}</div><Swatches value={style.color} onPick={(color) => onChange({ color: color ?? '#000000' })} /></div>
             </>
           )}
         </>
       )}
       {(tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'arrow' || tool === 'draw') && (
         <>
-          <div className="field"><div className="label">Colour</div><Swatches value={style.stroke} onPick={(stroke) => onChange({ stroke: stroke ?? '#000000' })} /></div>
-          {(tool === 'rect' || tool === 'ellipse') && <div className="field"><div className="label">Fill</div><Swatches value={style.fill} allowNone onPick={(fill) => onChange({ fill })} /></div>}
-          <div className="field"><div className="label">Width</div><Stepper value={style.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => onChange({ strokeWidth })} label="width" unit="pt" /></div>
+          <div className="field"><div className="label">{t('Colour')}</div><Swatches value={style.stroke} onPick={(stroke) => onChange({ stroke: stroke ?? '#000000' })} /></div>
+          {(tool === 'rect' || tool === 'ellipse') && <div className="field"><div className="label">{t('Fill colour')}</div><Swatches value={style.fill} allowNone onPick={(fill) => onChange({ fill })} /></div>}
+          <div className="field"><div className="label">{t('Width')}</div><Stepper value={style.strokeWidth} min={0.5} max={30} step={0.5} onChange={(strokeWidth) => onChange({ strokeWidth })} label="width" unit="pt" /></div>
         </>
       )}
       {tool === 'remove' && (
-        <div className="field"><div className="label">Brush</div>
+        <div className="field"><div className="label">{t('Brush')}</div>
           <Seg value={String(style.removeSize)} onChange={(v) => onChange({ removeSize: +v })} options={[['4', 'Small'], ['9', 'Medium'], ['18', 'Large']]} /></div>
       )}
-      {tool === 'highlight' && <div className="field"><div className="label">Colour</div><Swatches value={style.highlight} list={HIGHLIGHTS} custom={false} onPick={(highlight) => onChange({ highlight: highlight ?? HIGHLIGHTS[0] })} /></div>}
-      {(tool === 'underline' || tool === 'strike') && <div className="field"><div className="label">Colour</div><Swatches value={style.ink} list={MARK_INKS} onPick={(ink) => onChange({ ink: ink ?? MARK_INKS[0] })} /></div>}
+      {tool === 'highlight' && <div className="field"><div className="label">{t('Colour')}</div><Swatches value={style.highlight} list={HIGHLIGHTS} custom={false} onPick={(highlight) => onChange({ highlight: highlight ?? HIGHLIGHTS[0] })} /></div>}
+      {(tool === 'underline' || tool === 'strike') && <div className="field"><div className="label">{t('Colour')}</div><Swatches value={style.ink} list={MARK_INKS} onPick={(ink) => onChange({ ink: ink ?? MARK_INKS[0] })} /></div>}
     </div>
   );
 }
@@ -463,17 +465,17 @@ export interface ChangeItem { id: string; icon: string; label: string; page: num
 export function IdleProps({ changes, onPick }: { changes: ChangeItem[]; onPick: (id: string) => void }) {
   return (
     <div className="props">
-      <div className="head"><div className="t"><div className="kicker">Edit tool</div><h3 style={{ whiteSpace: 'normal' }}>Click any line to retype it</h3>
-        <div className="hint" style={{ fontSize: 13.5, marginTop: 2 }}>The new text keeps the original font, size, colour and position.</div></div></div>
+      <div className="head"><div className="t"><div className="kicker">{t('Edit tool')}</div><h3 style={{ whiteSpace: 'normal' }}>{t('Click any line to retype it')}</h3>
+        <div className="hint" style={{ fontSize: 13.5, marginTop: 2 }}>{t('The new text keeps the original font, size, colour and position.')}</div></div></div>
       <div className="field">
-        <div className="label">Changes</div>
+        <div className="label">{t('Changes')}</div>
         {changes.length ? (
           <div className="changes">
             {changes.map((c) => (
               <button key={c.id} onClick={() => onPick(c.id)}><Icon name={c.icon} size={18} /><span className="l">{c.label}</span><span className="p">p. {c.page}</span></button>
             ))}
           </div>
-        ) : <div className="empty-changes">No changes yet.</div>}
+        ) : <div className="empty-changes">{t('No changes yet.')}</div>}
       </div>
     </div>
   );

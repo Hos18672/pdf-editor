@@ -1,4 +1,5 @@
 // Files shared into the app (Android share sheet) as one PDF: PDFs are put together, pictures,
+import { t } from './i18n';
 // office files and text become pages. Everything happens on the device.
 import { PDFDocument } from 'pdf-lib';
 import { convertFile, kindOf } from './convert';
@@ -18,7 +19,7 @@ export async function sharedToPdf(files: Shared[], text: string | null, subject:
     if (it.mime === 'application/pdf' || /\.pdf$/i.test(it.name)) src = await loadDoc(it.data as Uint8Array);
     else {
       const kind = kindOf(it.name, it.mime);
-      if (!kind) throw new Error(`${it.name} can’t be turned into a PDF here`);
+      if (!kind) throw new Error(t('{name} can’t be turned into a PDF here', { name: it.name }));
       const file = new File([it.data as BlobPart], it.name, { type: it.mime });
       const r = await convertFile(file, { size: kind === 'image' ? 'fit' : 'a4', orient: 'auto', margin: kind === 'image' ? 'none' : 'normal' }, step);
       src = await PDFDocument.load(r.bytes);

@@ -2,6 +2,7 @@
 import React from 'react';
 import { Icon } from './icons';
 import { useBack } from './back';
+import { t, tn } from './i18n';
 
 const mac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
 const C = mac ? '⌘' : 'Ctrl';
@@ -41,19 +42,19 @@ export function ShortcutsSheet({ onClose }: { onClose: () => void }) {
   return (
     <>
       <div className="sheet-scrim keys-scrim" onClick={onClose} />
-      <div className="bsheet center keys" role="dialog" aria-label="Keyboard shortcuts">
+      <div className="bsheet center keys" role="dialog" aria-label={t('Keyboard shortcuts')}>
         <div className="keys-h">
-          <h3><Icon name="keyboard" size={20} />Keyboard and mouse</h3>
-          <button className="ibtn muted" onClick={onClose} aria-label="Close"><Icon name="close" size={18} /></button>
+          <h3><Icon name="keyboard" size={20} />{t('Keyboard and mouse')}</h3>
+          <button className="ibtn muted" onClick={onClose} aria-label={t('Close')}><Icon name="close" size={18} /></button>
         </div>
         <div className="keys-grid">
           {GROUPS.map((g) => (
             <section key={g.name}>
-              <h4>{g.name}</h4>
+              <h4>{t(g.name)}</h4>
               {g.rows.map(([keys, what], i) => (
                 <div className="keys-row" key={i}>
-                  <span className="keys-k">{keys.map((k, j) => <React.Fragment key={j}>{j > 0 && <i>+</i>}<kbd>{k}</kbd></React.Fragment>)}</span>
-                  <span>{what}</span>
+                  <span className="keys-k">{keys.map((k, j) => <React.Fragment key={j}>{j > 0 && <i>+</i>}<kbd>{k.length > 1 ? t(k) : k}</kbd></React.Fragment>)}</span>
+                  <span>{t(what)}</span>
                 </div>
               ))}
             </section>

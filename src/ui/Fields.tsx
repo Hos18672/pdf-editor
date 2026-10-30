@@ -1,6 +1,7 @@
 import React from 'react';
 import type { M } from '../engine/types';
 import { Icon } from './icons';
+import { t, tn } from './i18n';
 
 export interface FormField {
   id: string; name: string; page: number; type: 'text' | 'check' | 'radio' | 'choice' | 'sig';
@@ -104,7 +105,7 @@ export function FormLayer({ fields, values, zoom, interactive, active, onValue, 
         if (passive) return null;
         return (
           <button key={f.id} type="button" {...common} className="ffsig" style={st} onPointerDown={(e) => e.stopPropagation()} onClick={() => onSign(f)}>
-            <Icon name="signature" size={Math.min(16 * zoom, f.h * zoom * 0.6)} /><span>Tap to sign</span>
+            <Icon name="signature" size={Math.min(16 * zoom, f.h * zoom * 0.6)} /><span>{t('Tap to sign')}</span>
           </button>
         );
       })}

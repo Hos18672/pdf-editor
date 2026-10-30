@@ -1,3 +1,4 @@
+import { t as tr, locale } from './i18n';
 // Recent documents (opened, edited, scanned), kept on this device only: IndexedDB holds a small
 // preview of the first page and the PDF itself, so a document can be opened again from the start
 // screen. Nothing leaves the device.
@@ -124,9 +125,9 @@ export const onRecentChange = (fn: () => void) => { window.addEventListener(EVEN
 
 export function ago(t: number) {
   const s = (Date.now() - t) / 1000;
-  if (s < 60) return 'Just now';
-  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
-  if (s < 86400 * 2) return 'Yesterday';
-  return new Date(t).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+  if (s < 60) return tr('Just now');
+  if (s < 3600) return tr('{n} min ago', { n: Math.floor(s / 60) });
+  if (s < 86400) return tr('{n} h ago', { n: Math.floor(s / 3600) });
+  if (s < 86400 * 2) return tr('Yesterday');
+  return new Date(t).toLocaleDateString(locale(), { day: 'numeric', month: 'short' });
 }

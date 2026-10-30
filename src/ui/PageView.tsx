@@ -15,6 +15,7 @@ import { FormLayer, FormField } from './Fields';
 import { matchScanStyle, scanStyles } from './scanStyle';
 import { coverPixels } from './rules';
 import { fillField, readField, fieldSelection, setFieldSelection, setLineEditor, lineEditor, lineEditorChanged, fieldEditor, lookCss, type FieldContent, type LookMode } from './lineEdit';
+import { t, tn } from './i18n';
 
 export type FillMark = 'check' | 'cross' | 'dot' | 'text' | 'date';
 
@@ -528,13 +529,13 @@ export function PageView(p: Props) {
           {p.reading?.band && <div className="ocr-band" style={{ top: p.reading.band.y0 * zoom, height: (p.reading.band.y1 - p.reading.band.y0) * zoom }} />}
           {p.reading?.at && (
             <div className="ocr-tap" style={{ left: p.reading.at.x * zoom, top: p.reading.at.y * zoom }} role="status">
-              <span className="spinner" />Reading text…
+              <span className="spinner" />{t('Reading text…')}
             </div>
           )}
         </div>
       </div>
       {p.reading?.page && !p.reading.at && (
-        <div className="ocr-page" role="status"><span className="spinner" />Reading this page</div>
+        <div className="ocr-page" role="status"><span className="spinner" />{t('Reading this page')}</div>
       )}
       <div className="pageNum">{p.index + 1}</div>
     </div>
@@ -823,7 +824,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
   // dragging the line while it is being moved
   const dragFrom = useRef<{ x: number; y: number; dx: number; dy: number; id: number } | null>(null);
   const moveBox = moving ? (
-    <div className="movebox" title="Drag to move the line"
+    <div className="movebox" title={t('Drag to move the line')}
       style={{ left: ldx * zoom - 6, top: ldy * zoom - 6, width: (grown?.w ?? b.w) * zoom + 12, height: style.height as number + 12 }}
       onPointerDown={(e) => {
         e.stopPropagation(); e.preventDefault();
@@ -864,7 +865,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
     return (
       <div className={`run changed cloned${selected ? ' selected' : ''}${moving ? ' moving' : ''}`} data-key={run.key}
         style={{ ...style, width: Math.max(b.w, c.w - c.left) * z, pointerEvents: moved ? 'none' : undefined }}
-        title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
+        title={t('Click to edit text')} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
         <Cover page={page} b={b} bg={bg} fg={color?.fg ?? '#000'} zoom={z} x={l} y={oy + cdy2 - up} w={r - l} h={up + down} />
         <img className="clone" src={clone.url} alt="" draggable={false}
           style={{ left: (ldx - c.left) * z, top: (ldy + oy + c.below - c.h) * z, width: c.w * z, height: c.h * z, pointerEvents: 'auto' }} />
@@ -876,7 +877,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
     return (
       <div className={`run${selected ? ' selected' : ''}${edit ? ' changed' : ''}${moving ? ' moving' : ''}`} data-key={run.key}
         style={{ ...style, left: (b.x + dx) * zoom, top: (b.top + dy) * zoom }}
-        title="Click to edit text" onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
+        title={t('Click to edit text')} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); begin(e); }}>
         {moving && moveBox && React.cloneElement(moveBox, { style: { ...moveBox.props.style, left: -6, top: -6 } })}
       </div>
     );
@@ -913,7 +914,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
           dir="auto"
           role="textbox"
           aria-multiline="true"
-          aria-label="Line text"
+          aria-label={t('Line text')}
           spellCheck={false}
           autoCapitalize="off"
           {...{ autoCorrect: 'off' } as any}
@@ -1351,7 +1352,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
           </div>
           {editing && (
             // own key: its letters are put in by hand, React must never fill it
-            <div key="tfield" ref={fieldRef} className="tfield" dir="auto" role="textbox" aria-multiline="true" aria-label="Text" data-ph="Type here"
+            <div key="tfield" ref={fieldRef} className="tfield" dir="auto" role="textbox" aria-multiline="true" aria-label={t('Text')} data-ph={t('Type here')}
               spellCheck={false} suppressContentEditableWarning style={{ ...ts, touchAction: 'none' }}
               onInput={(e) => pushField(readField(e.currentTarget), true)}
               onPaste={(e) => { e.preventDefault(); tInsert(e.clipboardData.getData('text/plain')); }}
@@ -1385,7 +1386,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
         : <div style={{ position: 'absolute', inset: 0, background: o.fill, opacity: o.opacity ?? 0.4, mixBlendMode: 'multiply' }} />;
       break;
     case 'link':
-      inner = <div className="linkbox" title={o.url || (o.target !== undefined ? 'Link to a page' : 'Link')}><Icon name="link" size={Math.max(10, Math.min(16, o.h * zoom * 0.6))} /></div>;
+      inner = <div className="linkbox" title={o.url || (o.target !== undefined ? t('Link to a page') : t('Link'))}><Icon name="link" size={Math.max(10, Math.min(16, o.h * zoom * 0.6))} /></div>;
       break;
     case 'rect':
     case 'ellipse':
@@ -1437,30 +1438,30 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
   };
   const sized = o.type === 'text' || o.type === 'mark';
   const toolbar = selected && !sheetOpen && typeof document !== 'undefined' ? createPortal(
-    <div ref={barRef} className={`objbar${bar?.below ? ' below' : ''}${dragging ? ' moving' : ''}`} role="toolbar" aria-label="Object actions"
+    <div ref={barRef} className={`objbar${bar?.below ? ' below' : ''}${dragging ? ' moving' : ''}`} role="toolbar" aria-label={t('Object actions')}
       style={{ left: bar?.left ?? -9999, top: bar?.top ?? -9999, visibility: !bar || bar.hidden ? 'hidden' : 'visible', ['--ax' as any]: `${bar?.ax ?? 0}px` }}
       onPointerDown={stop} onMouseDown={keepFocus} onClick={stop} onDoubleClick={stop}>
-      <button type="button" className="grip" aria-label="Move" title="Drag to move"
+      <button type="button" className="grip" aria-label={t('Move')} title={t('Drag to move')}
         onPointerDown={start('grip')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
         <Icon name="move" size={18} />
       </button>
       <span className="sep" />
       {sized && (
         <>
-          <button type="button" aria-label="Smaller" title="Smaller" onClick={() => step(-1)}><Icon name="minus" size={16} /></button>
-          <span className="fsize" aria-label="Size">{Math.round(o.type === 'text' ? o.size : o.w)}</span>
-          <button type="button" aria-label="Larger" title="Larger" onClick={() => step(1)}><Icon name="plus" size={16} /></button>
+          <button type="button" aria-label={t('Smaller')} title={t('Smaller')} onClick={() => step(-1)}><Icon name="minus" size={16} /></button>
+          <span className="fsize" aria-label={t('Size')}>{Math.round(o.type === 'text' ? o.size : o.w)}</span>
+          <button type="button" aria-label={t('Larger')} title={t('Larger')} onClick={() => step(1)}><Icon name="plus" size={16} /></button>
           <span className="sep" />
         </>
       )}
       {o.type === 'text' && !editing && (
-        <button type="button" aria-label="Edit text" title="Edit text" onClick={() => onEditing(true)}><Icon name="pencil" size={18} /></button>
+        <button type="button" aria-label={t('Edit text')} title={t('Edit text')} onClick={() => onEditing(true)}><Icon name="pencil" size={18} /></button>
       )}
-      <button type="button" aria-label="Turn 90°" title="Turn 90°" onClick={quarter}><Icon name="arrow-clockwise" size={18} /></button>
-      <button type="button" aria-label="Duplicate" title="Duplicate (Ctrl+D)" onClick={onDuplicate}><Icon name="copy" size={18} /></button>
-      <button type="button" className="danger" aria-label="Delete" title="Delete" onClick={onDelete}><Icon name="trash" size={18} /></button>
+      <button type="button" aria-label={t('Turn 90°')} title={t('Turn 90°')} onClick={quarter}><Icon name="arrow-clockwise" size={18} /></button>
+      <button type="button" aria-label={t('Duplicate')} title={t('Duplicate (Ctrl+D)')} onClick={onDuplicate}><Icon name="copy" size={18} /></button>
+      <button type="button" className="danger" aria-label={t('Delete')} title={t('Delete')} onClick={onDelete}><Icon name="trash" size={18} /></button>
       {mobile && !editing && o.type !== 'whiteout' && o.type !== 'redact' && (
-        <><span className="sep" /><button type="button" aria-label="More options" title="More options" onClick={onMore}><Icon name="more" size={18} /></button></>
+        <><span className="sep" /><button type="button" aria-label={t('More options')} title={t('More options')} onClick={onMore}><Icon name="more" size={18} /></button></>
       )}
     </div>, document.body) : null;
   // thin or small things (a line, an underline, a dot): a bigger area around them takes the tap
@@ -1474,11 +1475,11 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       {selected && resizable && !editing && (
         <>
           <i className="dotc" style={{ left: -5, top: -5 }} /><i className="dotc" style={{ right: -5, top: -5 }} /><i className="dotc" style={{ left: -5, bottom: -5 }} />
-          <div className="handle" aria-label="Resize" onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><Icon name="resize" size={10} /></div>
+          <div className="handle" aria-label={t('Resize')} onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><Icon name="resize" size={10} /></div>
         </>
       )}
       {selected && !isLine && !editing && o.type !== 'link' && !(o.type === 'highlight' && o.style) && (
-        <div className="rothandle" role="slider" aria-label="Turn" aria-valuenow={Math.round(o.rot ?? 0)} title="Drag to turn"
+        <div className="rothandle" role="slider" aria-label={t('Turn')} aria-valuenow={Math.round(o.rot ?? 0)} title={t('Drag to turn')}
           onPointerDown={start('rotate')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
           <Icon name="arrow-clockwise:bold" size={13} />
           {turning !== null && <span className="rotval">{Math.round(turning)}°</span>}

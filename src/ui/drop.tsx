@@ -2,6 +2,7 @@
 // while files are above it, and the dashed drop box with its "Choose" button (start of the tools).
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
+import { t, tn } from './i18n';
 
 export const isPdf = (f: File) => f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
 export const isImage = (f: File) => f.type.startsWith('image/') || /\.(jpe?g|png|gif|webp|bmp|tiff?|heic|heif|avif)$/i.test(f.name);
@@ -106,7 +107,7 @@ export function DropBox({ icon, title, sub, accept, multiple, onFiles, filter, o
     <div className={`dz${over ? ' over' : ''}${row ? '' : ' stack'}`} style={style} {...bind}>
       <div className="dzi"><Icon name={over ? 'file-arrow-up' : icon} size={26} /></div>
       <div className="dzt">
-        <b>{over ? 'Drop to add' : title}</b>
+        <b>{over ? t('Drop to add') : title}</b>
         {sub && <span className="label">{sub}</span>}
         {children}
       </div>
