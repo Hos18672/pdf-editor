@@ -41,10 +41,10 @@ export function Tools(p: Props) {
   const meta: Record<ToolId, [string, string]> = {
     hub: ['All tools', 'Every tool runs on this device'],
     combine: ['Combine PDFs', 'Merge files and images into one PDF'],
-    extract: ['Extract pages', 'Save chosen pages as a new PDF'],
-    remove: ['Remove pages', 'Delete pages you don’t need'],
+    extract: ['Extract or remove pages', 'Save chosen pages as a new PDF, or delete them'],
+    remove: ['Extract or remove pages', 'Delete pages you don’t need, or save them as a new PDF'],
     insert: ['Insert pages', 'Add blank pages, images or another PDF'],
-    convert: ['Convert to PDF', 'Images, Office files, text and web pages'],
+    convert: ['Convert to PDF', 'Images, Word, Excel, PowerPoint, text and web pages'],
     compress: ['Compress PDF', 'Smaller files for e-mail and upload portals'],
     password: ['Password', 'Protect a PDF, or remove its password'],
     numbers: ['Page numbers', 'Number the pages'],
@@ -56,44 +56,34 @@ export function Tools(p: Props) {
     safecopy: ['Safe ID copy', 'A copy that can only be used for one purpose'],
   };
   const conv = (k: string) => () => { setConvertKind(k); setTool('convert'); };
+  // one entry per screen: kinds of the same job (file types, scan modes, extract/remove) are chosen inside the tool
   const groups: { name: string; items: HubItem[] }[] = [
     { name: 'Edit & sign', items: [
-      { name: 'Edit PDF', desc: 'Retype text, add text, images and shapes', icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
-      { name: 'Fill a form', desc: 'Type in fields, tick boxes, pick options', icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
+      { name: 'Edit PDF', desc: 'Retype text, add text, images, shapes', icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
+      { name: 'Fill a form', desc: 'Type in fields, tick boxes', icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
       { name: 'Sign', desc: 'Draw, type or upload a signature', icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
-      { name: 'Privacy check', desc: 'Find personal data and black it out for real', icon: 'shield-check:duotone', tile: TILE.edit, go: () => p.onEdit('privacy') },
-      { name: 'Safe ID copy', desc: '“COPY – only for …” burned into ID scans', icon: 'identification-badge:duotone', tile: TILE.edit, go: () => setTool('safecopy') },
-      { name: 'Deadline finder', desc: 'Dates in a letter, into your calendar', icon: 'calendar-plus:duotone', tile: TILE.edit, go: () => setTool('deadlines') },
+      { name: 'Privacy check', desc: 'Find personal data, black it out', icon: 'shield-check:duotone', tile: TILE.edit, go: () => p.onEdit('privacy') },
+      { name: 'Safe ID copy', desc: '“COPY – only for …” on ID scans', icon: 'identification-badge:duotone', tile: TILE.edit, go: () => setTool('safecopy') },
+      { name: 'Deadline finder', desc: 'Dates in a letter, to your calendar', icon: 'calendar-plus:duotone', tile: TILE.edit, go: () => setTool('deadlines') },
     ] },
-    { name: 'Scan', items: [
-      { name: 'Scan a document', desc: 'Camera or photos: auto-crop, straighten and clean up', icon: 'scan:duotone', tile: '#DDF1E4', go: p.onScan },
-      { name: 'Scan an ID card', desc: 'Front and back on one page, actual size', icon: 'identification-card:duotone', tile: '#DDF1E4', go: () => { try { localStorage.setItem('pe.scan.mode', 'id'); } catch { /* private */ } p.onScan(); } },
-      { name: 'Scan a receipt or invoice', desc: 'Long receipts and bills, sharp and white', icon: 'receipt:duotone', tile: '#DDF1E4', go: () => { try { localStorage.setItem('pe.scan.mode', 'receipt'); } catch { /* private */ } p.onScan(); } },
+    { name: 'Pages', items: [
+      { name: 'Combine PDFs', desc: 'Merge files and images into one', icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },
+      { name: 'Split PDF', desc: 'By ranges, every few pages or per page', icon: 'scissors:duotone', tile: TILE.org, go: () => setTool('split') },
+      { name: 'Extract or remove pages', desc: 'Pick pages to keep or delete', icon: 'export:duotone', tile: TILE.org, go: () => setTool('extract') },
+      { name: 'Insert pages', desc: 'Blank pages, images or another PDF', icon: 'file-plus:duotone', tile: TILE.org, go: () => setTool('insert') },
+      { name: 'Reorder & rotate', desc: 'Drag pages into place, turn them', icon: 'squares-four:duotone', tile: TILE.org, go: () => p.onEdit('pages') },
+    ] },
+    { name: 'Convert', items: [
+      { name: 'Convert to PDF', desc: 'Images, Word, Excel, PowerPoint, text, web', icon: 'file-arrow-down:duotone', tile: TILE.conv, go: conv('') },
+      { name: 'Scan to PDF', desc: 'Documents, ID cards, receipts', icon: 'scan:duotone', tile: TILE.conv, go: p.onScan },
+      { name: 'PDF to pictures', desc: 'Every page as a JPG or PNG', icon: 'images:duotone', tile: TILE.conv, go: () => setTool('images') },
+      { name: 'Extract text', desc: 'All the text, also from scans', icon: 'article:duotone', tile: TILE.conv, go: () => setTool('text') },
     ] },
     { name: 'Optimize & protect', items: [
       { name: 'Compress PDF', desc: 'Smaller files, also under a size limit', icon: 'arrows-in-line-vertical:duotone', tile: '#FFE3D6', go: () => setTool('compress') },
       { name: 'Password', desc: 'Protect a PDF or remove its password', icon: 'lock-key:duotone', tile: '#FFE3D6', go: () => setTool('password') },
       { name: 'Page numbers', desc: '1, 2, 3 or “Seite 1 von 9”', icon: 'list-numbers:duotone', tile: '#FFE3D6', go: () => setTool('numbers') },
       { name: 'Watermark', desc: 'CONFIDENTIAL, COPY or your own text', icon: 'stamp:duotone', tile: '#FFE3D6', go: () => setTool('watermark') },
-    ] },
-    { name: 'Organize pages', items: [
-      { name: 'Combine PDFs', desc: 'Merge several files into one', icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },
-      { name: 'Extract pages', desc: 'Save chosen pages as a new PDF', icon: 'export:duotone', tile: TILE.org, go: () => setTool('extract') },
-      { name: 'Remove pages', desc: 'Delete pages you don’t need', icon: 'file-minus:duotone', tile: TILE.org, go: () => setTool('remove') },
-      { name: 'Insert pages', desc: 'Add blank pages, images or another PDF', icon: 'file-plus:duotone', tile: TILE.org, go: () => setTool('insert') },
-      { name: 'Reorder & rotate', desc: 'Drag pages into place, turn them', icon: 'squares-four:duotone', tile: TILE.org, go: () => p.onEdit('pages') },
-      { name: 'Split PDF', desc: 'Every few pages, by ranges or per page', icon: 'scissors:duotone', tile: TILE.org, go: () => setTool('split') },
-    ] },
-    { name: 'From PDF', items: [
-      { name: 'PDF to pictures', desc: 'Every page as a JPG or PNG', icon: 'images:duotone', tile: TILE.conv, go: () => setTool('images') },
-      { name: 'Extract text', desc: 'All the text, also from scans', icon: 'article:duotone', tile: TILE.conv, go: () => setTool('text') },
-    ] },
-    { name: 'Convert to PDF', items: [
-      { name: 'Images to PDF', desc: 'JPG, PNG, HEIC, WebP', icon: 'image:duotone', tile: TILE.conv, go: conv('image') },
-      { name: 'Word to PDF', desc: 'DOCX', icon: 'file-doc:duotone', tile: TILE.conv, go: conv('word') },
-      { name: 'Excel to PDF', desc: 'XLSX, XLS, CSV, ODS', icon: 'file-xls:duotone', tile: TILE.conv, go: conv('excel') },
-      { name: 'PowerPoint to PDF', desc: 'PPTX', icon: 'file-ppt:duotone', tile: TILE.conv, go: conv('ppt') },
-      { name: 'Text & web to PDF', desc: 'TXT, Markdown, HTML', icon: 'file-html:duotone', tile: TILE.conv, go: conv('text') },
     ] },
   ];
 
@@ -116,8 +106,8 @@ export function Tools(p: Props) {
                 <div className="kicker">{g.name}</div>
                 <div className="cards">
                   {g.items.map((t) => (
-                    <button key={t.name} className="hcard" onClick={t.go}>
-                      <span className="ti" style={{ background: t.tile }}><Icon name={t.icon} size={23} /></span>
+                    <button key={t.name} className="hcard" onClick={t.go} title={`${t.name}: ${t.desc}`}>
+                      <span className="ti" style={{ background: t.tile }}><Icon name={t.icon} size={21} /></span>
                       <span className="tt"><b>{t.name}</b><span>{t.desc}</span></span>
                       <Icon name="right" size={16} />
                     </button>

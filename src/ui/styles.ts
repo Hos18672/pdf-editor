@@ -1295,4 +1295,22 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
   .scr > .topbar .btn.dl { height: 42px; padding: 0 14px; }
   .scam-row { max-width: none; }
 }
+/* All tools: compact cards; one line of description; four columns on wide screens, two on phones */
+.hub { gap: 22px; }
+.hub .grp { gap: 10px; }
+.hub .cards { grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 10px; }
+.hcard { padding: 12px 14px; gap: 12px; border-radius: 16px; }
+.hcard .ti { width: 40px; height: 40px; border-radius: 12px; }
+.hcard .tt b { font-size: 14.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hcard .tt span { font-size: 12.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@media (max-width: 599px) {
+  .hub h1 { font-size: 26px; }
+  .hub { gap: 18px; }
+  .hub .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .hcard { gap: 10px; padding: 10px; min-height: 60px; border-radius: 14px; }
+  .hcard > svg:last-child { display: none; }
+  .hcard .ti { width: 36px; height: 36px; border-radius: 11px; }
+  .hcard .tt b { white-space: normal; font-size: 13.5px; line-height: 1.2; }
+  .hcard .tt span { display: none; }
+}
 `;
