@@ -9,7 +9,7 @@ import { useSource, PickPdf, Side, Bar, type Props, type Src } from './Tools';
 import { ACCEPT, DropBox, isImage, isPdf } from './drop';
 import { baseName, fmtSize, parseRange, formatRange } from './pdfops';
 import { openPdf } from './pdfjs';
-import { t, tn, locale } from './i18n';
+import { t, tn, locale, getLang } from './i18n';
 
 type TP = Props & { desk: boolean; mobile: boolean };
 type Out = { name: string; bytes: Uint8Array; mime: string };
@@ -317,7 +317,7 @@ const COLORS: [string, [number, number, number]][] = [['#6B7280', [0.42, 0.45, 0
 
 export function Watermark(p: TP) {
   const { src, load, err } = useSource(p.current);
-  const [text, setText] = useState('CONFIDENTIAL');
+  const [text, setText] = useState(getLang() === 'de' ? 'VERTRAULICH' : 'CONFIDENTIAL');
   const [size, setSize] = useState(56);
   const [opacity, setOpacity] = useState(0.22);
   const [angle, setAngle] = useState<'45' | '0'>('45');
@@ -328,13 +328,13 @@ export function Watermark(p: TP) {
   if (!src) return <PickPdf onFile={load} err={err} title={t('Choose a PDF to watermark')} />;
   const go = () => run(t('Adding the watermark'), tn(src.pages.length, '{n} page', '{n} pages'), async () => {
     const { addWatermark } = await import('./pdftools');
-    const bytes = await addWatermark(await pdfBytesOf(src), { text: text.trim() || 'CONFIDENTIAL', size, opacity, color: COLORS[color][1], angle: +angle, tile, pages });
+    const bytes = await addWatermark(await pdfBytesOf(src), { text: text.trim() || (getLang() === 'de' ? 'VERTRAULICH' : 'CONFIDENTIAL'), size, opacity, color: COLORS[color][1], angle: +angle, tile, pages });
     return { files: [{ name: `${baseName(src.name)}-watermarked.pdf`, bytes, mime: 'application/pdf' }], summary: <><b>{t('Watermark added')}</b><span>{pages === 'all' ? t('“{w}” on all {n} pages', { w: text.trim(), n: src.pages.length }) : t('“{w}” on the first page', { w: text.trim() })}</span></> };
   });
   const options = (
     <>
       <label className="xt-in"><span className="label">{t('Text')}</span><input value={text} onChange={(e) => setText(e.target.value)} maxLength={80} placeholder="CONFIDENTIAL" /></label>
-      <div className="chips">{['CONFIDENTIAL', 'COPY', 'DRAFT', 'KOPIE', 'ENTWURF', 'PAID'].map((t) => <button key={t} className={`chip${text === t ? ' on' : ''}`} onClick={() => setText(t)}>{t}</button>)}</div>
+      <div className="chips">{(getLang() === 'de' ? ['VERTRAULICH', 'KOPIE', 'ENTWURF', 'BEZAHLT', 'MUSTER', 'COPY'] : ['CONFIDENTIAL', 'COPY', 'DRAFT', 'KOPIE', 'ENTWURF', 'PAID']).map((t) => <button key={t} className={`chip${text === t ? ' on' : ''}`} onClick={() => setText(t)}>{t}</button>)}</div>
       <div className="field"><span className="label">{t('Direction')}</span><Seg value={angle} onChange={setAngle} options={[['45', 'Diagonal'], ['0', 'Straight']]} /></div>
       <Toggle label={t('Repeat across the page')} checked={tile} onChange={(v) => { setTile(v); if (v && size > 36) setSize(32); if (!v && size === 32) setSize(56); }} />
       <div className="xt-row"><span>{t('Size')}</span><div style={{ width: 132 }}><Stepper value={size} min={12} max={160} step={4} onChange={setSize} label="size" unit="pt" /></div></div>
