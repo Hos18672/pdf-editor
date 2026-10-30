@@ -1,6 +1,6 @@
 // Offline support: the app shell and its assets are cached on first visit.
 // Pages: network first (so updates arrive), assets: cache first. Nothing about your files is ever sent anywhere.
-const CACHE = 'pdf-editor-v1';
+const CACHE = 'pdf-editor-v2';
 const scope = self.registration.scope;
 
 self.addEventListener('install', (e) => {
@@ -12,8 +12,7 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const req = e.request;
   if (req.method !== 'GET') return;
-  const url = new URL(req.url);
-  if (!req.url.startsWith(scope) && url.origin !== 'https://cdn.jsdelivr.net') return;
+  if (!req.url.startsWith(scope)) return;
   if (req.mode === 'navigate') {
     e.respondWith(fetch(req).then((res) => {
       const copy = res.clone();

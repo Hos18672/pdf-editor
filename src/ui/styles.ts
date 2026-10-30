@@ -1323,4 +1323,14 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
   .app .topbar.float { right: calc(8px + var(--safe-r) + 68px); }
   .dlfloat { top: calc(8px + var(--safe-t)); right: calc(8px + var(--safe-r)); width: 60px; }
 }
+/* legal: footer links and the in-app page viewer */
+.legal-links { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 4px 8px; font-size: 13px; color: var(--muted); }
+.legal-links a { color: var(--muted); text-decoration: none; padding: 10px 4px; min-height: 44px; display: inline-flex; align-items: center; }
+.legal-links a:hover { color: var(--text); text-decoration: underline; }
+.s2-foot { position: relative; padding: 4px 16px calc(16px + var(--safe-b)); margin-top: auto; }
+.hub-legal { padding-top: 4px; }
+.legal-sheet { position: fixed; inset: 0; z-index: 95; background: var(--desk); display: flex; flex-direction: column; animation: pe-in .24s var(--ease) both; }
+.legal-sheet .ls-h { flex: none; display: flex; align-items: center; gap: 8px; height: calc(56px + var(--safe-t)); padding: var(--safe-t) 8px 0; background: var(--surface); border-bottom: 1px solid var(--line); }
+.legal-sheet .ls-h b { flex: 1; text-align: center; font-size: 16px; }
+.legal-sheet iframe { flex: 1; width: 100%; border: 0; background: var(--desk); }
 `;

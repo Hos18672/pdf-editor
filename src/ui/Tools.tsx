@@ -7,6 +7,7 @@ import { Seg, Stepper, Toggle } from './Panel';
 import { saveFile, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { parseRange, formatRange, loadDoc, pickPages, imageBytes, addImagePage, addOutline, save, baseName, fmtSize } from './pdfops';
 import { Convert } from './Convert';
+import { LegalLinks, LegalSheet, type LegalPage } from './Legal';
 import { ACCEPT, DropBox, DropOverlay, isImage, isPdf, useFileDrop } from './drop';
 import { Compress, Password, PageNumbers, Watermark, Split, ToImages, ExtractText, Deadlines, SafeCopy } from './MoreTools';
 import { SortableArea, useSortableItem } from './sortable';
@@ -34,6 +35,7 @@ type HubItem = { name: string; desc: string; icon: string; tile: string; go: () 
 export function Tools(p: Props) {
   const [tool, setTool] = useState<ToolId>(p.initial);
   const [convertKind, setConvertKind] = useState<string>('');
+  const [legal, setLegal] = useState<LegalPage | null>(null);
   const mobile = p.bp === 'mobile', desk = p.bp === 'desktop' || p.bp === 'large';
   // a tool opened straight from a start-screen chip goes back to where it came from, not to the list
   const back = () => (tool === 'hub' || tool === p.initial ? p.onBack() : setTool('hub'));
@@ -115,9 +117,11 @@ export function Tools(p: Props) {
                 </div>
               </section>
             ))}
+            <LegalLinks onOpen={setLegal} className="hub-legal" />
           </div>
         </div>
       )}
+      {legal && <LegalSheet page={legal} onClose={() => setLegal(null)} />}
       {tool === 'combine' && <Combine {...p} desk={desk} mobile={mobile} />}
       {(tool === 'extract' || tool === 'remove') && <PagePick {...p} desk={desk} mobile={mobile} mode={tool} onMode={setTool} />}
       {tool === 'insert' && <Insert {...p} desk={desk} mobile={mobile} />}

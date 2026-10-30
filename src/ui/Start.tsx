@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
+import { LegalLinks, LegalSheet, type LegalPage } from './Legal';
 import { isPdf, useFileDrop } from './drop';
 import { appBase } from './assets';
 import type { Theme } from './hooks';
@@ -52,6 +53,7 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
     return () => { alive = false; off(); };
   }, []);
   const [pw, setPw] = useState('');
+  const [legal, setLegal] = useState<LegalPage | null>(null);
   // a PDF opens; other files (pictures, Office files) are turned into one first
   const { over, bind: drop } = useFileDrop((f) => { const pdf = f.find(isPdf); if (pdf || !onImport) onFile(pdf ?? f[0]); else onImport(f); });
 
@@ -171,6 +173,8 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
           </div>
         </section>
       )}
+      <footer className="s2-foot"><LegalLinks onOpen={setLegal} /></footer>
+      {legal && <LegalSheet page={legal} onClose={() => setLegal(null)} />}
     </div>
   );
 }
