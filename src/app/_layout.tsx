@@ -4,7 +4,7 @@ import { StatusBar } from 'expo-status-bar';
 
 export default function RootLayout() {
   const dark = useColorScheme() === 'dark';
-  const bg = Platform.OS === 'web' ? 'transparent' : dark ? '#201E1D' : '#F3F2F2';
+  const bg = Platform.OS === 'web' ? 'transparent' : dark ? '#191C27' : '#FFFFFF';
   return (
     <>
       <StatusBar style={dark ? 'light' : 'dark'} />

@@ -106,7 +106,7 @@ function NativeShell({ dark }: { dark: boolean }) {
   const latest = useRef(insets);
   latest.current = insets;
   const [chrome, setChrome] = useState<Chrome | null>(null);
-  const desk = dark ? '#161514' : '#E6E4E3'; // page background until the page has painted
+  const desk = dark ? '#0F1118' : '#ECEEF3'; // page background until the page has painted
   const topDark = chrome ? chrome.topDark : dark, bottomDark = chrome ? chrome.bottomDark : dark;
   // The phone's back button goes to the page: it closes the open dialog or screen, and only when
   // nothing is left does the page ask to leave the app (exitApp).
