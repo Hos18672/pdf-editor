@@ -1,6 +1,7 @@
 :root { --bg: #ECEEF3; --card: #fff; --text: #151833; --muted: #5D637A; --line: #E1E4EB; --ink: #1E2559; --link: #3446C9; color-scheme: light; }
 @media (prefers-color-scheme: dark) { :root { --bg: #0F1118; --card: #191C27; --text: #ECEEF6; --muted: #9CA2BA; --line: #2D3245; --ink: #B4BDFF; --link: #8E9BFF; color-scheme: dark; } }
 * { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 "Schibsted Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-font-smoothing: antialiased; }
 @font-face { font-family: "Schibsted Grotesk"; src: url("../fonts/schibsted-grotesk-latin-400-normal.woff2") format("woff2"); font-weight: 400; font-display: swap; }
 @font-face { font-family: "Schibsted Grotesk"; src: url("../fonts/schibsted-grotesk-latin-700-normal.woff2") format("woff2"); font-weight: 700; font-display: swap; }
@@ -10,7 +11,7 @@ nav.top a { padding: 8px 14px; border-radius: 999px; background: var(--card); co
 nav.top a[aria-current="page"] { background: var(--ink); color: var(--card); box-shadow: none; }
 article { background: var(--card); border-radius: 20px; padding: 24px 22px; box-shadow: 0 1px 2px rgba(20,23,46,.06), 0 0 0 1px var(--line); }
 article + article { margin-top: 16px; }
-h1 { font-size: 28px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 6px; }
+h1 { font-size: 28px; line-height: 1.15; letter-spacing: -.02em; margin: 0 0 6px; overflow-wrap: anywhere; hyphens: auto; -webkit-hyphens: auto; }
 h2 { font-size: 18px; margin: 26px 0 6px; }
 h3 { font-size: 15.5px; margin: 18px 0 4px; }
 p, li { margin: 6px 0; }
