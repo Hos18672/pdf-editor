@@ -341,7 +341,7 @@ export default function EditorApp(host: HostProps) {
           onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }}
           onScan={() => setRoute({ name: 'scan', back: 'tools' })} />
       ) : (
-        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'} v3={bp === 'mobile' || bp === 'tablet'}
+        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
           onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme}
           onRecent={async (d) => {

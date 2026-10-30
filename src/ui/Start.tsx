@@ -37,13 +37,11 @@ const QUICK: [QuickAction, string, string, string][] = [
   ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
 ];
 
-export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative, v3 }: {
+export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative }: {
   state: OpenState; onFile: (f: File) => void;
   /** files that aren't PDFs (pictures, Office files, text): turned into one PDF and opened */
   onImport?: (files: File[]) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
   onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; onShareRecent?: (d: RecentDoc) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
-  /** phones and tablets: the v3 home (navy open card, recent row, tool tiles) */
-  v3?: boolean;
 }) {
   const [recent, setRecent] = useState<RecentDoc[]>([]);
   useEffect(() => {
@@ -118,72 +116,6 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
           <div className="s2-ct"><b>{mobile ? 'Open a PDF' : 'Drop a PDF anywhere'}</b><span>{mobile ? 'From Files, Drive or Downloads' : 'Or paste one with Ctrl+V'}</span></div>
         </div>
         <button className="btn primary xl s2-cta" onClick={(e) => { e.stopPropagation(); onPick(); }}>Choose PDF<Icon name="arrow-right:bold" size={18} /></button>
-      </div>
-    );
-  }
-
-  if (v3) {
-    const tiles = (mobile ? QUICK.filter(([q]) => q === 'sign' || q === 'fill' || q === 'combine' || q === 'tools') : QUICK);
-    return (
-      <div className={`start h3${mobile ? ' p' : ' t'}${over ? ' dragging' : ''}`} {...drop}>
-        <header className="h3-nav">
-          <LogoMark size={40} />
-          <span className="h3-brand">Paginka</span>
-          <span className="sp" />
-          <button className="h3-round" onClick={onTools} aria-label="All tools" title="All tools"><Icon name="tools" size={19} /></button>
-          <ThemeButton theme={theme} onToggle={onTheme} round />
-        </header>
-        <div className="h3-top">
-          <div className="h3-copy">
-            <h1>Edit any PDF.<br /><span className="mk">Right here.</span></h1>
-            {!mobile && <p className="h3-lead">Retype text in its original font, sign, fill forms, merge and convert. Works offline.</p>}
-            {!mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>Files stay on this device.</b> Nothing is uploaded, ever.</span></div>}
-          </div>
-          {idle && !over ? (
-            <div className="h3-card" onClick={onPick}>
-              <div className="h3-sheets" aria-hidden="true"><i className="b" /><i className="f"><em className="t" /><em /><em className="w" /><em className="y" /><em className="s" /></i></div>
-              <div className="h3-ct"><b>Open a PDF</b><span>{isNative ? 'From your files, Drive, or share one to this app' : 'From your files, or drop one anywhere'}</span></div>
-              <div className="h3-acts">
-                <button className="h3-choose" onClick={(e) => { e.stopPropagation(); onPick(); }}>Choose file<Icon name="arrow-right:bold" size={18} /></button>
-                <button className="h3-cam" onClick={(e) => { e.stopPropagation(); onQuick('scan'); }} aria-label="Scan with camera" title="Scan with camera"><Icon name="camera" size={22} /></button>
-              </div>
-            </div>
-          ) : card}
-        </div>
-        {idle && !over && recent.length > 0 && (
-          <section className="h3-sec" aria-label="Recent documents">
-            <div className="h3-sh"><h2>Recent</h2><span>Kept on this device only</span></div>
-            <div className="h3-rec">
-              {recent.map((d) => (
-                <div key={d.id} className={`h3-rc${d.hasBytes ? '' : ' off'}`}>
-                  <button className="ro" onClick={() => d.hasBytes && onRecent(d)} disabled={!d.hasBytes} aria-label={`Open ${d.name}`}>
-                    <span className="th">{d.thumb ? <img src={d.thumb} alt="" draggable={false} /> : <Icon name="file-pdf:duotone" size={30} />}
-                      {d.kind !== 'opened' && <i className="bd">{d.kind === 'edited' ? 'Edited' : 'Scanned'}</i>}</span>
-                    <b title={d.name}>{d.name.replace(/\.pdf$/i, '')}</b>
-                    <small>{d.pages} {d.pages === 1 ? 'page' : 'pages'} · {ago(d.at)}</small>
-                  </button>
-                  <span className="ra">
-                    {d.hasBytes && onShareRecent && <button onClick={() => onShareRecent(d)} aria-label={`Share ${d.name}`} title="Share"><Icon name="share-network" size={15} /></button>}
-                    <button onClick={() => removeRecent(d.id)} aria-label={`Remove ${d.name} from the list`} title="Remove from the list"><Icon name="x" size={14} /></button>
-                  </span>
-                </div>
-              ))}
-            </div>
-          </section>
-        )}
-        {idle && !over && (
-          <section className="h3-sec" aria-label="Tools">
-            <div className="h3-sh"><h2>Tools</h2></div>
-            <div className="h3-tools">
-              {tiles.map(([q, label, icon, bg]) => (
-                <button key={q} className="h3-tile" onClick={() => onQuick(q)}>
-                  <span style={{ background: bg }}><Icon name={icon} size={22} /></span>{q === 'tools' ? 'All tools' : q === 'fill' ? 'Fill form' : q === 'convert' ? 'Convert' : label}
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
-        {mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>Files stay on this phone.</b> Nothing is uploaded, ever.</span></div>}
       </div>
     );
   }
