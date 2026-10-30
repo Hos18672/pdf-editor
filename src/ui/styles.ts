@@ -588,16 +588,16 @@ button { cursor: pointer; }
 /* ---------- mobile ---------- */
 .dock3 { position: absolute; left: calc(10px + var(--safe-l)); right: calc(10px + var(--safe-r)); bottom: calc(10px + var(--safe-b)); height: 72px; z-index: 12; border-radius: 24px; background: var(--surface); box-shadow: 0 12px 36px rgba(20,23,46,.16), 0 0 0 1px rgba(20,23,46,.05); display: flex; align-items: stretch; padding: 0 4px; animation: pe-in .3s var(--ease) both; }
 :root[data-theme="dark"] .dock3 { box-shadow: 0 14px 40px rgba(0,0,0,.55), 0 0 0 1px var(--line); }
-.dock3 .dk-scroll { flex: 1; min-width: 0; display: flex; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 26px), transparent); mask-image: linear-gradient(90deg, transparent 0, #000 10px, #000 calc(100% - 26px), transparent); }
+.dock3 .dk-scroll { flex: 1; min-width: 0; display: flex; overflow-x: auto; scrollbar-width: none; scroll-snap-type: x proximity; padding: 0 4px; scroll-padding: 0 4px; -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent); mask-image: linear-gradient(90deg, #000 calc(100% - 26px), transparent); }
 .dock3 .dk-scroll::-webkit-scrollbar { display: none; }
 .dk3 { flex: none; width: 64px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; border: 0; background: none; padding: 0; color: var(--muted); font: inherit; font-size: 11.5px; font-weight: 600; letter-spacing: -.005em; scroll-snap-align: start; cursor: pointer; -webkit-tap-highlight-color: transparent; }
 /* each tool is a soft tile; the selected one becomes a marker-yellow chip holding icon and label */
 .dk3 { height: 60px; margin: auto 1px; border-radius: 18px; position: relative; transition: background .25s var(--ease), color .25s var(--ease), box-shadow .25s var(--ease), transform .15s var(--ease); }
 .dk3 .ic { width: 32px; height: 28px; border-radius: 10px; display: flex; align-items: center; justify-content: center; color: var(--muted-2); transition: color .25s var(--ease), transform .25s var(--ease); }
 .dk3:hover:not(.on) { background: var(--surface-2); }
-.dk3.on { background: var(--marker); color: var(--on-marker); font-weight: 700; box-shadow: 0 6px 16px rgba(224,180,0,.38), inset 0 0 0 1px rgba(30,37,89,.06); }
+.dk3.on { background: var(--marker); color: var(--on-marker); font-weight: 700; box-shadow: 0 2px 6px rgba(224,180,0,.45), inset 0 0 0 1px rgba(30,37,89,.06); }
 .dk3.on .ic { color: var(--on-marker); transform: translateY(-1px) scale(1.08); }
-:root[data-theme="dark"] .dk3.on { box-shadow: 0 6px 18px rgba(0,0,0,.45); }
+:root[data-theme="dark"] .dk3.on { box-shadow: 0 2px 6px rgba(0,0,0,.45); }
 :root[data-theme="dark"] .dk3:hover:not(.on) { background: var(--surface-2); }
 .dk3:active { transform: scale(.94); }
 .dk3.more { width: 60px; }

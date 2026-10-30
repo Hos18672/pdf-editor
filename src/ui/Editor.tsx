@@ -1583,7 +1583,6 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         {!mobile && <button className={`ibtn${strip ? ' on' : ''}`} onClick={() => setStrip((v) => !v)} aria-pressed={strip} aria-label="Pages panel" title="Pages panel"><Icon name="sidebar-simple" size={20} weight={strip ? 'fill' : 'regular'} /></button>}
         {!mobile && <button className="ibtn" onClick={onTools} aria-label="All tools" title="All tools: combine, extract, convert"><Icon name="dots-nine" size={20} /></button>}
         {!mobile && <ThemeButton theme={theme} onToggle={onTheme} />}
-        <button className="ibtn" onClick={() => download('share')} aria-label="Share PDF" title="Share"><Icon name="share-network" size={20} /></button>
         {mobile
           ? <button className="ibtn primary" onClick={() => download()} aria-label={host.isNative ? 'Save PDF' : 'Download PDF'}><Icon name="download" size={20} /></button>
           : <button className="btn primary dl" onClick={() => download()}><Icon name="download" size={18} />Download</button>}
