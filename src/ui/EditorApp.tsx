@@ -39,6 +39,9 @@ const fontFaces = () => {
     `@font-face{font-family:"${family}";src:url("${u}${file}") format("woff2");font-weight:${weight};font-style:normal;font-display:swap}`;
   return [
     ...[400, 500, 600, 700, 800].map((w) => face('Schibsted Grotesk', `schibsted-grotesk-latin-${w}-normal.woff2`, w)),
+    // Broadsheet: the interface is set in the serif (500 and 800 fall back to the nearest cut)
+    ...[400, 600, 700].map((w) => face('Source Serif 4', `source-serif-4-latin-${w}-normal.woff2`, w)),
+    `@font-face{font-family:"Source Serif 4";src:url("${u}source-serif-4-latin-400-italic.woff2") format("woff2");font-weight:400;font-style:italic;font-display:swap}`,
     // lettering for edits on scans / picture pages (matched to the scan)
     ...['carlito', 'arimo', 'tinos', 'roboto'].flatMap((f) => [400, 700].map((w) => face(`PE ${f[0].toUpperCase()}${f.slice(1)}`, `${f}-latin-${w}-normal.woff2`, w))),
     face('Caveat', 'caveat-latin-600-normal.woff2', 400),

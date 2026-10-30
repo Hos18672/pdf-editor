@@ -29,12 +29,12 @@ export function LogoMark({ size = 40 }: { size?: number }) {
 }
 
 const QUICK: [QuickAction, string, string, string][] = [
-  ['scan', 'Scan', 'scan:duotone', '#DDF1E4'],
-  ['sign', 'Sign', 'signature:duotone', '#FFE14D'],
-  ['fill', 'Fill a form', 'textbox:duotone', '#DDE2FF'],
-  ['combine', 'Combine', 'stack:duotone', '#E3F1E9'],
-  ['convert', 'Convert to PDF', 'file-arrow-down:duotone', '#FCE3D8'],
-  ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
+  ['scan', 'Scan', 'scan:duotone', 'var(--tint-doc)'],
+  ['sign', 'Sign', 'signature:duotone', 'var(--tint-add)'],
+  ['fill', 'Fill a form', 'textbox:duotone', 'var(--tint-change)'],
+  ['combine', 'Combine', 'stack:duotone', 'var(--tint-doc)'],
+  ['convert', 'Convert to PDF', 'file-arrow-down:duotone', 'var(--tint-add)'],
+  ['tools', 'More tools', 'squares-four:duotone', 'var(--chip)'],
 ];
 
 export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative }: {

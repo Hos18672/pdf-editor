@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Schibsted+Grotesk:wght@400;500;600;700;800&family=Caveat:wght@600&display=swap">
+<script src="https://unpkg.com/@phosphor-icons/web@2.1.1"></script>
+<style>
+@keyframes m3-float{0%,100%{transform:translateY(0) rotate(var(--r,0deg))}50%{transform:translateY(-8px) rotate(var(--r,0deg))}}
+@keyframes m3-mark{0%,15%{background-size:0% 40%}50%,100%{background-size:100% 40%}}
+@keyframes m3-shim{to{background-position:-200% 0}}
+@keyframes m3-scan{from{top:-10%}to{top:96%}}
+@keyframes m3-spin{to{transform:rotate(360deg)}}
+@keyframes m3-up{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes m3-sheet{from{transform:translateY(60px);opacity:.4}to{transform:none;opacity:1}}
+@keyframes m3-blink{50%{opacity:0}}
+</style>
+</helmet>
+<div style="position:relative;width:100%;height:100%;overflow:hidden;background:#ECEEF3;color:#151833;font-family:'Schibsted Grotesk',system-ui,sans-serif;font-size:14px;">
+  <div style="position:absolute;inset:0;background-image:radial-gradient(#C9CEDB 1px,transparent 1px);background-size:22px 22px;opacity:.5;pointer-events:none;"></div>
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;display:flex;flex-direction:column;gap:{{ hGap }};padding:{{ hPad }};box-sizing:border-box;overflow:hidden;">
+      <div style="display:flex;align-items:center;gap:12px;animation:m3-up .5s both;">
+        <div style="width:40px;height:40px;border-radius:13px;background:#1E2559;position:relative;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 16px rgba(30,37,89,.3);"><div style="width:16px;height:20px;background:#fff;border-radius:2px 6px 2px 2px;"></div><div style="position:absolute;right:7px;bottom:7px;width:10px;height:10px;border-radius:50%;background:#FFE14D;border:2px solid #1E2559;"></div></div>
+        <div style="font-weight:800;font-size:18px;letter-spacing:-.02em;">PDF Editor</div>
+        <div style="flex:1;"></div>
+        <div style="width:44px;height:44px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.08);display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph ph-moon"></i></div>
+      </div>
+      <div style="display:grid;grid-template-columns:{{ hCols }};gap:{{ hColGap }};align-items:center;">
+        <div style="display:flex;flex-direction:column;gap:18px;animation:m3-up .6s .05s both;">
+          <div style="font-size:{{ hH1 }};font-weight:800;letter-spacing:-.045em;line-height:.98;">Edit any PDF.<br><span style="background-image:linear-gradient(#FFE14D,#FFE14D);background-repeat:no-repeat;background-position:0 88%;background-size:100% 40%;animation:m3-mark 1.4s .3s cubic-bezier(.6,0,.2,1) both;padding:0 .06em;margin:0 -.06em;">Right here.</span></div>
+          <sc-if value="{{ isT }}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:17px;line-height:1.5;color:#4A5068;text-wrap:pretty;">Retype text in its original font, sign, fill forms, merge and convert. Works offline.</div>
+            <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.75);font-size:13.5px;color:#3F4560;line-height:1.35;"><span style="width:34px;height:34px;flex:none;border-radius:12px;background:#E3F1E9;color:#1E7A4C;display:flex;align-items:center;justify-content:center;font-size:17px;"><i class="ph-fill ph-lock-simple"></i></span><span><b style="color:#151833;">Files stay on this device.</b> Nothing is uploaded, ever.</span></div>
+          </sc-if>
+        </div>
+        <div style="position:relative;min-height:{{ cardH }};border-radius:30px;background:#1E2559;color:#fff;padding:{{ cardPad }};display:flex;flex-direction:column;justify-content:space-between;gap:18px;overflow:hidden;box-shadow:0 22px 48px rgba(30,37,89,.34);animation:m3-up .6s .12s both;box-sizing:border-box;">
+          <div style="position:absolute;inset:0;background-image:radial-gradient(rgba(255,255,255,.09) 1px,transparent 1px);background-size:18px 18px;"></div>
+          <div style="position:absolute;right:{{ sheetR }};top:{{ sheetT }};width:{{ sheetW }};aspect-ratio:1/1.3;">
+            <div style="--r:-10deg;position:absolute;inset:0;background:#3A4386;border-radius:12px;animation:m3-float 7s ease-in-out infinite;"></div>
+            <div style="--r:7deg;position:absolute;inset:0;background-color:#fff;background-image:linear-gradient(225deg,#FFE14D 0 14%,transparent 14%);border-radius:12px;box-shadow:0 18px 40px rgba(0,0,0,.3);padding:18% 14%;box-sizing:border-box;display:flex;flex-direction:column;gap:7%;animation:m3-float 6s .4s ease-in-out infinite;">
+              <div style="height:7%;width:60%;background:#1E2559;border-radius:2px;"></div>
+              <div style="height:4%;background:#ECEEF3;border-radius:2px;"></div>
+              <div style="height:4%;width:88%;background:#ECEEF3;border-radius:2px;"></div>
+              <div style="height:9%;width:70%;background:#FFE14D;border-radius:3px;opacity:.8;"></div>
+              <div style="height:4%;width:76%;background:#ECEEF3;border-radius:2px;"></div>
+            </div>
+          </div>
+          <div style="position:relative;display:flex;flex-direction:column;gap:6px;max-width:{{ cardTextW }};">
+            <div style="font-size:{{ cardH2 }};font-weight:800;letter-spacing:-.025em;line-height:1.05;">Open a PDF</div>
+            <div style="font-size:14px;line-height:1.4;color:#C9CEF0;">From your files, Drive, or share one to this app</div>
+          </div>
+          <div style="position:relative;display:flex;gap:10px;">
+            <div style="height:52px;padding:0 20px 0 22px;border-radius:18px;background:#FFE14D;color:#1E2559;font-weight:800;font-size:15px;display:flex;align-items:center;gap:10px;box-shadow:0 8px 20px rgba(224,180,0,.35);cursor:pointer;">Choose file<i class="ph-bold ph-arrow-right"></i></div>
+            <div title="Scan with camera" style="width:52px;height:52px;border-radius:18px;background:rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-size:22px;"><i class="ph ph-camera"></i></div>
+          </div>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;animation:m3-up .6s .2s both;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;"><span style="font-size:17px;font-weight:700;">Recent</span><span style="font-size:14px;font-weight:600;color:#1E2559;">See all</span></div>
+        <div style="display:flex;gap:{{ recGap }};margin-right:{{ recBleed }};overflow:hidden;">
+          <sc-for list="{{ recents }}" as="r" hint-placeholder-count="3">
+            <div style="flex:{{ recFlex }};width:{{ recW }};min-width:0;display:flex;flex-direction:column;gap:10px;">
+              <div style="position:relative;height:{{ recH }};border-radius:20px;background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.06),0 0 0 1px rgba(20,23,46,.04);overflow:hidden;">
+                <div style="position:absolute;left:16%;right:16%;top:16px;bottom:-20px;background:#fff;border-radius:4px;box-shadow:0 0 0 1px #ECEEF3,0 8px 20px rgba(20,23,46,.10);padding:14% 12%;display:flex;flex-direction:column;gap:7px;">
+                  <div style="{{ r.bar }}"></div>
+                  <div style="height:4px;background:#ECEEF3;border-radius:2px;"></div>
+                  <div style="height:4px;width:86%;background:#ECEEF3;border-radius:2px;"></div>
+                  <div style="height:4px;width:70%;background:#ECEEF3;border-radius:2px;"></div>
+                  <div style="height:4px;background:#ECEEF3;border-radius:2px;"></div>
+                </div>
+                <sc-if value="{{ r.edited }}" hint-placeholder-val="{{ false }}"><span style="position:absolute;left:10px;top:10px;height:24px;padding:0 9px;border-radius:12px;background:#FFE14D;color:#1E2559;font-size:12px;font-weight:700;display:flex;align-items:center;">Edited</span></sc-if>
+              </div>
+              <div style="display:flex;flex-direction:column;gap:2px;padding:0 2px;">
+                <span style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ r.name }}</span>
+                <span style="font-size:12.5px;color:#5D637A;">{{ r.meta }}</span>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:12px;animation:m3-up .6s .28s both;">
+        <span style="font-size:17px;font-weight:700;">Tools</span>
+        <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:{{ tGap }};">
+          <sc-for list="{{ homeTools }}" as="t" hint-placeholder-count="4">
+            <div style="height:{{ tH }};border-radius:22px;background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.06),0 0 0 1px rgba(20,23,46,.04);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:0 6px;cursor:pointer;transition:transform .2s;" style-hover="transform:translateY(-2px);">
+              <span style="width:42px;height:42px;border-radius:15px;background:{{ t.bg }};color:#1E2559;display:flex;align-items:center;justify-content:center;font-size:22px;"><i class="{{ t.icon }}"></i></span>
+              <span style="font-size:13.5px;font-weight:600;text-align:center;">{{ t.label }}</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+      <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;gap:12px;padding:12px 14px;border-radius:18px;background:rgba(255,255,255,.75);font-size:13.5px;color:#3F4560;line-height:1.35;animation:m3-up .6s .34s both;"><span style="width:34px;height:34px;flex:none;border-radius:12px;background:#E3F1E9;color:#1E7A4C;display:flex;align-items:center;justify-content:center;font-size:17px;"><i class="ph-fill ph-lock-simple"></i></span><span><b style="color:#151833;">Files stay on this phone.</b> Nothing is uploaded, ever.</span></div>
+      </sc-if>
+    </div>
+  </sc-if>
+  <sc-if value="{{ isEd }}" hint-placeholder-val="{{ true }}">
+    <sc-if value="{{ showDoc }}" hint-placeholder-val="{{ true }}">
+      <div style="{{ pageS }}">
+        <div style="position:relative;width:100%;container-type:inline-size;">
+          <dc-import name="PdfPage" mode="{{ pageMode }}" style="width:100%;" hint-size="100%,500px"></dc-import>
+          <sc-if value="{{ showSel }}" hint-placeholder-val="{{ false }}">
+            <div style="position:absolute;left:52%;width:34%;bottom:15.5cqw;height:9cqw;outline:2px solid #3446C9;border-radius:2px;z-index:2;">
+              <div style="position:absolute;left:-7px;top:-7px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #3446C9;"></div>
+              <div style="position:absolute;right:-7px;top:-7px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #3446C9;"></div>
+              <div style="position:absolute;left:-7px;bottom:-7px;width:12px;height:12px;border-radius:50%;background:#fff;border:2px solid #3446C9;"></div>
+              <div style="position:absolute;right:-15px;bottom:-15px;width:30px;height:30px;border-radius:50%;background:#3446C9;border:2.5px solid #fff;box-sizing:border-box;box-shadow:0 2px 8px rgba(20,23,46,.3);display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;"><i class="ph-bold ph-arrows-out-simple"></i></div>
+              <div style="{{ tbS }}">
+                <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:19px;color:#C9CEF0;"><i class="ph ph-arrows-out-cardinal"></i></div>
+                <div style="width:1px;height:22px;background:rgba(255,255,255,.18);"></div>
+                <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:16px;"><i class="ph-bold ph-minus"></i></div>
+                <div style="min-width:26px;text-align:center;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;">28</div>
+                <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:16px;"><i class="ph-bold ph-plus"></i></div>
+                <div style="width:1px;height:22px;background:rgba(255,255,255,.18);"></div>
+                <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph ph-copy"></i></div>
+                <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:19px;color:#FF9C8F;"><i class="ph ph-trash"></i></div>
+              </div>
+            </div>
+          </sc-if>
+        </div>
+        <sc-if value="{{ notEditText }}" hint-placeholder-val="{{ true }}"><dc-import name="PdfPage" mode="plain" page-no="2 of 4" style="width:100%;" hint-size="100%,500px"></dc-import></sc-if>
+      </div>
+    </sc-if>
+    <sc-if value="{{ opening }}" hint-placeholder-val="{{ false }}">
+      <div style="{{ pageS }}">
+        <div style="position:relative;width:100%;aspect-ratio:1/1.414;background:#fff;border-radius:3px;box-shadow:0 1px 2px rgba(20,23,46,.06),0 10px 30px rgba(20,23,46,.10);overflow:hidden;padding:10%;box-sizing:border-box;display:flex;flex-direction:column;gap:3.2%;">
+          <div style="height:4.5%;width:55%;border-radius:3px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="height:1.8%;width:30%;border-radius:2px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="height:1.6%;border-radius:2px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="height:1.6%;width:90%;border-radius:2px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="height:1.6%;width:82%;border-radius:2px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="height:18%;border-radius:6px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="height:1.6%;border-radius:2px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="height:1.6%;width:70%;border-radius:2px;background:linear-gradient(90deg,#ECEEF3 0%,#F7F8FA 50%,#ECEEF3 100%);background-size:200% 100%;animation:m3-shim 1.4s linear infinite;"></div>
+          <div style="position:absolute;left:0;right:0;height:14%;background:linear-gradient(180deg,rgba(255,225,77,0),rgba(255,225,77,.55));animation:m3-scan 1.6s ease-in-out infinite alternate;"></div>
+        </div>
+      </div>
+      <div style="position:absolute;left:0;right:0;margin:0 auto;width:max-content;max-width:calc(100% - 48px);top:{{ openTop }};z-index:5;display:flex;align-items:center;gap:12px;padding:12px 18px 12px 12px;border-radius:24px;background:#fff;box-shadow:0 18px 44px rgba(20,23,46,.2);overflow:hidden;box-sizing:border-box;">
+        <div style="width:36px;height:36px;flex:none;border-radius:50%;border:3.5px solid #ECEEF3;border-top-color:#1E2559;box-sizing:border-box;animation:m3-spin .9s linear infinite;"></div>
+        <div style="display:flex;flex-direction:column;gap:2px;min-width:0;"><span style="font-size:14.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Opening Lease_Agreement_2026.pdf</span><span style="font-size:12.5px;color:#5D637A;">Page 3 of 8 · matching fonts</span></div>
+        <div style="position:absolute;left:0;bottom:0;height:3px;width:38%;background:#1E2559;"></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;left:12px;right:12px;top:42px;height:48px;display:flex;align-items:center;gap:6px;z-index:5;">
+        <div style="width:44px;height:44px;flex:none;border-radius:50%;background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 2px rgba(20,23,46,.08),0 6px 16px rgba(20,23,46,.08);display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph ph-arrow-left"></i></div>
+        <div style="flex:1;min-width:0;height:44px;border-radius:22px;background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 2px rgba(20,23,46,.08),0 6px 16px rgba(20,23,46,.08);display:flex;flex-direction:column;justify-content:center;padding:0 16px;box-sizing:border-box;">
+          <span style="font-size:14px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ fileName }}</span>
+          <span style="font-size:12px;color:#5D637A;display:flex;align-items:center;gap:5px;white-space:nowrap;">{{ fileMeta }}<sc-if value="{{ showChanges }}" hint-placeholder-val="{{ true }}"><span style="width:6px;height:6px;border-radius:50%;background:#E0B400;"></span>{{ changes }}</sc-if></span>
+        </div>
+        <div style="width:44px;height:44px;flex:none;border-radius:50%;background:rgba(255,255,255,.92);box-shadow:0 1px 2px rgba(20,23,46,.08),0 6px 16px rgba(20,23,46,.08);display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph ph-arrow-u-up-left"></i></div>
+        <div style="width:44px;height:44px;flex:none;border-radius:50%;background:rgba(255,255,255,.92);box-shadow:0 1px 2px rgba(20,23,46,.08),0 6px 16px rgba(20,23,46,.08);display:flex;align-items:center;justify-content:center;font-size:19px;color:#A7ACBE;"><i class="ph ph-arrow-u-up-right"></i></div>
+        <div style="width:44px;height:44px;flex:none;border-radius:50%;background:#1E2559;color:#fff;box-shadow:0 6px 16px rgba(30,37,89,.35);display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph-bold ph-download-simple"></i></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isT }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:16px;right:16px;top:{{ islandTop }};height:64px;border-radius:24px;background:rgba(255,255,255,.9);backdrop-filter:blur(14px);box-shadow:0 1px 2px rgba(20,23,46,.06),0 10px 28px rgba(20,23,46,.08);display:flex;align-items:center;gap:8px;padding:0 10px;z-index:5;box-sizing:border-box;">
+        <div style="width:44px;height:44px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph ph-arrow-left"></i></div>
+        <div style="width:32px;height:40px;flex:none;border-radius:6px;background:#F5F6F9;box-shadow:inset 0 0 0 1px #E1E4EB;display:flex;align-items:flex-end;justify-content:center;padding-bottom:5px;box-sizing:border-box;font-size:9px;font-weight:800;color:#B83227;">PDF</div>
+        <div style="display:flex;flex-direction:column;gap:3px;min-width:0;">
+          <span style="font-size:15px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ fileName }}</span>
+          <span style="font-size:12.5px;color:#5D637A;display:flex;align-items:center;gap:6px;">4 pages<sc-if value="{{ showChanges }}" hint-placeholder-val="{{ true }}"><span style="height:20px;padding:0 8px;border-radius:10px;background:#FFF4B8;color:#5C4A00;font-weight:700;display:inline-flex;align-items:center;">{{ changes }}</span></sc-if></span>
+        </div>
+        <div style="flex:1;"></div>
+        <div style="width:44px;height:44px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph ph-arrow-u-up-left"></i></div>
+        <div style="width:44px;height:44px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#A7ACBE;"><i class="ph ph-arrow-u-up-right"></i></div>
+        <div style="height:44px;display:flex;align-items:center;border-radius:16px;background:#F1F2F6;font-size:13.5px;font-weight:700;font-variant-numeric:tabular-nums;"><span style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><i class="ph-bold ph-minus"></i></span>100%<span style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><i class="ph-bold ph-plus"></i></span></div>
+        <div style="height:48px;padding:0 20px 0 16px;border-radius:16px;background:#1E2559;color:#fff;display:flex;align-items:center;gap:8px;font-weight:700;font-size:14.5px;box-shadow:0 6px 16px rgba(30,37,89,.3);"><i class="ph-bold ph-download-simple" style="font-size:18px;"></i>Download</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ showScrub }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;right:5px;top:150px;height:400px;width:4px;border-radius:2px;background:rgba(20,23,46,.10);z-index:3;"><div style="width:4px;height:70px;border-radius:2px;background:#1E2559;"></div></div>
+      <div style="position:absolute;right:16px;top:160px;height:30px;padding:0 12px;border-radius:15px;background:#1E2559;color:#fff;font-size:12.5px;font-weight:700;display:flex;align-items:center;font-variant-numeric:tabular-nums;z-index:3;box-shadow:0 6px 14px rgba(30,37,89,.3);">1 / 4</div>
+    </sc-if>
+    <sc-if value="{{ showRail }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;right:16px;top:0;bottom:0;margin:auto 0;height:max-content;padding:10px;border-radius:24px;background:rgba(255,255,255,.92);backdrop-filter:blur(12px);box-shadow:0 1px 2px rgba(20,23,46,.06),0 14px 36px rgba(20,23,46,.12);display:flex;flex-direction:column;align-items:center;gap:10px;z-index:3;">
+        <sc-for list="{{ thumbs }}" as="t" hint-placeholder-count="4">
+          <div style="display:flex;flex-direction:column;align-items:center;gap:4px;">
+            <div style="{{ t.s }}"><div style="height:5px;width:60%;background:#C9CCD8;border-radius:1px;"></div><div style="height:3px;background:#ECEEF3;"></div><div style="height:3px;background:#ECEEF3;"></div><div style="height:3px;width:70%;background:#ECEEF3;"></div></div>
+            <span style="{{ t.lab }}">{{ t.n }}</span>
+          </div>
+        </sc-for>
+        <div style="width:44px;height:44px;border-radius:14px;background:#F1F2F6;display:flex;align-items:center;justify-content:center;font-size:18px;color:#1E2559;"><i class="ph-bold ph-plus"></i></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ strip }}" hint-placeholder-val="{{ false }}">
+      <div style="{{ stripS }}">
+        <sc-for list="{{ swatches }}" as="c" hint-placeholder-count="5"><div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="{{ c.s }}"></div></div></sc-for>
+        <div style="{{ stripSep }}"></div>
+        <div style="width:44px;height:44px;border-radius:14px;background:#F1F2F6;display:flex;align-items:center;justify-content:center;font-size:20px;color:#1E2559;"><i class="ph-fill ph-highlighter"></i></div>
+        <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#4A5068;"><i class="ph ph-text-underline"></i></div>
+        <sc-if value="{{ isT }}" hint-placeholder-val="{{ false }}"><div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#4A5068;"><i class="ph ph-text-strikethrough"></i></div></sc-if>
+        <sc-if value="{{ isTP }}" hint-placeholder-val="{{ false }}">
+          <div style="{{ stripSep }}"></div>
+          <div style="display:flex;align-items:center;gap:10px;padding:0 10px 0 6px;font-size:12.5px;color:#5D637A;"><span>Opacity</span><div style="width:96px;height:6px;border-radius:3px;background:#ECEEF3;position:relative;"><div style="width:70%;height:100%;border-radius:3px;background:#1E2559;"></div><div style="position:absolute;left:70%;top:50%;width:20px;height:20px;margin:-10px;border-radius:50%;background:#fff;box-shadow:0 0 0 2px #1E2559,0 2px 6px rgba(20,23,46,.2);"></div></div><span style="font-weight:700;color:#151833;font-variant-numeric:tabular-nums;">70%</span></div>
+        </sc-if>
+      </div>
+    </sc-if>
+    <sc-if value="{{ showTray }}" hint-placeholder-val="{{ true }}">
+      <div style="{{ trayS }}">
+        <sc-for list="{{ tray }}" as="t" hint-placeholder-count="6">
+          <sc-if value="{{ t.sep }}" hint-placeholder-val="{{ false }}"><div style="{{ t.sepS }}"></div></sc-if>
+          <sc-if value="{{ t.tool }}" hint-placeholder-val="{{ true }}"><div style="{{ t.s }}"><i class="{{ t.icon }}" style="font-size:23px;"></i><span>{{ t.label }}</span></div></sc-if>
+        </sc-for>
+      </div>
+    </sc-if>
+    <sc-if value="{{ showExport }}" hint-placeholder-val="{{ false }}">
+      <div style="{{ progS }}">
+        <div style="width:46px;height:46px;flex:none;border-radius:50%;background:conic-gradient(#FFE14D 0 72%,rgba(255,255,255,.14) 72% 100%);display:flex;align-items:center;justify-content:center;"><div style="width:36px;height:36px;border-radius:50%;background:#1E2559;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-weight:800;color:#fff;">72%</div></div>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px;color:#fff;"><span style="font-size:15px;font-weight:700;">Preparing your PDF</span><span style="font-size:12.5px;color:#C9CEF0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Embedding fonts · page 3 of 4</span></div>
+        <div style="height:44px;padding:0 14px;border-radius:14px;background:rgba(255,255,255,.12);color:#fff;font-weight:600;font-size:14px;display:flex;align-items:center;">Cancel</div>
+        <div style="position:absolute;left:0;bottom:0;height:3px;width:72%;background:#FFE14D;"></div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ showToast }}" hint-placeholder-val="{{ false }}">
+      <div style="{{ toastS }}">
+        <span style="width:40px;height:40px;flex:none;border-radius:14px;background:#E3F1E9;color:#1E7A4C;display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph-bold ph-check"></i></span>
+        <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;"><span style="font-size:15px;font-weight:700;">Saved to Downloads</span><span style="font-size:12.5px;color:#5D637A;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Lease_Agreement_2026-edited.pdf</span></div>
+        <div style="height:44px;padding:0 14px;border-radius:14px;background:#F1F2F6;font-weight:700;font-size:14px;color:#1E2559;display:flex;align-items:center;gap:6px;"><i class="ph-bold ph-share-network"></i>Share</div>
+      </div>
+    </sc-if>
+  </sc-if>
+  <sc-if value="{{ isPages }}" hint-placeholder-val="{{ false }}">
+    <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}">
+      <div style="position:absolute;left:12px;right:12px;top:42px;height:48px;display:flex;align-items:center;gap:6px;z-index:5;">
+        <div style="width:44px;height:44px;flex:none;border-radius:50%;background:rgba(255,255,255,.92);box-shadow:0 1px 2px rgba(20,23,46,.08),0 6px 16px rgba(20,23,46,.08);display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph ph-arrow-left"></i></div>
+        <div style="flex:1;min-width:0;height:44px;border-radius:22px;background:rgba(255,255,255,.92);box-shadow:0 1px 2px rgba(20,23,46,.08),0 6px 16px rgba(20,23,46,.08);display:flex;flex-direction:column;justify-content:center;padding:0 16px;box-sizing:border-box;"><span style="font-size:14px;font-weight:700;">Organize pages</span><span style="font-size:12px;color:#5D637A;">4 pages · 1 selected</span></div>
+        <div style="height:44px;padding:0 18px;border-radius:22px;background:#1E2559;color:#fff;font-weight:700;font-size:14px;display:flex;align-items:center;box-shadow:0 6px 16px rgba(30,37,89,.35);">Done</div>
+      </div>
+    </sc-if>
+    <sc-if value="{{ isT }}" hint-placeholder-val="{{ false }}">
+      <div style="position:absolute;left:16px;right:16px;top:40px;height:64px;border-radius:24px;background:rgba(255,255,255,.9);box-shadow:0 1px 2px rgba(20,23,46,.06),0 10px 28px rgba(20,23,46,.08);display:flex;align-items:center;gap:10px;padding:0 10px 0 10px;z-index:5;box-sizing:border-box;">
+        <div style="width:44px;height:44px;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:20px;"><i class="ph ph-arrow-left"></i></div>
+        <div style="display:flex;flex-direction:column;gap:2px;"><span style="font-size:16px;font-weight:700;">Organize pages</span><span style="font-size:12.5px;color:#5D637A;">Lease_Agreement_2026.pdf · 4 pages · 1 selected</span></div>
+        <div style="flex:1;"></div>
+        <div style="height:44px;padding:0 16px;border-radius:16px;display:flex;align-items:center;font-weight:700;font-size:14px;color:#1E2559;">Select all</div>
+        <div style="height:48px;padding:0 22px;border-radius:16px;background:#1E2559;color:#fff;display:flex;align-items:center;font-weight:700;font-size:14.5px;">Done</div>
+      </div>
+    </sc-if>
+    <div style="{{ gridS }}">
+      <sc-for list="{{ pcards }}" as="p" hint-placeholder-count="4">
+        <div style="{{ p.wrap }}">
+          <div style="{{ p.thumb }}">
+            <div style="height:5%;width:55%;background:#C9CCD8;border-radius:2px;"></div>
+            <div style="height:2.4%;background:#ECEEF3;border-radius:2px;"></div>
+            <div style="height:2.4%;background:#ECEEF3;border-radius:2px;"></div>
+            <div style="height:2.4%;width:80%;background:#ECEEF3;border-radius:2px;"></div>
+            <div style="height:20%;background:#F3F4F7;border-radius:6px;"></div>
+            <div style="height:2.4%;background:#ECEEF3;border-radius:2px;"></div>
+            <div style="height:2.4%;width:66%;background:#ECEEF3;border-radius:2px;"></div>
+            <div style="position:absolute;right:6px;top:6px;width:36px;height:36px;border-radius:50%;background:#fff;box-shadow:0 1px 2px rgba(20,23,46,.1),0 4px 10px rgba(20,23,46,.1);display:flex;align-items:center;justify-content:center;font-size:18px;color:#3F4560;"><i class="ph-bold ph-dots-three"></i></div>
+            <sc-if value="{{ p.sel }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:8px;top:8px;width:30px;height:30px;border-radius:50%;background:#1E2559;color:#fff;display:flex;align-items:center;justify-content:center;font-size:15px;"><i class="ph-bold ph-check"></i></div></sc-if>
+            <sc-if value="{{ p.rot }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:8px;top:8px;height:28px;padding:0 9px;border-radius:14px;background:#FFE14D;color:#1E2559;display:flex;align-items:center;gap:5px;font-size:12px;font-weight:800;"><i class="ph-bold ph-arrow-clockwise"></i>90°</div></sc-if>
+            <sc-if value="{{ p.drag }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:0;right:0;bottom:12px;margin:0 auto;width:max-content;height:30px;padding:0 12px;border-radius:15px;background:#1E2559;color:#fff;display:flex;align-items:center;gap:6px;font-size:12.5px;font-weight:700;"><i class="ph-bold ph-hand-grabbing"></i>Move to 2</div></sc-if>
+            <sc-if value="{{ p.marker }}" hint-placeholder-val="{{ false }}"><div style="position:absolute;left:{{ mkL }};top:-4px;bottom:-4px;width:4px;border-radius:2px;background:#FFE14D;box-shadow:0 0 0 3px rgba(255,225,77,.35);"></div></sc-if>
+          </div>
+          <span style="{{ p.num }}">{{ p.n }}</span>
+        </div>
+      </sc-for>
+      <div style="display:flex;flex-direction:column;align-items:center;gap:10px;">
+        <div style="width:100%;aspect-ratio:1/1.414;border-radius:12px;border:2px dashed #BFC4D2;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;padding:0 12px;">
+          <div style="width:48px;height:48px;border-radius:50%;background:#1E2559;color:#FFE14D;display:flex;align-items:center;justify-content:center;font-size:22px;"><i class="ph-bold ph-plus"></i></div>
+          <span style="font-size:14px;font-weight:700;">Add pages</span>
+          <span style="font-size:12.5px;color:#5D637A;line-height:1.35;">Blank, PDF, image or camera</span>
+        </div>
+        <span style="height:26px;"></span>
+      </div>
+    </div>
+    <div style="{{ actTrayS }}">
+      <sc-for list="{{ pActs }}" as="a" hint-placeholder-count="4"><div style="{{ a.s }}"><i class="{{ a.icon }}" style="font-size:22px;"></i><span>{{ a.label }}</span></div></sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ editText }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;left:0;right:0;bottom:0;z-index:6;display:flex;flex-direction:column;animation:m3-up .3s both;">
+      <div style="display:flex;align-items:center;gap:8px;padding:{{ psPad }};background:#fff;border-radius:22px 22px 0 0;box-shadow:0 -8px 24px rgba(20,23,46,.08);">
+        <div style="flex:{{ chipFlex }};min-width:0;height:44px;padding:0 12px;border-radius:14px;background:#F1F2F6;display:flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;box-sizing:border-box;"><span style="font-family:Georgia,serif;font-size:17px;font-weight:600;">Aa</span><span style="flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">Source Serif 4</span><i class="ph-bold ph-caret-down" style="font-size:13px;color:#5D637A;"></i></div>
+        <div style="display:flex;align-items:center;height:44px;border-radius:14px;background:#F1F2F6;flex:none;"><div style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><i class="ph-bold ph-minus"></i></div><span style="min-width:28px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums;">11</span><div style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><i class="ph-bold ph-plus"></i></div></div>
+        <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}">
+          <div style="width:44px;height:44px;flex:none;border-radius:14px;background:#F1F2F6;display:flex;align-items:center;justify-content:center;"><div style="width:22px;height:22px;border-radius:50%;background:#1d1d1f;box-shadow:0 0 0 2px #F1F2F6,0 0 0 3.5px #1d1d1f;"></div></div>
+          <div style="width:44px;height:44px;flex:none;border-radius:14px;background:#F1F2F6;display:flex;align-items:center;justify-content:center;font-size:19px;"><i class="ph-bold ph-dots-three"></i></div>
+        </sc-if>
+        <sc-if value="{{ isT }}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;gap:2px;">
+            <div style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:26px;height:26px;border-radius:50%;background:#1d1d1f;box-shadow:0 0 0 2px #fff,0 0 0 4px #1E2559;"></div></div>
+            <div style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:26px;height:26px;border-radius:50%;background:#1E2559;"></div></div>
+            <div style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:26px;height:26px;border-radius:50%;background:#B83227;"></div></div>
+            <div style="width:40px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:26px;height:26px;border-radius:50%;background:conic-gradient(#FFE14D,#9BE7B4,#9FD3FF,#FFB3C7,#FFE14D);"></div></div>
+          </div>
+          <div style="flex:1;"></div>
+          <div style="height:44px;padding:0 14px;border-radius:14px;display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px;color:#1E2559;"><i class="ph-bold ph-arrow-counter-clockwise"></i>Restore</div>
+          <div style="width:44px;height:44px;border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:19px;color:#B83227;"><i class="ph ph-trash"></i></div>
+          <div style="height:44px;padding:0 18px;border-radius:14px;background:#1E2559;color:#fff;display:flex;align-items:center;font-weight:700;font-size:14px;">Done</div>
+        </sc-if>
+      </div>
+      <div style="background:#E3E6EC;padding:{{ kbPad }};display:flex;flex-direction:column;gap:{{ kbGap }};">
+        <div style="display:flex;align-items:center;height:40px;font-size:15px;color:#151833;"><span style="flex:1;text-align:center;">Okafor</span><span style="width:1px;height:20px;background:#B9BEC9;"></span><span style="flex:1;text-align:center;font-weight:700;">Okafor’s</span><span style="width:1px;height:20px;background:#B9BEC9;"></span><span style="flex:1;text-align:center;">Okay</span></div>
+        <sc-for list="{{ kbRows }}" as="row" hint-placeholder-count="4"><div style="display:flex;gap:{{ kbKeyGap }};"><sc-for list="{{ row.k }}" as="k" hint-placeholder-count="10"><div style="{{ k.s }}">{{ k.t }}</div></sc-for></div></sc-for>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showSig }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:rgba(20,23,46,.38);z-index:7;"></div>
+    <div style="{{ sigS }}">
+      <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}"><div style="width:40px;height:5px;border-radius:3px;background:#D5D9E2;align-self:center;flex:none;"></div></sc-if>
+      <div style="display:flex;align-items:center;justify-content:space-between;flex:none;"><span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">Add signature</span><span style="width:44px;height:44px;border-radius:50%;background:#F1F2F6;display:flex;align-items:center;justify-content:center;font-size:17px;"><i class="ph-bold ph-x"></i></span></div>
+      <div style="display:flex;flex-direction:column;gap:10px;flex:none;">
+        <span style="font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#5D637A;">Saved on this device</span>
+        <div style="display:flex;gap:10px;">
+          <div style="position:relative;flex:1;height:76px;border-radius:20px;background:#F5F6F9;box-shadow:inset 0 0 0 2px #1E2559;display:flex;align-items:center;justify-content:center;font-family:'Caveat',cursive;font-size:30px;color:#1E2559;">Jordan Ellis</div>
+          <div style="flex:1;height:76px;border-radius:20px;background:#F5F6F9;display:flex;align-items:center;justify-content:center;font-family:'Caveat',cursive;font-size:30px;color:#151833;">J. E.</div>
+          <div style="width:76px;height:76px;flex:none;border-radius:20px;border:2px dashed #BFC4D2;box-sizing:border-box;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;color:#1E2559;font-size:12px;font-weight:700;"><i class="ph-bold ph-plus" style="font-size:18px;"></i>New</div>
+        </div>
+      </div>
+      <div style="display:flex;padding:4px;background:#F1F2F6;border-radius:18px;flex:none;">
+        <div style="flex:1;height:44px;border-radius:14px;background:#fff;box-shadow:0 1px 3px rgba(20,23,46,.12);display:flex;align-items:center;justify-content:center;gap:7px;font-weight:700;font-size:14.5px;"><i class="ph-bold ph-scribble"></i>Draw</div>
+        <div style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;gap:7px;font-weight:500;font-size:14.5px;color:#3F4560;"><i class="ph ph-keyboard"></i>Type</div>
+        <div style="flex:1;height:44px;display:flex;align-items:center;justify-content:center;gap:7px;font-weight:500;font-size:14.5px;color:#3F4560;"><i class="ph ph-upload-simple"></i>Upload</div>
+      </div>
+      <div style="position:relative;flex:{{ padFlex }};height:{{ padH }};min-height:170px;border-radius:24px;background:#F8F9FB;box-shadow:inset 0 0 0 1.5px #E1E4EB;overflow:hidden;">
+        <div style="position:absolute;left:24px;right:24px;bottom:30%;border-top:2px dashed #CDD2DE;"></div>
+        <div style="position:absolute;left:26px;bottom:calc(30% + 6px);font-size:20px;color:#A7ACBE;">×</div>
+        <div style="position:absolute;left:0;right:0;bottom:calc(30% - 10px);text-align:center;font-family:'Caveat',cursive;font-size:{{ sigFs }};color:#1E2559;line-height:1;transform:rotate(-3deg);">Jordan Ellis</div>
+        <div style="position:absolute;right:10px;top:10px;width:44px;height:44px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(20,23,46,.12);display:flex;align-items:center;justify-content:center;font-size:18px;color:#3F4560;"><i class="ph-bold ph-arrow-u-up-left"></i></div>
+        <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}"><div style="position:absolute;left:0;right:0;bottom:12px;display:flex;align-items:center;justify-content:center;gap:6px;font-size:12.5px;color:#5D637A;"><i class="ph ph-device-rotate" style="font-size:15px;"></i>Turn sideways for a wider pad</div></sc-if>
+      </div>
+      <div style="display:flex;align-items:center;gap:4px;flex:none;">
+        <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:28px;height:28px;border-radius:50%;background:#151833;"></div></div>
+        <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:28px;height:28px;border-radius:50%;background:#1E2559;box-shadow:0 0 0 2px #fff,0 0 0 4px #1E2559;"></div></div>
+        <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:28px;height:28px;border-radius:50%;background:#2350D8;"></div></div>
+        <div style="width:1px;height:26px;background:#E1E4EB;margin:0 8px;"></div>
+        <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:6px;height:6px;border-radius:50%;background:#3F4560;"></div></div>
+        <div style="width:44px;height:44px;border-radius:14px;background:#F1F2F6;display:flex;align-items:center;justify-content:center;"><div style="width:10px;height:10px;border-radius:50%;background:#151833;"></div></div>
+        <div style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;"><div style="width:15px;height:15px;border-radius:50%;background:#3F4560;"></div></div>
+        <div style="flex:1;"></div>
+        <sc-if value="{{ isT }}" hint-placeholder-val="{{ false }}"><div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:14px;">Save on this device<div style="width:48px;height:28px;border-radius:14px;background:#1E2559;position:relative;"><div style="position:absolute;right:3px;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;"></div></div></div></sc-if>
+      </div>
+      <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}">
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex:none;"><div style="display:flex;flex-direction:column;gap:2px;"><span style="font-weight:600;font-size:15px;">Save on this device</span><span style="font-size:12.5px;color:#5D637A;">Kept only on this phone</span></div><div style="width:48px;height:28px;flex:none;border-radius:14px;background:#1E2559;position:relative;"><div style="position:absolute;right:3px;top:3px;width:22px;height:22px;border-radius:50%;background:#fff;"></div></div></div>
+      </sc-if>
+      <div style="display:flex;gap:10px;flex:none;">
+        <div style="height:56px;padding:0 22px;border-radius:18px;box-shadow:inset 0 0 0 1.5px #CDD2DE;color:#1E2559;font-weight:700;font-size:15px;display:flex;align-items:center;">Clear</div>
+        <div style="flex:1;height:56px;border-radius:18px;background:#1E2559;color:#fff;font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;gap:9px;box-shadow:0 8px 20px rgba(30,37,89,.28);"><i class="ph-bold ph-signature" style="font-size:19px;"></i>Place signature</div>
+      </div>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showTools }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:rgba(20,23,46,.32);z-index:7;"></div>
+    <div style="position:absolute;left:8px;right:8px;bottom:8px;z-index:8;background:#fff;border-radius:32px;padding:10px 16px 22px;display:flex;flex-direction:column;gap:14px;box-shadow:0 -10px 40px rgba(20,23,46,.2);animation:m3-sheet .34s cubic-bezier(.2,.8,.2,1) both;">
+      <div style="width:40px;height:5px;border-radius:3px;background:#D5D9E2;align-self:center;"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:0 4px;"><span style="font-size:22px;font-weight:800;letter-spacing:-.02em;">All tools</span><span style="width:44px;height:44px;border-radius:50%;background:#F1F2F6;display:flex;align-items:center;justify-content:center;font-size:17px;"><i class="ph-bold ph-x"></i></span></div>
+      <div style="height:48px;border-radius:16px;background:#F1F2F6;display:flex;align-items:center;gap:10px;padding:0 14px;font-size:15px;color:#5D637A;"><i class="ph ph-magnifying-glass" style="font-size:18px;"></i>Search tools</div>
+      <sc-for list="{{ toolGroups }}" as="g" hint-placeholder-count="4">
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <span style="font-size:12px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:#5D637A;padding:0 4px;">{{ g.name }}</span>
+          <div style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;">
+            <sc-for list="{{ g.items }}" as="t" hint-placeholder-count="3"><div style="{{ t.tile }}"><span style="{{ t.chip }}"><i class="{{ t.icon }}"></i></span><span style="font-size:12.5px;font-weight:600;">{{ t.label }}</span></div></sc-for>
+          </div>
+        </div>
+      </sc-for>
+    </div>
+  </sc-if>
+  <sc-if value="{{ showLocked }}" hint-placeholder-val="{{ false }}">
+    <div style="position:absolute;inset:0;background:rgba(20,23,46,.38);z-index:7;"></div>
+    <div style="{{ lockS }}">
+      <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}"><div style="width:40px;height:5px;border-radius:3px;background:#D5D9E2;align-self:center;"></div></sc-if>
+      <div style="width:60px;height:60px;border-radius:20px;background:#FFE14D;color:#1E2559;display:flex;align-items:center;justify-content:center;font-size:28px;"><i class="ph-fill ph-lock-key"></i></div>
+      <div style="display:flex;flex-direction:column;gap:6px;"><span style="font-size:24px;font-weight:800;letter-spacing:-.02em;">This PDF is locked</span><span style="font-size:15px;line-height:1.45;color:#4A5068;text-wrap:pretty;">Enter the password for <b style="color:#151833;">Lease_Agreement_2026.pdf</b>. It’s checked on this device and never sent anywhere.</span></div>
+      <div style="display:flex;flex-direction:column;gap:8px;"><span style="font-size:13.5px;font-weight:600;color:#3F4560;">Password</span>
+        <div style="height:56px;border-radius:16px;background:#fff;box-shadow:inset 0 0 0 2px #3446C9,0 0 0 5px rgba(52,70,201,.14);display:flex;align-items:center;gap:6px;padding:0 6px 0 16px;"><span style="font-size:20px;letter-spacing:.2em;">••••••••</span><span style="width:2px;height:24px;background:#3446C9;animation:m3-blink 1s steps(1) infinite;"></span><span style="flex:1;"></span><span style="width:44px;height:44px;display:flex;align-items:center;justify-content:center;font-size:20px;color:#5D637A;"><i class="ph ph-eye"></i></span></div>
+      </div>
+      <div style="display:flex;gap:10px;">
+        <div style="height:56px;padding:0 22px;border-radius:18px;box-shadow:inset 0 0 0 1.5px #CDD2DE;color:#1E2559;font-weight:700;font-size:15px;display:flex;align-items:center;">Cancel</div>
+        <div style="flex:1;height:56px;border-radius:18px;background:#1E2559;color:#fff;font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;gap:9px;"><i class="ph-bold ph-lock-key-open" style="font-size:19px;"></i>Unlock</div>
+      </div>
+    </div>
+  </sc-if>
+  <div style="position:absolute;top:0;left:0;right:0;height:{{ sbH }};display:flex;align-items:center;justify-content:space-between;padding:0 {{ sbPad }};font-size:{{ sbFs }};font-weight:600;z-index:9;pointer-events:none;">
+    <span style="font-variant-numeric:tabular-nums;">{{ sbTime }}</span>
+    <sc-if value="{{ isP }}" hint-placeholder-val="{{ true }}"><span style="position:absolute;left:0;right:0;top:11px;margin:0 auto;width:14px;height:14px;border-radius:50%;background:#0B0C12;"></span></sc-if>
+    <span style="display:flex;gap:6px;align-items:center;font-size:15px;"><i class="ph-fill ph-wifi-high"></i><i class="ph-fill ph-cell-signal-full"></i><i class="ph-fill ph-battery-full"></i></span>
+  </div>
+  <div style="position:absolute;bottom:8px;left:0;right:0;margin:0 auto;width:{{ gbW }};height:4px;border-radius:2px;background:rgba(21,24,51,.55);z-index:9;"></div>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:390,&quot;height&quot;:844},&quot;bp&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;phone&quot;,&quot;tablet&quot;,&quot;tabletL&quot;],&quot;default&quot;:&quot;phone&quot;,&quot;tsType&quot;:&quot;string&quot;},&quot;screen&quot;:{&quot;editor&quot;:&quot;enum&quot;,&quot;options&quot;:[&quot;home&quot;,&quot;workspace&quot;,&quot;editText&quot;,&quot;selectObj&quot;,&quot;signature&quot;,&quot;tools&quot;,&quot;pages&quot;,&quot;opening&quot;,&quot;export&quot;,&quot;toast&quot;,&quot;locked&quot;],&quot;default&quot;:&quot;workspace&quot;,&quot;tsType&quot;:&quot;string&quot;}}">
+class Component extends DCLogic {
+  renderVals() {
+    const bp = this.props.bp ?? 'phone', s = this.props.screen ?? 'workspace';
+    const P = bp === 'phone', TL = bp === 'tabletL', T = !P, TP = bp === 'tablet';
+    const isHome = s === 'home' || s === 'locked', isPages = s === 'pages', isEd = !isHome && !isPages;
+    const opening = s === 'opening', editText = s === 'editText';
+    const active = { workspace: 'highlight', selectObj: 'sign', signature: 'sign' }[s] || 'edit';
+    const center = { left: 0, right: 0, margin: '0 auto', width: 'max-content' };
+    const D = { edit: ['Edit', 'ph-cursor-text'], fill: ['Fill', 'ph-textbox'], text: ['Text', 'ph-text-t'], sign: ['Sign', 'ph-signature'], image: ['Image', 'ph-image'], whiteout: ['Whiteout', 'ph-eraser'], highlight: ['Highlight', 'ph-highlighter'], shapes: ['Shapes', 'ph-shapes'], draw: ['Draw', 'ph-scribble'], pages: ['Pages', 'ph-squares-four'], more: ['More', 'ph-dots-nine'] };
+    const keys = P ? ['edit', 'text', 'sign', 'highlight', 'draw', 'more'] : ['edit', 'fill', 'text', 'sign', 'image', 'whiteout', 'highlight', 'shapes', 'draw', 'sep', 'pages'];
+    const tray = keys.map(k => {
+      if (k === 'sep') return { sep: true, tool: false, sepS: TL ? { width: '40px', height: '1px', background: 'rgba(255,255,255,.18)', margin: '4px 0' } : { width: '1px', height: '36px', background: 'rgba(255,255,255,.18)', margin: '0 4px' } };
+      const on = k === active, [label, ic] = D[k];
+      return { sep: false, tool: true, label, icon: (on ? 'ph-fill ' : 'ph ') + ic,
+        s: { width: (P ? 58 : 66) + 'px', height: (P ? 60 : 62) + 'px', flex: 'none', borderRadius: '20px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', fontSize: '12px', fontWeight: on ? 700 : 500, cursor: 'pointer', color: on ? '#1E2559' : 'rgba(255,255,255,.82)', background: on ? '#FFE14D' : 'transparent', transform: on ? (TL ? 'translateX(16px)' : 'translateY(-16px)') : 'none', boxShadow: on ? '0 12px 24px rgba(224,180,0,.42),0 0 0 4px #1E2559' : 'none', transition: 'transform .28s cubic-bezier(.2,.8,.2,1),background .2s' } };
+    });
+    const base = { position: 'absolute', display: 'flex', alignItems: 'center', background: '#1E2559', borderRadius: '30px', boxShadow: '0 18px 44px rgba(30,37,89,.36)', zIndex: 4, boxSizing: 'border-box' };
+    const bottomBar = P ? { left: '12px', right: '12px', bottom: '22px', height: '76px' } : { ...center, bottom: '24px', height: '82px' };
+    const trayPos = TL ? { left: '16px', top: 0, bottom: 0, margin: 'auto 0', height: 'max-content', width: '84px', flexDirection: 'column', padding: '10px 0', gap: '2px' } : P ? { ...bottomBar, justifyContent: 'space-between', padding: '0 4px' } : { ...bottomBar, padding: '0 10px', gap: '2px' };
+    const trayS = { ...base, ...trayPos, opacity: opening ? .45 : 1 };
+    const actTrayS = { ...base, ...bottomBar, ...(P ? { justifyContent: 'space-around', padding: '0 6px' } : { padding: '0 12px', gap: '8px' }) };
+    const progS = { ...base, ...bottomBar, ...(P ? {} : { width: '520px' }), padding: '0 14px', gap: '14px', overflow: 'hidden' };
+    const stripS = { position: 'absolute', zIndex: 4, display: 'flex', alignItems: 'center', gap: '2px', padding: TL ? '6px 4px' : '4px 6px', boxSizing: 'border-box', background: '#fff', borderRadius: '22px', boxShadow: '0 1px 2px rgba(20,23,46,.06),0 16px 40px rgba(20,23,46,.16)', flexDirection: TL ? 'column' : 'row', ...(TL ? { left: '134px', top: '316px' } : { ...center, bottom: P ? '122px' : '130px' }) };
+    const stripSep = TL ? { width: '26px', height: '1px', background: '#E1E4EB', margin: '4px 0' } : { width: '1px', height: '26px', background: '#E1E4EB', margin: '0 4px' };
+    const swatches = ['#FFE14D', '#9BE7B4', '#9FD3FF', '#FFB3C7', '#FFC58A'].map((c, i) => ({ s: { width: '28px', height: '28px', borderRadius: '50%', background: c, boxShadow: i === 0 ? '0 0 0 2px #fff,0 0 0 4px #1E2559' : 'inset 0 0 0 1px rgba(20,23,46,.08)' } }));
+    const pw = TL ? 500 : T ? 600 : 358;
+    const pageS = { position: 'absolute', display: 'flex', flexDirection: 'column', gap: P ? '16px' : '24px', zIndex: 1, ...(editText ? (P ? { left: '-60px', width: '760px', top: '-10px' } : { ...center, width: '720px', top: '96px' }) : P ? { left: '16px', width: '358px', top: '104px' } : { ...center, width: pw + 'px', top: TL ? '96px' : '116px' }) };
+    const pageMode = { workspace: 'highlight', editText: 'editText', selectObj: 'signed', export: 'signed', toast: 'signed' }[s] || 'plain';
+    const tbS = { position: 'absolute', bottom: 'calc(100% + 14px)', display: 'flex', alignItems: 'center', gap: '2px', padding: '4px', background: '#1E2559', borderRadius: '18px', boxShadow: '0 12px 28px rgba(20,23,46,.3)', color: '#fff', whiteSpace: 'nowrap', zIndex: 3, ...(P ? { right: '-12px' } : { left: '50%', transform: 'translateX(-50%)' }) };
+    const thumbs = [1, 2, 3, 4].map(n => ({ n: String(n), s: { width: '44px', height: '62px', borderRadius: '6px', background: '#fff', boxShadow: n === 1 ? '0 0 0 2.5px #1E2559' : '0 0 0 1px #E1E4EB', padding: '8px 6px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '4px' }, lab: { fontSize: '12px', fontWeight: n === 1 ? 700 : 500, color: n === 1 ? '#151833' : '#5D637A' } }));
+    const toastS = { position: 'absolute', zIndex: 6, display: 'flex', alignItems: 'center', gap: '12px', padding: '10px 10px 10px 12px', background: '#fff', borderRadius: '22px', boxShadow: '0 1px 2px rgba(20,23,46,.06),0 20px 48px rgba(20,23,46,.2)', animation: 'm3-up .4s cubic-bezier(.2,.8,.2,1) both', boxSizing: 'border-box', ...(P ? { left: '12px', right: '12px', bottom: '122px' } : { ...center, width: '520px', bottom: TL ? '28px' : '130px' }) };
+    const kk = (t, f, kind) => ({ t, s: { flex: f, height: P ? '44px' : '54px', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: kind === 'fn' ? (P ? '15px' : '17px') : (P ? '19px' : '22px'), background: kind === 'sp' ? 'transparent' : kind === 'fn' ? '#C9CDD6' : kind === 'go' ? '#1E2559' : '#fff', color: kind === 'go' ? '#fff' : '#151833', boxShadow: kind === 'sp' ? 'none' : '0 1px 0 rgba(20,23,46,.2)', fontWeight: kind === 'fn' ? 600 : 400 } });
+    const L = str => str.split('').map(c => kk(c, 1));
+    const kbRows = [{ k: L('qwertyuiop') }, { k: [kk('', .5, 'sp'), ...L('asdfghjkl'), kk('', .5, 'sp')] }, { k: [kk('⇧', 1.5, 'fn'), ...L('zxcvbnm'), kk('⌫', 1.5, 'fn')] }, { k: [kk('?123', 1.5, 'fn'), kk(',', 1), kk('', 5), kk('.', 1), kk('↵', 1.5, 'go')] }];
+    const sheetBase = { position: 'absolute', zIndex: 8, background: '#fff', display: 'flex', flexDirection: 'column', boxShadow: '0 -10px 50px rgba(20,23,46,.25)', animation: 'm3-sheet .34s cubic-bezier(.2,.8,.2,1) both', boxSizing: 'border-box' };
+    const modal = w => ({ left: 0, right: 0, top: 0, bottom: 0, margin: 'auto', width: w, height: 'max-content', borderRadius: '32px', padding: '26px 28px 28px' });
+    const sigS = { ...sheetBase, gap: P ? '16px' : '20px', ...(P ? { left: 0, right: 0, bottom: 0, top: '96px', borderRadius: '32px 32px 0 0', padding: '10px 20px 30px' } : modal('640px')) };
+    const lockS = { ...sheetBase, gap: '18px', ...(P ? { left: 0, right: 0, bottom: 0, borderRadius: '32px 32px 0 0', padding: '10px 20px 34px' } : modal('520px')) };
+    const tint = { Change: '#DDE2FF', Add: '#FFF1A8', 'Mark up': '#FCE3D8', Document: '#E3F1E9' };
+    const toolGroups = [['Change', [['Edit', 'ph-cursor-text'], ['Fill form', 'ph-textbox']]], ['Add', [['Text', 'ph-text-t'], ['Sign', 'ph-signature'], ['Image', 'ph-image']]], ['Mark up', [['Whiteout', 'ph-eraser'], ['Highlight', 'ph-highlighter'], ['Shapes', 'ph-shapes'], ['Draw', 'ph-scribble']]], ['Document', [['Pages', 'ph-squares-four'], ['Combine', 'ph-stack'], ['Extract', 'ph-export'], ['Convert', 'ph-file-arrow-down']]]].map(([name, items]) => ({ name, items: items.map(([label, ic]) => { const on = label === 'Edit'; return { label, icon: (on ? 'ph-fill ' : 'ph-duotone ') + ic,
+      chip: { width: '40px', height: '40px', borderRadius: '14px', background: on ? '#FFE14D' : tint[name], color: '#1E2559', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '21px' },
+      tile: { height: '84px', borderRadius: '20px', background: on ? '#1E2559' : '#F5F6F9', color: on ? '#fff' : '#151833', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '8px' } }; }) }));
+    const recents = [['Lease_Agreement_2026.pdf', '4 pages · 2h ago', '#1E2559', true], ['Tenant_application.pdf', 'Form · Yesterday', '#3446C9', false], ['Invoice_0918.pdf', '1 page · Mon', '#1E7A4C', false], ['Pet_addendum.pdf', '2 pages · Oct 21', '#C58A00', false]].slice(0, P ? 3 : 4).map(([name, meta, ink, edited]) => ({ name, meta, edited, bar: { height: '7px', width: '58%', borderRadius: '2px', background: ink } }));
+    const ht = [['Edit PDF', 'ph-pencil-simple-line', '#FFE14D'], ['Sign', 'ph-signature', '#FFF1A8'], ['Fill form', 'ph-textbox', '#DDE2FF'], ['Combine', 'ph-stack', '#E3F1E9'], ['Extract', 'ph-export', '#DDE2FF'], ['Insert pages', 'ph-file-plus', '#DDE2FF'], ['Convert', 'ph-file-arrow-down', '#FCE3D8'], ['All tools', 'ph-squares-four', '#ECEEF3']];
+    const homeTools = (P ? [ht[1], ht[2], ht[3], ht[7]] : ht).map(([label, ic, bg]) => ({ label, icon: 'ph-duotone ' + ic, bg }));
+    const pcards = [1, 2, 3, 4].map(n => ({ n: String(n), sel: n === 2, rot: n === 3, drag: n === 4, marker: n === 2,
+      wrap: { position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', transform: n === 4 ? 'translate(-10px,-10px) rotate(-4deg) scale(1.04)' : 'none', zIndex: n === 4 ? 3 : 1 },
+      thumb: { position: 'relative', width: '100%', aspectRatio: '1/1.414', background: '#fff', borderRadius: '6px', padding: '14% 12%', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', gap: '6%', boxShadow: n === 2 ? '0 0 0 3px #1E2559,0 10px 24px rgba(20,23,46,.14)' : n === 4 ? '0 28px 56px rgba(20,23,46,.28)' : '0 1px 2px rgba(20,23,46,.06),0 8px 20px rgba(20,23,46,.08)' },
+      num: { height: '26px', minWidth: '26px', padding: '0 8px', borderRadius: '13px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 700, background: n === 2 ? '#1E2559' : 'transparent', color: n === 2 ? '#fff' : '#5D637A', boxSizing: 'border-box' } }));
+    const gridS = { position: 'absolute', display: 'grid', zIndex: 1, ...(P ? { left: '16px', right: '16px', top: '104px', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '18px 14px' } : { ...center, width: '660px', top: '128px', gridTemplateColumns: 'repeat(3,minmax(0,1fr))', gap: '32px 28px' }) };
+    const pActs = [['Rotate', 'ph-arrow-clockwise', '#fff'], ['Duplicate', 'ph-copy', '#fff'], ['Extract', 'ph-export', '#fff'], ['Delete', 'ph-trash', '#FF9C8F']].map(([label, ic, c]) => ({ label, icon: 'ph ' + ic, s: { width: P ? '76px' : '88px', height: '60px', borderRadius: '18px', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '4px', color: c, fontSize: '12px', fontWeight: 600 } }));
+    return {
+      isP: P, isT: T, isTL: TL, isTP: TP, isHome, isEd, isPages, opening, editText,
+      showDoc: isEd && !opening, notEditText: !editText, pageS, pageMode, showSel: s === 'selectObj', tbS,
+      fileName: 'Lease_Agreement_2026.pdf', fileMeta: opening ? 'Opening…' : 'Page 1 of 4', showChanges: !opening, changes: s === 'workspace' ? '2 edits' : '3 edits',
+      islandTop: TL ? '36px' : '40px', openTop: P ? '300px' : '480px',
+      showScrub: P && ['workspace', 'selectObj', 'toast', 'export'].includes(s), showRail: T && isEd && !editText && !opening, thumbs,
+      strip: s === 'workspace', stripS, stripSep, swatches,
+      showTray: isEd && !editText && s !== 'export', trayS, tray, showExport: s === 'export', progS, showToast: s === 'toast', toastS,
+      psPad: P ? '8px 10px' : '10px 16px', chipFlex: P ? '1' : 'none', kbRows, kbPad: P ? '4px 5px 30px' : '6px 10px 28px', kbGap: P ? '9px' : '10px', kbKeyGap: P ? '5px' : '8px',
+      showSig: s === 'signature', sigS, padFlex: P ? '1' : 'none', padH: P ? 'auto' : '300px', sigFs: P ? '64px' : '84px',
+      showTools: s === 'tools' && P, toolGroups, showLocked: s === 'locked', lockS,
+      hPad: P ? '52px 20px 0' : '64px 56px 0', hGap: P ? '14px' : '40px', hCols: P ? 'minmax(0,1fr)' : 'minmax(0,1fr) minmax(0,1fr)', hColGap: P ? '20px' : '36px', hH1: P ? '38px' : '64px',
+      cardH: P ? '172px' : '300px', cardPad: P ? '22px' : '30px', sheetR: P ? '-14px' : '28px', sheetT: P ? '18px' : '34px', sheetW: P ? '112px' : '168px', cardTextW: P ? '60%' : '56%', cardH2: P ? '28px' : '36px',
+      recents, recGap: P ? '12px' : '18px', recBleed: P ? '-20px' : '0', recFlex: P ? 'none' : '1', recW: P ? '148px' : 'auto', recH: P ? '108px' : '170px',
+      homeTools, tGap: P ? '8px' : '14px', tH: P ? '84px' : '108px',
+      gridS, pcards, mkL: P ? '-11px' : '-16px', actTrayS, pActs,
+      sbH: P ? '36px' : '28px', sbPad: P ? '24px' : '20px', sbFs: P ? '14px' : '13px', sbTime: P ? '9:41' : '9:41  Thu 29 Oct', gbW: P ? '108px' : '160px',
+    };
+  }
+}
+</script>
+</body>
+</html>

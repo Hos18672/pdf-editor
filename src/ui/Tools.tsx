@@ -28,7 +28,7 @@ export interface Props {
   onScan: () => void;
 }
 
-const TILE = { edit: '#FFE14D', org: '#DDE2FF', conv: '#E3F1E9' };
+const TILE = { edit: 'var(--tint-add)', org: 'var(--tint-change)', conv: 'var(--tint-doc)' };
 type HubItem = { name: string; desc: string; icon: string; tile: string; go: () => void };
 
 export function Tools(p: Props) {
