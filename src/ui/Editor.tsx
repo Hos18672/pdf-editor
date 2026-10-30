@@ -171,12 +171,13 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [privOpen, setPrivOpen] = useState(start === 'privacy');
   const [found, setFound] = useState<{ list: Hit[]; cur: number; priv: boolean }>({ list: [], cur: -1, priv: false });
   const [strip, setStripRaw] = useState<boolean>(() => {
-    if (bp !== 'desktop' && bp !== 'large') return false;
+    // tablets and up: the page rail stays open (remembered); phones open it on demand
+    if (bp === 'mobile') return false;
     try { return localStorage.getItem('pe-strip') !== '0'; } catch { return true; }
   });
   const setStrip = (v: boolean | ((x: boolean) => boolean)) => setStripRaw((cur) => {
     const n = typeof v === 'function' ? v(cur) : v;
-    if (bp === 'desktop' || bp === 'large') { try { localStorage.setItem('pe-strip', n ? '1' : '0'); } catch { /* fine */ } }
+    if (bp !== 'mobile') { try { localStorage.setItem('pe-strip', n ? '1' : '0'); } catch { /* fine */ } }
     return n;
   });
   // phone: the bottom bar keeps the chosen tool in view
@@ -191,6 +192,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   // tool flyout beside the rail (tablet / desktop) or above the dock (phone, shapes only)
   const [flyout, setFlyout] = useState<{ t: RailT; top: number } | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [moreQ, setMoreQ] = useState('');
+  useEffect(() => { if (!moreOpen) setMoreQ(''); }, [moreOpen]);
   const [askClose, setAskClose] = useState(false);
   const savedSnap = useRef<unknown>(null); // what the last download contained: closing then needs no question
   const [recent, setRecent] = useState<Recent>(readRecent);
@@ -1701,7 +1704,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           )}
         </div>
         {strip && view === 'doc' && (
-          <PageStrip pages={snap.pages} cur={curPage} overlay={!desk}
+          <PageStrip pages={snap.pages} cur={curPage} overlay={mobile}
             pdfFor={(src) => (preview && preview.keys[src] !== undefined ? preview.pdf : pdf)}
             onGo={(src) => { goToPage(src); if (mobile) setStrip(false); }} onClose={() => setStrip(false)}
             onOrganize={() => { setStrip(false); railClick(RAIL.find((r) => r.t === 'pages')!); }}
@@ -1711,6 +1714,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           <button className="pgtab" onClick={() => setStrip(true)} aria-label="Show all pages">
             <Icon name="sidebar-simple" size={17} /><b>{Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1)}</b>/{snap.pages.length}
           </button>
+        )}
+        {mobile && !strip && view === 'doc' && !mobileEditing && !fieldNav && snap.pages.length > 1 && (
+          <span className="scrub" aria-hidden><i style={{ height: `${100 / snap.pages.length}%`, top: `${(Math.max(0, snap.pages.findIndex((p) => p.src === curPage)) / snap.pages.length) * 100}%` }} /></span>
         )}
         {desk && view === 'doc' && (
           <aside className="side" aria-label="Properties">
@@ -1799,7 +1805,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             <div className="tsh"><h2>All tools</h2>
               <ThemeButton theme={theme} onToggle={onTheme} />
               <button className="ibtn round" onClick={() => setMoreOpen(false)} aria-label="Close"><Icon name="x:bold" size={18} /></button></div>
-            {GROUPS.map((g) => (
+            <label className="tsearch"><Icon name="magnifying-glass" size={18} />
+              <input value={moreQ} onChange={(e) => setMoreQ(e.target.value)} placeholder="Search tools" aria-label="Search tools" autoComplete="off" spellCheck={false} />
+              {moreQ && <button className="ibtn" onClick={() => setMoreQ('')} aria-label="Clear search"><Icon name="x:bold" size={14} /></button>}</label>
+            {GROUPS.map((g) => ({ ...g, items: g.items.filter((r) => toolMatch(r.label + ' ' + r.t, moreQ)) })).filter((g) => g.items.length).map((g) => (
               <div key={g.name} className="tsg">
                 <span className="kicker">{g.name}</span>
                 <div className="tiles">
@@ -1815,13 +1824,15 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                 </div>
               </div>
             ))}
-            <div className="tsg">
-              <span className="kicker">Check</span>
-              <div className="tiles">
-                <button className="tile" onClick={() => { setMoreOpen(false); setFindOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="magnifying-glass" size={21} weight="duotone" /></span>Find</button>
-                <button className="tile" onClick={() => { setMoreOpen(false); setPrivOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="shield-check" size={21} weight="duotone" /></span>Privacy</button>
+            {(toolMatch('find search', moreQ) || toolMatch('privacy check personal data', moreQ)) && (
+              <div className="tsg">
+                <span className="kicker">Check</span>
+                <div className="tiles">
+                  {toolMatch('find search', moreQ) && <button className="tile" onClick={() => { setMoreOpen(false); setFindOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="magnifying-glass" size={21} weight="duotone" /></span>Find</button>}
+                  {toolMatch('privacy check personal data', moreQ) && <button className="tile" onClick={() => { setMoreOpen(false); setPrivOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="shield-check" size={21} weight="duotone" /></span>Privacy</button>}
+                </div>
               </div>
-            </div>
+            )}
             <button className="more-tools" onClick={() => { setMoreOpen(false); onTools(); }}>More tools: compress, password, split…<Icon name="right" size={16} /></button>
           </div>
         </>
@@ -2075,4 +2086,10 @@ function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMar
       <button className="btn primary lg block" onClick={onDownload}><Icon name="download" size={18} />Download filled PDF</button>
     </div>
   );
+}
+
+/** the All tools search: every word typed appears in the tool's name or keywords */
+function toolMatch(hay: string, q: string) {
+  const h = hay.toLowerCase();
+  return q.trim().toLowerCase().split(/\s+/).filter(Boolean).every((w) => h.includes(w));
 }
