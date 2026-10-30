@@ -1583,10 +1583,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         {!mobile && <button className={`ibtn${strip ? ' on' : ''}`} onClick={() => setStrip((v) => !v)} aria-pressed={strip} aria-label="Pages panel" title="Pages panel"><Icon name="sidebar-simple" size={20} weight={strip ? 'fill' : 'regular'} /></button>}
         {!mobile && <button className="ibtn" onClick={onTools} aria-label="All tools" title="All tools: combine, extract, convert"><Icon name="dots-nine" size={20} /></button>}
         {!mobile && <ThemeButton theme={theme} onToggle={onTheme} />}
-        {mobile
-          ? <button className="ibtn primary" onClick={() => download()} aria-label={host.isNative ? 'Save PDF' : 'Download PDF'}><Icon name="download" size={20} /></button>
-          : <button className="btn primary dl" onClick={() => download()}><Icon name="download" size={18} />Download</button>}
       </header>
+      {/* Download floats on its own, beside the top bar */}
+      <button className={`dlfloat${mobile ? ' m' : ''}`} onClick={() => download()} aria-label={host.isNative ? 'Save PDF' : 'Download PDF'} title={host.isNative ? 'Save PDF' : 'Download PDF'}>
+        <Icon name="download" size={mobile ? 22 : 19} />{!mobile && <span>Download</span>}
+      </button>
       {fileMenu && (
         <FileSheet name={docName ?? file.name.replace(/\.pdf$/i, '') + '-edited'} original={file.name} mobile={mobile} native={!!host.isNative}
           pages={snap.pages.length} changes={editCount}

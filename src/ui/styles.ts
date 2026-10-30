@@ -1313,4 +1313,14 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
   .hcard .tt b { white-space: normal; font-size: 13.5px; line-height: 1.2; }
   .hcard .tt span { display: none; }
 }
+/* the Download button floats apart from the top bar, at the same height */
+.app .topbar.float { right: calc(16px + var(--safe-r) + 154px); }
+.dlfloat { position: absolute; top: calc(16px + var(--safe-t)); right: calc(16px + var(--safe-r)); z-index: 12; width: 144px; height: 60px; border: 0; border-radius: 20px; background: var(--ink); color: var(--on-ink); display: flex; align-items: center; justify-content: center; gap: 9px; font: inherit; font-size: 15px; font-weight: 700; box-shadow: 0 1px 2px rgba(20,23,46,.1), 0 10px 24px rgba(30,37,89,.28); cursor: pointer; transition: background .15s, transform .15s var(--ease); animation: pe-in .3s .05s var(--ease) both; }
+.dlfloat:hover { background: var(--ink-hover); }
+.dlfloat:active { transform: scale(.96); }
+:root[data-theme="dark"] .dlfloat { box-shadow: 0 10px 24px rgba(0,0,0,.4); }
+@media (max-width: 599px) {
+  .app .topbar.float { right: calc(8px + var(--safe-r) + 68px); }
+  .dlfloat { top: calc(8px + var(--safe-t)); right: calc(8px + var(--safe-r)); width: 60px; }
+}
 `;
