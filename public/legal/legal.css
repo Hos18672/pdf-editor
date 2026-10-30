@@ -23,3 +23,29 @@ th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line
 th { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); }
 .box { background: var(--bg); border-radius: 14px; padding: 12px 14px; margin: 10px 0; }
 footer { color: var(--muted); font-size: 13px; text-align: center; margin-top: 18px; }
+
+/* small screens: compact type, one scrolling row of tabs, tighter cards, stacked tables */
+@media (max-width: 600px) {
+  body { font-size: 14px; line-height: 1.55; }
+  main { padding: calc(12px + env(safe-area-inset-top, 0px)) 10px calc(28px + env(safe-area-inset-bottom, 0px)); }
+  nav.top { flex-wrap: nowrap; overflow-x: auto; gap: 6px; margin: 0 -10px 12px; padding: 0 10px 2px; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  nav.top::-webkit-scrollbar { display: none; }
+  nav.top a { flex: none; padding: 7px 12px; font-size: 13px; white-space: nowrap; }
+  article { padding: 16px 14px; border-radius: 16px; }
+  article + article { margin-top: 12px; }
+  h1 { font-size: 21px; }
+  h2 { font-size: 15.5px; margin: 18px 0 4px; }
+  h3 { font-size: 14.5px; margin: 14px 0 2px; }
+  .meta { font-size: 12.5px; margin-bottom: 10px; }
+  ul { padding-left: 18px; }
+  .box { padding: 10px 12px; font-size: 13.5px; }
+  p, li { overflow-wrap: anywhere; }
+  table, thead, tbody, tr, th, td { display: block; }
+  thead { display: none; }
+  tr { padding: 8px 0; border-bottom: 1px solid var(--line); }
+  td { border: 0; padding: 1px 0; font-size: 13px; }
+  td:first-child { font-weight: 600; font-size: 13.5px; }
+  td:nth-child(2):empty { display: none; }
+  td:nth-child(2):not(:empty)::before { content: "Version "; color: var(--muted); }
+  td:nth-child(3) { color: var(--muted); }
+}
