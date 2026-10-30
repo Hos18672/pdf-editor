@@ -25,16 +25,25 @@ export function setLang(l: Lang) {
   listeners.forEach((f) => f(l));
 }
 
+/** The text for a key. A key may carry a context after `|` (`'Clear|sig'`) when one English word
+ *  needs a different (often shorter) German word in one place; the context is never shown. */
+const look = (en: string) => {
+  const hit = lang === 'de' ? DE[en] : undefined;
+  if (hit !== undefined) return hit;
+  const bar = en.indexOf('|');
+  return bar < 0 ? en : lang === 'de' ? (DE[en.slice(0, bar)] ?? en.slice(0, bar)) : en.slice(0, bar);
+};
+
 /** Translate: `t('Saved {name}', { name })`. Unknown strings stay English. */
 export function t(en: string, vars?: Record<string, string | number>): string {
-  let s = lang === 'de' ? (DE[en] ?? en) : en;
+  let s = look(en);
   if (vars) for (const k in vars) s = s.split(`{${k}}`).join(String(vars[k]));
   return s;
 }
 
 /** A sentence with elements inside: `tj('Tap {plus} to add', { plus: <b>+</b> })`. */
 export function tj(en: string, parts: Record<string, React.ReactNode>): React.ReactNode {
-  const s = lang === 'de' ? (DE[en] ?? en) : en;
+  const s = look(en);
   return s.split(/(\{\w+\})/).map((seg, i) => {
     const m = seg.match(/^\{(\w+)\}$/);
     return React.createElement(React.Fragment, { key: i }, m && m[1] in parts ? parts[m[1]] : seg);

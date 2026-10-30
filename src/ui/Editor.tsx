@@ -1583,7 +1583,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         )}
         {!mobile && <button className={`ibtn${strip ? ' on' : ''}`} onClick={() => setStrip((v) => !v)} aria-pressed={strip} aria-label={t('Pages panel')} title={t('Pages panel')}><Icon name="sidebar-simple" size={20} weight={strip ? 'fill' : 'regular'} /></button>}
         {!mobile && <button className="ibtn" onClick={onTools} aria-label={t('All tools')} title={t('All tools: combine, extract, convert')}><Icon name="dots-nine" size={20} /></button>}
-        {!mobile && <LangButton />}
+        {desk && <LangButton />}
         {!mobile && <ThemeButton theme={theme} onToggle={onTheme} />}
       </header>
       {/* Download floats on its own, beside the top bar */}

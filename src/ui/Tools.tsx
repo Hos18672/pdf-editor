@@ -94,7 +94,7 @@ export function Tools(p: Props) {
     <div className="tscreen">
       <header className="topbar">
         <button className="ibtn" onClick={back} aria-label={t('Back')}><Icon name="back" /></button>
-        <div className="doc"><div className="names"><div className="fname">{t(meta[tool][0])}</div><div className="fmeta">{t(meta[tool][1])}</div></div></div>
+        <div className="doc"><div className="names"><div className="fname">{t(meta[tool][0])}</div><div className="fmeta one">{t(meta[tool][1])}</div></div></div>
         {!mobile && <div className="privacy-pill"><Icon name="lock" size={14} />{t('Processed on this device')}</div>}
       </header>
       {tool === 'hub' && (

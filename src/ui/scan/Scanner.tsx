@@ -21,7 +21,7 @@ import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
 import { t, tn } from '../i18n';
 
 const FILTERS: { id: Filter; label: string }[] = [
-  { id: 'original', label: 'Original' }, { id: 'lighten', label: 'Lighten' }, { id: 'enhance', label: 'Enhance' }, { id: 'auto', label: 'Magic' },
+  { id: 'original', label: 'Original' }, { id: 'lighten', label: 'Lighten|scan' }, { id: 'enhance', label: 'Enhance|scan' }, { id: 'auto', label: 'Magic' },
   { id: 'color', label: 'Photo' }, { id: 'gray', label: 'Grey' }, { id: 'bw', label: 'B & W' },
 ];
 const FILTER_IDS = FILTERS.map((f) => f.id);
@@ -564,12 +564,12 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
 
           {page && (
             <div className="sc-acts">
-              <button onClick={() => setCrop(page.id)}><Icon name="crop" size={21} /><span>{t('Crop')}</span></button>
-              <button onClick={() => setErasing(page.id)} className={page.erase?.length ? 'on' : ''}><Icon name="eraser" size={21} /><span>{t('Remove')}</span></button>
+              <button onClick={() => setCrop(page.id)}><Icon name="crop" size={21} /><span>{t('Crop|scan')}</span></button>
+              <button onClick={() => setErasing(page.id)} className={page.erase?.length ? 'on' : ''}><Icon name="eraser" size={21} /><span>{t('Remove|scan')}</span></button>
               <button onClick={() => rotate(-1)}><Icon name="restore" size={21} /><span>{t('Left')}</span></button>
               <button onClick={() => rotate(1)}><Icon name="rotate" size={21} /><span>{t('Right')}</span></button>
               <button onClick={() => remove(page.id)} className="danger"><Icon name="trash" size={21} /><span>{t('Delete')}</span></button>
-              <button onClick={toCamera} className="add"><Icon name="camera-plus" size={21} /><span>{t('Add page')}</span></button>
+              <button onClick={toCamera} className="add"><Icon name="camera-plus" size={21} /><span>{t('Add page|scan')}</span></button>
             </div>
           )}
 

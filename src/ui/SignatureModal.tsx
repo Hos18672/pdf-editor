@@ -172,9 +172,9 @@ export function SignatureModal({ onClose, onPick, sheet }: { onClose: () => void
           </section>
         )}
         <div className="seg lg" role="tablist">
-          {([['draw', 'Draw', 'scribble'], ['type', 'Type', 'keyboard'], ['upload', 'Upload', 'upload']] as const).map(([t, label, ic]) => (
-            <button key={t} className={tab === t ? 'on' : ''} onClick={() => setTab(t)} role="tab" aria-selected={tab === t}>
-              <Icon name={ic} size={17} />{label}
+          {([['draw', 'Draw', 'scribble'], ['type', 'Type|sig', 'keyboard'], ['upload', 'Upload', 'upload']] as const).map(([k, label, ic]) => (
+            <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)} role="tab" aria-selected={tab === k}>
+              <Icon name={ic} size={17} />{t(label)}
             </button>
           ))}
         </div>
@@ -220,9 +220,9 @@ export function SignatureModal({ onClose, onPick, sheet }: { onClose: () => void
         </div>
         {tab !== 'upload' && (
           <div className="foot">
-            {tab === 'draw' && <button className="btn outline lg" onClick={clear} disabled={!hasInk}><Icon name="restore" size={17} />{t('Clear')}</button>}
+            {tab === 'draw' && <button className="btn outline lg" onClick={clear} disabled={!hasInk}><Icon name="restore" size={17} />{t('Clear|sig')}</button>}
             <button className="btn primary lg" disabled={tab === 'draw' ? !hasInk : !name.trim()} onClick={place}>
-              <Icon name="signature:bold" size={18} />{t('Place signature')}
+              <Icon name="signature:bold" size={18} />{t('Place signature|btn')}
             </button>
           </div>
         )}
