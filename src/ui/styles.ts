@@ -1348,7 +1348,7 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 /* German: long single words hyphenate instead of being cut; footers keep the summary readable */
 :root[lang="de"] .tool { width: 76px; font-size: 10px; letter-spacing: -.01em; }
 :root[lang="de"] .hcard .tt b, :root[lang="de"] .hcard .tt span { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-@media (max-width: 599px) { :root[lang="de"] .hcard .tt span { display: none; } :root[lang="de"] .tbar .t span { white-space: normal; } }
+@media (max-width: 599px) { :root[lang="de"] .hcard .tt span { display: none; } :root[lang="de"] .hcard .tt b { -webkit-line-clamp: 3; } :root[lang="de"] .tbar .t span { white-space: normal; } }
 :root[lang="de"] .hcard .tt b, :root[lang="de"] .s2-chip, :root[lang="de"] .tbar .t b { -webkit-hyphens: auto; hyphens: auto; }
 @media (max-width: 599px) {
   :root[lang="de"] .hcard { gap: 8px; padding: 10px 8px; }
