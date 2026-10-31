@@ -1,6 +1,7 @@
 // Page-level PDF operations, all done on the device with pdf-lib.
 import { PDFDocument, PDFName, PDFHexString, PDFNull, PDFNumber, PDFRef, degrees } from 'pdf-lib';
 import type { PageState } from '../engine/types';
+import { t } from './i18n';
 
 /** "1-3, 5" (also with – or —) → zero-based page indexes within 0..count-1, in order, no duplicates. */
 export function parseRange(text: string, count: number): number[] {
@@ -44,7 +45,7 @@ export async function imageBytes(file: Blob): Promise<{ bytes: Uint8Array; png: 
   }
   const url = URL.createObjectURL(blob);
   try {
-    const im = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error('Not a readable image')); i.src = url; });
+    const im = await new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(t('Not a readable image'))); i.src = url; });
     const w = im.naturalWidth, h = im.naturalHeight;
     if (blob.type === 'image/jpeg' || blob.type === 'image/png') return { bytes: new Uint8Array(await blob.arrayBuffer()), png: blob.type === 'image/png', w, h };
     const c = document.createElement('canvas');

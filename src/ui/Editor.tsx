@@ -1990,10 +1990,10 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, to
           obj.font || docFonts
             // the document's fonts: pick one in the options
             ? <button className="chipb" aria-label={t('Font {f}', { f: obj.font?.label ?? t(famLabel[obj.family]) })} onClick={onToggle}>
-                <span style={{ fontFamily: obj.font?.css ?? famCss[obj.family], fontSynthesis: 'none' } as any}>{t('Aa')}</span><span className="fn">{obj.font?.label ?? famLabel[obj.family]}</span>
+                <span style={{ fontFamily: obj.font?.css ?? famCss[obj.family], fontSynthesis: 'none' } as any}>{t('Aa')}</span><span className="fn">{obj.font?.label ?? t(famLabel[obj.family])}</span>
               </button>
             : <button className="chipb" aria-label={t('Change font')} onClick={() => onObj({ family: fams[(fams.indexOf(obj.family) + 1) % 3] })}>
-                <span style={{ fontFamily: famCss[obj.family] }}>{t('Aa')}</span><span className="fn">{famLabel[obj.family]}</span>
+                <span style={{ fontFamily: famCss[obj.family] }}>{t('Aa')}</span><span className="fn">{t(famLabel[obj.family])}</span>
               </button>
         )}
         {run && <Stepper soft value={selSize ?? run.size} min={2} max={300} label={selSize !== null ? t('size of the selected letters') : t('size')}

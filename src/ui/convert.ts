@@ -1,6 +1,7 @@
 // Turning other files into PDFs on the device. Heavy libraries are loaded only when needed.
 import { PDFDocument } from 'pdf-lib';
 import { addImagePage, imageBytes, PageSize } from './pdfops';
+import { t } from './i18n';
 
 export interface ConvertOptions { size: PageSize; orient: 'auto' | 'portrait' | 'landscape'; margin: 'none' | 'small' | 'normal' }
 export type Progress = (f: number) => void;
@@ -355,5 +356,5 @@ async function pptxToPdf(doc: PDFDocument, file: File, progress: Progress) {
     } finally { host.remove(); }
     progress(0.1 + 0.85 * ((si + 1) / slides.length));
   }
-  if (!doc.getPageCount()) throw new Error('No slides found');
+  if (!doc.getPageCount()) throw new Error(t('No slides found'));
 }

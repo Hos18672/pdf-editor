@@ -82,7 +82,7 @@ const FAMILIES: [FontFamily, string, string][] = [
   ['Helvetica', 'Sans', 'Arial, Helvetica, sans-serif'], ['Times', 'Serif', '"Times New Roman", serif'], ['Courier', 'Mono', '"Courier New", monospace'],
 ];
 const Family = ({ value, onChange }: { value: FontFamily; onChange: (f: FontFamily) => void }) => (
-  <Seg value={value} onChange={onChange} options={FAMILIES.map(([f, label, css]) => [f, <span style={{ fontFamily: css }}>{label}</span>])} />
+  <Seg value={value} onChange={onChange} options={FAMILIES.map(([f, label, css]) => [f, <span style={{ fontFamily: css }}>{t(label)}</span>])} />
 );
 
 function Head({ kicker, title, onClose }: { kicker: string; title: string; onClose?: () => void }) {
@@ -99,7 +99,7 @@ export const fontLabel = (font?: FontInfo) => {
   return n || t('Embedded font');
 };
 
-const LOOK_BTNS: [keyof CharLook, string, string][] = [['b', 'text-b:bold', 'Bold'], ['i', 'text-italic', 'Italic'], ['u', 'text-underline', 'Underline'], ['s', 'text-strikethrough', 'Strike-through']];
+const LOOK_BTNS: [keyof CharLook, string, string][] = [['b', 'text-b:bold', 'Bold'], ['i', 'text-italic', 'Italic'], ['u', 'text-underline', 'Underline|fmt'], ['s', 'text-strikethrough', 'Strike-through']];
 const ALIGNS: ['left' | 'center' | 'right', string][] = [['left', 'Align left'], ['center', 'Centre'], ['right', 'Align right']];
 
 /**
@@ -131,8 +131,8 @@ export function TextTools({ editKey, whole, onWhole, disabled, align, onAlign }:
       {LOOK_BTNS.map(([k, icon, label]) => {
         const off = !sel && disabled?.[k];
         return (
-          <button key={k} type="button" className={cur[k] ? 'on' : ''} aria-pressed={!!cur[k]} aria-label={label} disabled={!!off}
-            title={off || `${label}${k === 's' ? '' : ` (Ctrl+${k.toUpperCase()})`}${sel ? ' · selected letters' : ''}`} onClick={() => flip(k)}>
+          <button key={k} type="button" className={cur[k] ? 'on' : ''} aria-pressed={!!cur[k]} aria-label={t(label)} disabled={!!off}
+            title={off || `${t(label)}${k === 's' ? '' : ` (${t('Ctrl')}+${k.toUpperCase()})`}${sel ? ` · ${t('selected letters')}` : ''}`} onClick={() => flip(k)}>
             <Icon name={icon} size={19} />
           </button>
         );
@@ -278,7 +278,7 @@ function FontPick({ o, docFonts, onChange }: { o: Extract<EditorObject, { type: 
       ))}
       {FAMILIES.map(([fam, label, css]) => (
         <button key={fam} role="radio" aria-checked={!o.font && o.family === fam} className={!o.font && o.family === fam ? 'on std' : 'std'}
-          onClick={() => onChange({ font: undefined, family: fam })} style={{ fontFamily: css }}>{label}</button>
+          onClick={() => onChange({ font: undefined, family: fam })} style={{ fontFamily: css }}>{t(label)}</button>
       ))}
     </div>
   );
@@ -401,7 +401,7 @@ function LinkProps({ o, order, onChange }: { o: Extract<EditorObject, { type: 'l
       </div>
       {kind === 'web' ? (
         <div className="field"><div className="label">{t('Address')}</div>
-          <input className="input" type="url" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="https://example.com or name@mail.com"
+          <input className="input" type="url" inputMode="url" autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder={t('https://example.com or name@mail.com')}
             value={o.url} onChange={(e) => onChange({ url: e.target.value })} onKeyDown={(e) => e.stopPropagation()} aria-label={t('Web address')} />
         </div>
       ) : (

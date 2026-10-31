@@ -556,7 +556,7 @@ button { cursor: pointer; }
 .props .acts2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .props .hint { font-size: 12.5px; line-height: 1.55; color: var(--muted); }
 .props .lineacts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.props .lineacts .btn { justify-content: center; padding-left: 8px; padding-right: 8px; min-width: 0; }
+.props .lineacts .btn { justify-content: center; flex-direction: column; gap: 3px; height: auto; min-height: 58px; padding: 8px 4px; min-width: 0; font-size: 12.5px; white-space: normal; text-align: center; line-height: 1.15; }
 .props .keys { font-size: 12.5px; color: var(--muted); display: flex; gap: 14px; flex-wrap: wrap; }
 .props .keys b { font-weight: 600; }
 .fontbox { height: 44px; border-radius: 14px; box-shadow: inset 0 0 0 1px var(--line-2); display: flex; align-items: center; gap: 10px; padding: 0 12px; min-width: 0; }
@@ -1357,6 +1357,8 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
   :root[lang="de"] .tbar .t b { white-space: normal; line-height: 1.2; }
 }
 @media (max-width: 400px) { :root[lang="de"] .tbar > .btn svg { display: none; } }
+@media (max-width: 380px) { :root[lang="de"] .sc-acts button { font-size: 10px; } }
+@media (max-width: 719px) { .sc-acts button { flex: 1 1 auto; height: auto; min-height: 52px; padding-bottom: 6px; } }
 .legal-links span[aria-hidden] { display: none; }
 .legal-links { gap: 0 14px; }
 @media (max-width: 719px) { :root[lang="de"] .sc-acts { gap: 2px; } :root[lang="de"] .sc-acts button { font-size: 10.5px; padding: 0 1px; justify-content: flex-start; padding-top: 9px; } :root[lang="de"] .sc-ft .lb { font-size: 11px; } }

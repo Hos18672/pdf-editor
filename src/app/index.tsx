@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BackHandler, Keyboard, KeyboardAvoidingView, Platform, StyleSheet, View, useColorScheme } from 'react-native';
+import { BackHandler, Keyboard, KeyboardAvoidingView, PixelRatio, Platform, StyleSheet, View, useColorScheme } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { NavigationBar } from 'expo-navigation-bar';
@@ -162,6 +162,9 @@ function NativeShell({ dark }: { dark: boolean }) {
           allowFileAccessFromFileURLs: true,
           allowUniversalAccessFromFileURLs: true,
           setBuiltInZoomControls: false,
+          // Android scales WebView text by the phone's font-size setting. Unlimited, that breaks compact
+          // rows (toolbars, buttons), so it follows the setting only up to 115 %.
+          textZoom: Math.round(Math.min(PixelRatio.getFontScale(), 1.15) * 100),
           // the document scanner's live camera (getUserMedia): Android asks for the camera permission
           // when the page first requests it; the preview video must play without a tap
           mediaPlaybackRequiresUserAction: false,
