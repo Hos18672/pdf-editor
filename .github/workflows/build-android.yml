@@ -1,4 +1,4 @@
-name: Build Android APK
+name: Build Android APK and AAB
 
 # Run from the Actions tab ("Run workflow") or by pushing a tag like v1.0.1.
 # The APK is attached to a GitHub release, so it can be downloaded straight to a phone.
@@ -17,7 +17,7 @@ concurrency:
 jobs:
   apk:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -70,10 +70,44 @@ jobs:
           echo "version=$v" >> "$GITHUB_OUTPUT"
           ls -l "$out"
 
+      # Google Play takes an Android App Bundle (.aab). It holds all phone architectures (Play
+      # delivers only the right one to each phone). It is signed with the upload key from the
+      # repository secrets UPLOAD_KEYSTORE_B64 and UPLOAD_KEYSTORE_PASSWORD (alias "upload");
+      # without them the bundle keeps the debug signature, which Play refuses.
+      - name: Build release AAB (Google Play)
+        working-directory: android
+        env:
+          CI: '1'
+          NODE_ENV: production
+        run: ./gradlew bundleRelease --no-daemon -PreactNativeArchitectures=armeabi-v7a,arm64-v8a,x86_64
+
+      - name: Sign the AAB with the upload key
+        id: aab
+        env:
+          KS_B64: ${{ secrets.UPLOAD_KEYSTORE_B64 }}
+          KS_PW: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+        run: |
+          out="Paginka-${{ steps.apk.outputs.version }}-build${{ github.run_number }}.aab"
+          cp android/app/build/outputs/bundle/release/app-release.aab "$out"
+          if [ -n "$KS_B64" ]; then
+            echo "$KS_B64" | base64 -d > upload.jks
+            zip -q -d "$out" 'META-INF/*.SF' 'META-INF/*.RSA' 'META-INF/*.MF' || true
+            jarsigner -sigalg SHA256withRSA -digestalg SHA-256 -keystore upload.jks -storepass "$KS_PW" "$out" upload
+            rm -f upload.jks
+            echo "signed=upload" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning title=AAB not signed for Play::Add the UPLOAD_KEYSTORE_B64 and UPLOAD_KEYSTORE_PASSWORD secrets"
+            echo "signed=debug" >> "$GITHUB_OUTPUT"
+          fi
+          echo "file=$out" >> "$GITHUB_OUTPUT"
+          ls -l "$out"
+
       - uses: actions/upload-artifact@v4
         with:
           name: android-apk
-          path: ${{ steps.apk.outputs.file }}
+          path: |
+            ${{ steps.apk.outputs.file }}
+            ${{ steps.aab.outputs.file }}
 
       - name: Publish as a GitHub release
         env:
@@ -83,10 +117,10 @@ jobs:
           if [ "${GITHUB_REF_TYPE}" != "tag" ]; then tag="android-build-${{ github.run_number }}"; fi
           # the error (if any) is written as an annotation, so it can be read without the full log
           gh --version | head -1
-          if ! out=$(gh release create "$tag" "${{ steps.apk.outputs.file }}" \
+          if ! out=$(gh release create "$tag" "${{ steps.apk.outputs.file }}" "${{ steps.aab.outputs.file }}" \
             --target "${GITHUB_SHA}" \
             --title "Paginka ${{ steps.apk.outputs.version }} (Android, build ${{ github.run_number }})" \
-            --notes "Android app (APK) built from ${GITHUB_SHA::7}. On your phone: download the .apk, open it and allow installing from this source." 2>&1); then
+            --notes "Android app (APK) built from ${GITHUB_SHA::7}. On your phone: download the .apk, open it and allow installing from this source. The .aab is for Google Play (signed: ${{ steps.aab.outputs.signed }})." 2>&1); then
             echo "::error title=Publish failed::$(echo "$out" | tr '\n' ' ' | head -c 900)"
             exit 1
           fi
