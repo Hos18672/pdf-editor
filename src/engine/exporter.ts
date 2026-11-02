@@ -1,6 +1,6 @@
 import {
   PDFDocument, PDFDict, PDFName, PDFRef, PDFArray, PDFRawStream, PDFStream, StandardFonts,
-  decodePDFRawStream, degrees, PDFFont, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList, PDFBool, PDFString,
+  decodePDFRawStream, degrees, PDFFont, PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList, PDFBool, PDFString, PDFHexString,
 } from 'pdf-lib';
 import { tokenize, rebuild, fmtNum, toHex } from './contentStream';
 import { interpret, removeGlyphs, hideGlyphs, invert, Glyph, M } from './interpreter';
@@ -547,7 +547,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
 
     // Objects drawn in viewport space
     // (a Remove done in the page's content is not drawn again as a picture)
-    const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link' && o.type !== 'erase' && !(o.type === 'image' && o.vector));
+    const objs = input.objects.filter((o) => o.page === pi && o.type !== 'link' && o.type !== 'note' && o.type !== 'erase' && !(o.type === 'image' && o.vector));
     if (objs.length) {
       add += 'q ' + invert(vm).map(f).join(' ') + ' cm\n';
       for (const o of objs) add += await drawObject(doc, leaf, o, stdFont, safe, { docSources, matchPdf, arabicPdf });
@@ -565,6 +565,25 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
       const annot = doc.context.obj({
         Type: 'Annot', Subtype: 'Link', Rect: [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)].map((v) => +v.toFixed(2)), Border: [0, 0, 0],
         ...(dest ? { Dest: [dest.ref, PDFName.of('Fit')] } : { A: { Type: 'Action', S: 'URI', URI: PDFString.of(uri!) } }),
+      });
+      const ref = doc.context.register(annot);
+      const annots = leaf.lookupMaybe(PDFName.of('Annots'), PDFArray);
+      if (annots) annots.push(ref); else leaf.set(PDFName.of('Annots'), doc.context.obj([ref]));
+    }
+
+    // comments: sticky-note annotations (shown by every PDF reader, nothing drawn in the page)
+    for (const o of input.objects) {
+      if (o.page !== pi || o.type !== 'note' || !vm || !o.text.trim()) continue;
+      const inv = invert(vm);
+      const ux = inv[0] * o.x + inv[2] * o.y + inv[4], uy = inv[1] * o.x + inv[3] * o.y + inv[5];
+      const [cr, cg, cb] = [1, 3, 5].map((i) => parseInt(o.color.slice(i, i + 2), 16) / 255);
+      const now = new Date(), p2 = (n: number) => String(n).padStart(2, '0');
+      const annot = doc.context.obj({
+        Type: 'Annot', Subtype: 'Text', Name: 'Comment', Open: false, F: 4,
+        Rect: [ux, uy - 20, ux + 20, uy].map((v) => +v.toFixed(2)),
+        Contents: PDFHexString.fromText(o.text), C: [cr, cg, cb].map((v) => +v.toFixed(3)),
+        T: PDFHexString.fromText('Paginka'),
+        M: PDFString.of(`D:${now.getFullYear()}${p2(now.getMonth() + 1)}${p2(now.getDate())}${p2(now.getHours())}${p2(now.getMinutes())}${p2(now.getSeconds())}`),
       });
       const ref = doc.context.register(annot);
       const annots = leaf.lookupMaybe(PDFName.of('Annots'), PDFArray);

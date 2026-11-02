@@ -3,13 +3,18 @@ import { pageCover, pageRules } from './rules';
 import { gesture } from './gesture';
 import { Icon } from './icons';
 import { openPdf } from './pdfjs';
-import { useHistory, uid, Tool, ToolStyle, RunEdit } from './store';
+import { useHistory, uid, Tool, ToolStyle, RunEdit, cleanScales, cleanLooks } from './store';
 import { PageView, PageInfo, PageData, FillMark, lineRooms } from './PageView';
 import { SignatureModal, Stamp } from './SignatureModal';
 import { Organizer } from './Organizer';
 import { runBox } from './geometry';
 import { AddPagesSheet, type AddWhat } from './AddPages';
-import { FindBar, PrivacyCheck } from './FindBar';
+import { FindBar, PrivacyCheck, type ReplaceOpts } from './FindBar';
+import { StampModal } from './StampModal';
+import { haptic } from './motion';
+import { ProfileModal } from './ProfileModal';
+import { loadProfile, hasProfile, wantOf, valueFor, labelLine, type Profile } from './profile';
+import { BASELINE } from '../engine/matchFonts';
 import type { Hit, DocRef } from './search';
 import { Loupe } from './Loupe';
 import { Thumb } from './Thumb';
@@ -94,6 +99,8 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
     { t: 'text', label: 'Text', icon: 'text-t', key: 'T', opts: true },
     { t: 'sign', label: 'Sign', icon: 'signature', key: 'S' },
     { t: 'image', label: 'Image', icon: 'image', key: 'I' },
+    { t: 'stamp', label: 'Stamp', icon: 'stamp', key: 'A' },
+    { t: 'note', label: 'Comment', icon: 'note', key: 'N' },
     { t: 'link', label: 'Link', icon: 'link', key: 'K' }] },
   { name: 'Mark up', tint: 'var(--tint-markup)', items: [
     { t: 'whiteout', label: 'Whiteout', icon: 'eraser', key: 'W' },
@@ -107,7 +114,7 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
 ];
 const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
 /** phone: every tool in the bottom bar, most used first (it scrolls sideways) */
-const DOCK: RailT[] = ['edit', 'text', 'sign', 'markup', 'draw', 'shapes', 'whiteout', 'remove', 'redact', 'image', 'link', 'fill', 'pages'];
+const DOCK: RailT[] = ['edit', 'text', 'sign', 'markup', 'draw', 'shapes', 'stamp', 'note', 'whiteout', 'remove', 'redact', 'image', 'link', 'fill', 'pages'];
 const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line', 'arrow'];
 /** highlight, underline, strike-through: one rail button, picked in its flyout */
 const MARK_TOOLS: Tool[] = ['highlight', 'underline', 'strike'];
@@ -164,6 +171,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [addAfter, setAddAfter] = useState<number | null>(null); // the Add pages sheet: new pages after this many
   // find in document / privacy check: matches drawn over the pages
   const [findOpen, setFindOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
   /** the keyboard shortcuts sheet */
   const [keysOpen, setKeysOpen] = useState(false);
   /** an added object copied with Ctrl+C (pasted with Ctrl+V on the page in view) */
@@ -186,6 +194,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [pageData, setPageData] = useState<Record<number, PageData>>({});
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
   const [showSig, setShowSig] = useState<null | { field?: FormField }>(null);
+  const [showStamp, setShowStamp] = useState(false);
+  const [showProfile, setShowProfile] = useState<null | { fill: boolean }>(null);
   /** Remove strokes being worked out (shown as paint until the page shows them taken out) */
   const [removingBusy, setRemovingBusy] = useState(0);
   const [view, setView] = useState<'doc' | 'pages'>(start === 'pages' ? 'pages' : 'doc');
@@ -506,7 +516,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setEditing((cur) => (cur === id ? null : cur));
     commit((s) => {
       const o = s.objects.find((x) => x.id === id);
-      if (o && o.type === 'text' && !o.text.trim()) return { ...s, objects: s.objects.filter((x) => x.id !== id) };
+      if (o && (o.type === 'text' || o.type === 'note') && !o.text.trim()) return { ...s, objects: s.objects.filter((x) => x.id !== id) };
       return s;
     }, true);
   };
@@ -1261,6 +1271,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setView('doc');
     if (t === 'sign') { setShowSig({}); return; }
     if (t === 'image') { imgInput.current?.click(); return; }
+    if (t === 'stamp') { setShowStamp(true); return; }
     if (t === 'fill') setFillMark(fields.length ? null : 'check');
     setTool(t);
   };
@@ -1285,6 +1296,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   };
   const railClick = (r: RailItem) => {
     setMoreOpen(false);
+    haptic();
     if (mobile) setRecent((v) => useRecent(v, r.t));
     if (r.t === 'pages') { setFlyout(null); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }
     const same = railActive(r);
@@ -1305,6 +1317,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     : r.t === 'shapes' ? SHAPE_TOOLS.includes(tool)
     : r.t === 'markup' ? MARK_TOOLS.includes(tool)
     : r.t === 'sign' ? !!showSig || selObj?.type === 'signature'
+    : r.t === 'stamp' ? showStamp
     : r.t === tool;
   useEffect(() => { if (SHAPE_TOOLS.includes(tool)) lastShape.current = tool; if (MARK_TOOLS.includes(tool)) lastMark.current = tool; }, [tool]);
   // the flyout closes on a click outside it (and outside the rail / dock)
@@ -1334,7 +1347,69 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const docRef = (): DocRef => ({
     pdf, pages: snap.pages.map((p) => p.src), vm: (src) => infos[src].vm,
     ocrRuns: (src) => pageData[src]?.runs.filter((r) => r.fontName === 'ocr') ?? [],
+    edited: (src) => {
+      const d = pageDataRef.current[src];
+      if (!d || !d.runs.some((r) => snap.edits[r.key])) return null;
+      return { runs: d.runs, text: (r) => snap.edits[r.key]?.text ?? r.str };
+    },
   });
+  // ----- find & replace -----
+  // the lines of pages not yet shown are read first (a few pages at a time)
+  const pageDataRef = useRef(pageData);
+  pageDataRef.current = pageData;
+  const [wantData, setWantData] = useState<Set<number>>(new Set());
+  const ensureData = async (srcs: number[], progress?: (done: number, all: number) => void) => {
+    const missing = srcs.filter((s) => !pageDataRef.current[s] && !pictureSet.has(s));
+    for (let i = 0; i < missing.length; i += 3) {
+      const batch = missing.slice(i, i + 3);
+      setWantData(new Set(batch));
+      const t0 = Date.now();
+      while (batch.some((s) => !pageDataRef.current[s]) && Date.now() - t0 < 10000) await new Promise((r) => setTimeout(r, 50));
+      progress?.(Math.min(missing.length, i + 3), missing.length);
+    }
+    setWantData(new Set());
+  };
+  const replaceAll = async (q: string, by: string, o: ReplaceOpts): Promise<number> => {
+    const order = snap.pages.map((p) => p.src);
+    if (order.some((s) => !pageDataRef.current[s] && !pictureSet.has(s))) {
+      setBusy({ title: t('Reading the pages…') });
+      try { await ensureData(order, (d, a) => setBusy({ title: t('Reading the pages…'), progress: d / a })); } finally { setBusy(null); }
+    }
+    const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    let re: RegExp;
+    try { re = new RegExp(o.word ? `(?<![\\p{L}\\p{N}])${esc}(?![\\p{L}\\p{N}])` : esc, (o.matchCase ? '' : 'i') + 'gu'); } catch { return 0; }
+    const changes: Record<string, RunEdit> = {};
+    let n = 0, lines = 0;
+    for (const src of order) {
+      for (const r of pageDataRef.current[src]?.runs ?? []) {
+        if (erasedRuns.has(r.key)) continue;
+        const cur = snap.edits[r.key];
+        const text = cur?.text ?? r.str;
+        const ms = [...text.matchAll(re)];
+        if (!ms.length) continue;
+        // per-letter sizes and looks follow the text: a replacement takes those of the letter it starts at
+        const cps = [...text];
+        let out = '', at = 0;
+        const sc: number[] = [], lk: NonNullable<RunEdit['looks']> = [];
+        for (const m of ms) {
+          const i0 = [...text.slice(0, m.index!)].length, i1 = i0 + [...m[0]].length;
+          out += cps.slice(at, i0).join('') + by;
+          for (let k = at; k < i0; k++) { sc.push(cur?.scales?.[k] ?? 1); lk.push(cur?.looks?.[k] ?? null); }
+          for (const _ of [...by]) { sc.push(cur?.scales?.[i0] ?? 1); lk.push(cur?.looks?.[i0] ?? null); }
+          at = i1;
+        }
+        out += cps.slice(at).join('');
+        for (let k = at; k < cps.length; k++) { sc.push(cur?.scales?.[k] ?? 1); lk.push(cur?.looks?.[k] ?? null); }
+        changes[r.key] = { ...(cur ?? { sizeScale: 1, color: null }), text: out, scales: cleanScales(out, sc), looks: cleanLooks(out, lk) };
+        n += ms.length; lines++;
+      }
+    }
+    if (!n) { toast({ msg: t('Nothing found to replace'), kind: 'err' }); return 0; }
+    commit((s) => ({ ...s, edits: { ...s.edits, ...changes } }));
+    setFound({ list: [], cur: -1, priv: false });
+    toast({ msg: tn(n, '{n} match replaced, in the same font', '{n} matches replaced, in the same font'), action: { label: t('Undo'), run: hist.undo } });
+    return n;
+  };
   const goHit = (h: Hit) => {
     const el = wrapRef.current?.querySelector<HTMLElement>(`.pageOuter[data-src="${h.page}"]`);
     const r = h.rects[0];
@@ -1354,6 +1429,77 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setFound({ list: [], cur: -1, priv: false });
     toast({ msg: tn(add.length, '{n} part blacked out. It is deleted from the file when you download.', '{n} parts blacked out. They are deleted from the file when you download.'), action: { label: t('Undo'), run: hist.undo } });
   };
+  // ----- autofill with "My details" -----
+  /** the words printed just left of a form field, or just above it */
+  const printedLabel = (f: FormField): string | null => {
+    const info = infos[f.page], runs = pageData[f.page]?.runs;
+    if (!info || !runs) return null;
+    let best: { s: string; d: number } | null = null;
+    for (const r of runs) {
+      const str = (snap.edits[r.key]?.text ?? r.str).trim();
+      if (!str || str.length > 60) continue;
+      const b = runBox(r, info.vm);
+      if (Math.abs(b.angle) > 0.02) continue;
+      const top = b.y - b.asc, bot = b.y + b.h * 0.25;
+      let d = Infinity;
+      // left of it on the same row
+      if (bot > f.y && top < f.y + f.h && b.x + b.w <= f.x + 4 && f.x - (b.x + b.w) < 220) d = f.x - (b.x + b.w);
+      // above it, over its left part
+      else if (bot <= f.y + 3 && f.y - bot < 22 && b.x < f.x + f.w * 0.6 && b.x + b.w > f.x - 10) d = (f.y - bot) * 2 + 10;
+      if (d < (best?.d ?? Infinity)) best = { s: str, d };
+    }
+    return best?.s ?? null;
+  };
+  const autofill = async (p: Profile = loadProfile()) => {
+    if (!hasProfile(p)) { setShowProfile({ fill: true }); return; }
+    const order = snap.pages.map((x) => x.src);
+    if (order.some((s) => !pageDataRef.current[s] && !pictureSet.has(s))) {
+      setBusy({ title: t('Reading the pages…') });
+      try { await ensureData(order, (d, a) => setBusy({ title: t('Reading the pages…'), progress: d / a })); } finally { setBusy(null); }
+    }
+    // 1. fillable fields: by their name, tooltip or the label printed next to them
+    const forms: Record<string, string> = {};
+    for (const f of fillable) {
+      if (f.type !== 'text') continue;
+      const cur = snap.forms[f.name] ?? f.initial;
+      if (typeof cur === 'string' && cur.trim()) continue;
+      const want = wantOf(f.label, f.name.split('.').pop(), printedLabel(f));
+      const v = want ? valueFor(p, want, f.maxLen) : null;
+      if (v) forms[f.name] = v;
+    }
+    // 2. pages without fields: printed labels with room after them ("Vorname: ……")
+    const add: EditorObject[] = [];
+    const data = pageDataRef.current;
+    for (const src of order) {
+      if (fields.some((f) => f.page === src) || !infos[src]) continue;
+      const runs = data[src]?.runs ?? [];
+      for (const r of runs) {
+        const text = snap.edits[r.key]?.text ?? r.str;
+        const ll = labelLine(text);
+        if (!ll) continue;
+        const v = valueFor(p, ll.want);
+        if (!v) continue;
+        const b = runBox(r, infos[src].vm);
+        if (Math.abs(b.angle) > 0.02 || b.h < 4) continue;
+        const x = b.x + b.w * (ll.at / Math.max(1, text.length)) + (ll.at >= text.length ? b.h * 0.6 : 2);
+        // already written in: other text on that line just after the label, or something placed there
+        const taken = runs.some((q) => {
+          if (q === r || !(snap.edits[q.key]?.text ?? q.str).trim()) return false;
+          const qb = runBox(q, infos[src].vm);
+          return Math.abs(qb.y - b.y) < b.h * 0.6 && qb.x >= x - 2 && qb.x < x + 90;
+        }) || snap.objects.some((o) => o.page === src && o.type === 'text' && Math.abs(o.y + o.h / 2 - (b.y - b.h * 0.35)) < b.h && o.x >= x - 4 && o.x < x + 90);
+        if (taken) continue;
+        const fi = fonts[r.fontName];
+        const fb = fi?.fallback ?? { family: 'Helvetica' as const, bold: false, italic: false };
+        const size = Math.max(7, Math.min(14, Math.round(b.h * 10) / 10));
+        add.push({ id: uid(), page: src, type: 'text', x, y: b.y - size * BASELINE[fb.family], w: 20, h: size * 1.2, text: v, family: fb.family, size, color: '#1E2559', bold: false, italic: false });
+      }
+    }
+    const n = Object.keys(forms).length + add.length;
+    if (!n) { toast({ msg: t('No fields found that your details fit'), action: { label: t('My details'), run: () => setShowProfile({ fill: false }) } }); return; }
+    commit((s) => ({ ...s, forms: { ...s.forms, ...forms }, objects: [...s.objects, ...add] }));
+    toast({ msg: tn(n, '{n} field filled in with your details', '{n} fields filled in with your details'), action: { label: t('Undo'), run: hist.undo } });
+  };
   const hitsByPage = useMemo(() => {
     const m: Record<number, { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[]> = {};
     found.list.forEach((h, i) => { for (const r of h.rects) (m[h.page] ??= []).push({ ...r, cur: i === found.cur, priv: found.priv }); });
@@ -1363,6 +1509,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f') { e.preventDefault(); setPrivOpen(false); setFindOpen(true); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'h') { e.preventDefault(); setPrivOpen(false); setFindOpen(true); setReplaceOpen(true); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -1492,7 +1639,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       out.push({ id: key, icon: e.text.trim() ? 'edit' : 'trash', label: e.text.trim() ? t('Edited “{s}”', { s: e.text.trim().slice(0, 28) }) : t('Deleted a line'), page: pageNo(src) });
     }
     for (const o of snap.objects) {
-      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check', link: 'link', erase: 'bandaids' };
+      const ic: Record<string, string> = { text: 'text', image: 'image', signature: 'sign', rect: 'rect', ellipse: 'ellipse', whiteout: 'whiteout', redact: 'redact', highlight: 'highlight', line: 'line', draw: 'draw', mark: 'check', link: 'link', erase: 'bandaids', note: 'note' };
       out.push({ id: o.id, icon: ic[o.type], label: o.type === 'text' ? t('Text “{s}”', { s: o.text.trim().slice(0, 24) || '…' }) : objTitle(o), page: pageNo(o.page) });
     }
     const nf = Object.keys(snap.forms).length;
@@ -1520,6 +1667,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   );
   const fillPanel = (
     <FillPanel fields={fillable} values={snap.forms} index={fieldIndex} filled={filledCount} mark={fillMark} flatten={flatten}
+      onAutofill={() => autofill()} onProfile={() => setShowProfile({ fill: false })}
       onPick={(f) => focusField(f)} onMark={(m) => setFillMark((cur) => (cur === m ? null : m))} onFlatten={setFlatten} onDownload={download}
       onPrev={() => focusField(fillable[Math.max(0, fieldIndex - 1)])} onNext={() => focusField(fillable[Math.min(fillable.length - 1, fieldIndex + 1)])} />
   );
@@ -1636,7 +1784,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                     setFonts((m) => ({ ...m, ...f }));
                   }}
                   onSelect={(id) => { setSelected(id); if (id === null) setSheetFor(null); }} onEditing={setEditing} onStopEditing={stopEditing}
-                  hits={hitsByPage[p.src]}
+                  hits={hitsByPage[p.src]} wantData={wantData.has(p.src)}
                   onRunEdit={setRunEdit} onAdd={addObject} onChange={changeObject}
                   onRemove={removeStroke} erasing={erasingOn(p.src)} skipRuns={erasedRuns}
                   onPlace={() => false}
@@ -1841,13 +1989,13 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       )}
       {mobile && tool === 'fill' && !activeField && !mobileEditing && (
         <MobileFillBar fields={fillable.length} filled={filledCount} mark={fillMark} onMark={(m) => setFillMark((cur) => (cur === m ? null : m))}
-          onStart={() => focusField(fillable[0])} />
+          onStart={() => focusField(fillable[0])} onAutofill={() => autofill()} />
       )}
 
       <input ref={imgInput} type="file" accept="image/*" hidden onChange={(e) => { onImage(e.target.files?.[0]); e.target.value = ''; }} />
       {findOpen && view === 'doc' && (
-        <FindBar doc={docRef} mobile={mobile} onClose={() => { setFindOpen(false); setFound({ list: [], cur: -1, priv: false }); }}
-          onHits={(list, cur) => setFound({ list, cur, priv: false })} onGo={goHit} onRedact={redactHits} />
+        <FindBar doc={docRef} mobile={mobile} onClose={() => { setFindOpen(false); setReplaceOpen(false); setFound({ list: [], cur: -1, priv: false }); }}
+          onHits={(list, cur) => setFound({ list, cur, priv: false })} onGo={goHit} onRedact={redactHits} onReplace={replaceAll} replace={replaceOpen} />
       )}
       {privOpen && view === 'doc' && (
         <PrivacyCheck doc={docRef} mobile={mobile} scannedLeft={scannedLeft}
@@ -1861,6 +2009,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           onAdd={(w) => { const at = addAfter; setAddAfter(null); onAddPages(at, w).then((first) => { if (first !== null && view === 'doc') setTimeout(() => goToPage(first), 400); }); }} />
       )}
       {keysOpen && <ShortcutsSheet onClose={() => setKeysOpen(false)} />}
+      {showProfile && <ProfileModal sheet={mobile} fillLabel={showProfile.fill ? t('Save and fill in') : undefined}
+        onClose={() => setShowProfile(null)} onSaved={(p) => { const fill = showProfile.fill; setShowProfile(null); if (fill) autofill(p); else toast({ msg: t('Your details are saved on this device') }); }} />}
+      {showStamp && <StampModal sheet={mobile} onClose={() => setShowStamp(false)} onPick={(s) => { setShowStamp(false); placeStamp(s, 'image'); }} />}
       {showSig && <SignatureModal sheet={mobile} onClose={() => setShowSig(null)} onPick={(s) => { const f = showSig.field; setShowSig(null); placeStamp(s, 'signature', f); }} />}
       {dragInfo && (() => {
         const obj = snap.objects.find((o) => o.id === dragInfo.id);
@@ -2009,10 +2160,11 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, to
   );
 }
 
-function MobileFillBar({ fields, filled, mark, onMark, onStart }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void }) {
+function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void; onAutofill: () => void }) {
   return (
     <div className="slimbar fillfloat">
       <div className="row" style={{ overflowX: 'auto' }}>
+        <button className="ibtn af-mini" style={{ width: 44, height: 44 }} onClick={onAutofill} aria-label={t('Fill in with my details')} title={t('Fill in with my details')}><Icon name="magic-wand:duotone" size={21} /></button>
         {fields > 0 && <button className="btn primary" onClick={onStart}>{tn(fields, 'Fill {n} field', 'Fill {n} fields')}</button>}
         {fields > 0 && <span className="label num" style={{ whiteSpace: 'nowrap' }}>{filled}/{fields}</span>}
         <div className="sp" />
@@ -2028,13 +2180,19 @@ function MobileFillBar({ fields, filled, mark, onMark, onStart }: { fields: numb
 
 const MARKS: [FillMark, string, string][] = [['check', 'check', 'Tick'], ['cross', 'x:bold', 'Cross'], ['dot', 'circle:fill', 'Dot'], ['text', 'text', 'Text'], ['date', 'calendar-blank', 'Date']];
 
-function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMark, onFlatten, onDownload, onPrev, onNext }: {
+function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMark, onFlatten, onDownload, onPrev, onNext, onAutofill, onProfile }: {
   fields: FormField[]; values: Record<string, string | boolean>; index: number; filled: number; mark: FillMark | null; flatten: boolean;
+  onAutofill: () => void; onProfile: () => void;
   onPick: (f: FormField) => void; onMark: (m: FillMark) => void; onFlatten: (v: boolean) => void; onDownload: () => void; onPrev: () => void; onNext: () => void;
 }) {
   const kind: Record<FormField['type'], string> = { text: 'Text', check: 'Checkbox', radio: 'Choice', choice: 'List', sig: 'Signature' };
   return (
     <div className="props" style={{ minHeight: '100%' }}>
+      <div className="autofill">
+        <button className="af-go" onClick={onAutofill}><span className="af-ic"><Icon name="magic-wand:duotone" size={22} /></span>
+          <span className="af-t"><b>{t('Fill in with my details')}</b><small>{t('Name, address, date of birth … in one tap')}</small></span></button>
+        <button className="linkbtn" onClick={onProfile}>{t('Edit my details')}</button>
+      </div>
       {fields.length > 0 ? (
         <>
           <div className="field">

@@ -4,7 +4,7 @@ import type { CharLook, ClonedText, EditorObject, FormValues, M } from '../engin
 import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
-import { uid, cleanScales, cleanLooks, sameLooks } from './store';
+import { uid, cleanScales, cleanLooks, sameLooks, NOTE_COLORS } from './store';
 import { BASELINE, textSize, arabicText } from '../engine/matchFonts';
 import { hasArabic, isRtl } from '../engine/rtl';
 import { registerEditFont, baselineInLine, docFontOf, objectFontCss, arabicFace, ARABIC_CSS } from './textFonts';
@@ -51,6 +51,8 @@ interface Props {
   selected: string | null;
   editing: string | null;
   onData: (src: number, data: PageData, fonts: Record<string, FontInfo>) => void;
+  /** read the page's lines even though it is not on screen (find & replace) */
+  wantData?: boolean;
   onSelect: (id: string | null) => void;
   onEditing: (id: string | null) => void;
   onStopEditing: (id: string) => void;
@@ -134,7 +136,7 @@ export function PageView(p: Props) {
 
   // render canvas (debounced on zoom)
   useEffect(() => {
-    if (!visible) return;
+    if (!visible && !(p.wantData && !p.data)) return;
     if (rendered && Math.abs(rendered - zoom) < 0.001 && renderedKey.current === sourceKey) return;
     let cancelled = false;
     const t = setTimeout(async () => {
@@ -199,7 +201,7 @@ export function PageView(p: Props) {
     }, rendered && renderedKey.current === sourceKey ? 160 : 0);
     return () => { cancelled = true; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [visible, zoom, p.pdf, p.src, source, sourceKey]);
+  }, [visible, zoom, p.pdf, p.src, source, sourceKey, p.wantData]);
   // the canvas already shows the edited text with the document's real glyphs
   // (per line: a newer edit elsewhere on the page leaves the lines already in the preview as they are)
   const shownEdits = useMemo(() => {
@@ -261,6 +263,15 @@ export function PageView(p: Props) {
     // a picture page (scan): tapping its text reads it, then opens the line for editing
     // (a tap that only ends editing or clears a selection does not)
     if (p.onPictureTap && p.tool === 'edit') { if (!hadSelection.current) p.onPictureTap(pt.x, pt.y); return; }
+    // a comment: a sticky note where tapped, open for typing
+    if (p.tool === 'note') {
+      const n = 22;
+      p.onAdd({ id, page: p.src, type: 'note', x: Math.max(0, Math.min(info.w - n, pt.x - n / 2)), y: Math.max(0, Math.min(info.h - n, pt.y - n / 2)), w: n, h: n, text: '', color: p.style.note ?? '#FFC93C' });
+      p.onSelect(id);
+      p.onEditing(id);
+      p.onTextPlaced();
+      return;
+    }
     // new text boxes are placed on click (tap), so scrolling or a two-finger gesture never adds one
     if (p.tool !== 'text') return;
     // new text looks like the page's own text next to it (font, size, colour; on a line: its baseline)
@@ -320,7 +331,7 @@ export function PageView(p: Props) {
     if (e.pointerType === 'touch' && !e.isPrimary) { setDraft(null); return; }
     if ((e.target as HTMLElement).closest(through ? '.run, textarea, .objbar, .ff, .ffbox, .ffsig' : '.obj, .run, textarea, .objbar, .ff, .ffbox, .ffsig')) return;
     const pt = local(e);
-    if (p.tool === 'text' || (p.tool === 'fill' && p.fillMark)) return;
+    if (p.tool === 'text' || p.tool === 'note' || (p.tool === 'fill' && p.fillMark)) return;
     if ((p.tool === 'sign' || p.tool === 'image') && p.onPlace(p.src, pt.x, pt.y)) return;
     if (dragTools.includes(p.tool)) {
       (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
@@ -1413,6 +1424,29 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
         </svg>
       );
       break;
+    case 'note': {
+      const right = o.x > page.w / 2;
+      inner = (
+        <>
+          <div className="notepin" style={{ ['--nc' as any]: o.color }} title={o.text || t('Comment')}>
+            <Icon name="note:fill" size={Math.max(20, Math.min(28, o.w * zoom))} />
+          </div>
+          {(selected || editing) && (
+            <div className={`notepop${right ? ' r' : ''}`} onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+              <textarea autoFocus={editing} value={o.text} placeholder={t('Write a comment…')} aria-label={t('Comment')} rows={3}
+                onChange={(e) => onChange({ text: e.target.value } as any, true)}
+                onFocus={() => { if (!editing) onEditing(true); }}
+                onBlur={() => onEditing(false)}
+                onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Escape') (e.currentTarget as HTMLElement).blur(); }} />
+              <div className="notecols">
+                {NOTE_COLORS.map((c) => <button key={c} type="button" aria-label={t('Colour')} className={c === o.color ? 'on' : ''} style={{ background: c }} onMouseDown={(e) => e.preventDefault()} onClick={() => onChange({ color: c } as any, false)} />)}
+              </div>
+            </div>
+          )}
+        </>
+      );
+      break;
+    }
     case 'mark': {
       const W = o.w * zoom, H = o.h * zoom, sw = Math.min(W, H) * 0.13;
       inner = (
@@ -1425,7 +1459,9 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       break;
     }
   }
-  const resizable = o.type !== 'line' && o.type !== 'draw';
+  // shapes, lines, drawings and text with a lowered opacity (pictures and highlights do it themselves)
+  if (o.opacity !== undefined && o.opacity < 1 && !['image', 'signature', 'highlight', 'note'].includes(o.type)) inner = <div style={{ position: 'absolute', inset: 0, opacity: o.opacity }}>{inner}</div>;
+  const resizable = o.type !== 'line' && o.type !== 'draw' && o.type !== 'note';
   const stop = (e: React.SyntheticEvent) => e.stopPropagation();
   const step = (d: number) => {
     if (o.type === 'text') {
@@ -1457,17 +1493,17 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
       {o.type === 'text' && !editing && (
         <button type="button" aria-label={t('Edit text')} title={t('Edit text')} onClick={() => onEditing(true)}><Icon name="pencil" size={18} /></button>
       )}
-      <button type="button" aria-label={t('Turn 90°')} title={t('Turn 90°')} onClick={quarter}><Icon name="arrow-clockwise" size={18} /></button>
+      {o.type !== 'note' && <button type="button" aria-label={t('Turn 90°')} title={t('Turn 90°')} onClick={quarter}><Icon name="arrow-clockwise" size={18} /></button>}
       <button type="button" aria-label={t('Duplicate')} title={t('Duplicate (Ctrl+D)')} onClick={onDuplicate}><Icon name="copy" size={18} /></button>
       <button type="button" className="danger" aria-label={t('Delete')} title={t('Delete')} onClick={onDelete}><Icon name="trash" size={18} /></button>
-      {mobile && !editing && o.type !== 'whiteout' && o.type !== 'redact' && (
+      {mobile && !editing && o.type !== 'whiteout' && o.type !== 'redact' && o.type !== 'note' && (
         <><span className="sep" /><button type="button" aria-label={t('More options')} title={t('More options')} onClick={onMore}><Icon name="more" size={18} /></button></>
       )}
     </div>, document.body) : null;
   // thin or small things (a line, an underline, a dot): a bigger area around them takes the tap
   const thin = typeof style.width === 'number' && typeof style.height === 'number' && (style.width < 32 || style.height < 32);
   return (
-    <div ref={objRef} data-id={o.id} className={`obj${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${editing ? ' editing' : ''}${thin ? ' thin' : ''}`} style={style}
+    <div ref={objRef} data-id={o.id} className={`obj${o.type === 'note' ? ' note' : ''}${selected ? ' selected' : ''}${dragging ? ' dragging' : ''}${editing ? ' editing' : ''}${thin ? ' thin' : ''}`} style={style}
       onPointerDown={start('move')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}
       onDoubleClick={() => o.type === 'text' && onEditing(true)}>
       {inner}
@@ -1478,7 +1514,7 @@ function ObjectView({ o, zoom, selected, editing, local, rotation, onSelect, onE
           <div className="handle" aria-label={t('Resize')} onPointerDown={start('resize')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}><Icon name="resize" size={10} /></div>
         </>
       )}
-      {selected && !isLine && !editing && o.type !== 'link' && !(o.type === 'highlight' && o.style) && (
+      {selected && !isLine && !editing && o.type !== 'link' && o.type !== 'note' && !(o.type === 'highlight' && o.style) && (
         <div className="rothandle" role="slider" aria-label={t('Turn')} aria-valuenow={Math.round(o.rot ?? 0)} title={t('Drag to turn')}
           onPointerDown={start('rotate')} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
           <Icon name="arrow-clockwise:bold" size={13} />

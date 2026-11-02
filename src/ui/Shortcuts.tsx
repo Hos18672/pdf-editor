@@ -17,7 +17,7 @@ const GROUPS: { name: string; rows: [string[], string][] }[] = [
     [['Page Down'], 'Next page'], [['Page Up'], 'Previous page'], [['Home'], 'First page'], [['End'], 'Last page'],
   ] },
   { name: 'Tools', rows: [
-    [['E'], 'Edit text'], [['T'], 'Add text'], [['S'], 'Sign'], [['I'], 'Image'], [['K'], 'Link'],
+    [['E'], 'Edit text'], [['T'], 'Add text'], [['S'], 'Sign'], [['I'], 'Image'], [['A'], 'Stamp'], [['N'], 'Comment'], [['K'], 'Link'],
     [['W'], 'Whiteout'], [['X'], 'Redact'], [['M'], 'Remove'], [['H'], 'Highlight'], [['R'], 'Shapes'], [['D'], 'Draw'],
     [['F'], 'Fill a form'], [['P'], 'Pages'], [['[ ]'], 'Remove brush size'], [['?'], 'This list'], [['Esc'], 'Back to Edit, deselect'],
   ] },
@@ -27,7 +27,7 @@ const GROUPS: { name: string; rows: [string[], string][] }[] = [
     [[C, 'B'], 'Bold (while typing)'], [[C, 'I'], 'Italic (while typing)'], [[C, 'U'], 'Underline (while typing)'],
   ] },
   { name: 'File', rows: [
-    [[C, 'S'], 'Download'], [[C, 'P'], 'Print'], [[C, 'F'], 'Find'],
+    [[C, 'S'], 'Download'], [[C, 'P'], 'Print'], [[C, 'F'], 'Find'], [[C, 'H'], 'Find and replace'],
   ] },
 ];
 

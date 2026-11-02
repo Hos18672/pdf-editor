@@ -125,7 +125,9 @@ export type EditorObject =
   /** a clickable area: a web address, or a page of the document (original index) */
   | (Base & { type: 'link'; url: string; target?: number })
   | (Base & { type: 'draw'; stroke: string; strokeWidth: number; points: number[] }) // relative to x,y
-  | (Base & { type: 'mark'; kind: 'check' | 'cross' | 'dot'; color: string });
+  | (Base & { type: 'mark'; kind: 'check' | 'cross' | 'dot'; color: string })
+  /** a comment (sticky note): saved as a PDF text annotation, nothing drawn on the page */
+  | (Base & { type: 'note'; text: string; color: string });
 
 /** Form field values by fully qualified field name: text/choice = string, checkbox = boolean, radio = export value */
 export type FormValues = Record<string, string | boolean>;

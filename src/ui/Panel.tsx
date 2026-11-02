@@ -3,7 +3,7 @@ import { useLineSelSize, useLineSelLook, lineEditor, sharedLook, withLook } from
 import type { CharLook, DocFont, EditorObject, FontFamily, Looks } from '../engine/types';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { RunEdit, Tool, ToolStyle } from './store';
-import { cleanLooks } from './store';
+import { cleanLooks, NOTE_COLORS } from './store';
 import { Icon } from './icons';
 import { ColorPicker } from './ColorPicker';
 import { t, tn } from './i18n';
@@ -258,7 +258,7 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
 
 export const OBJ_TITLE: Record<EditorObject['type'], string> = {
   text: 'Text', image: 'Image', signature: 'Signature', rect: 'Box', ellipse: 'Circle',
-  whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark', link: 'Link', erase: 'Removed area',
+  whiteout: 'Whiteout', redact: 'Redaction', highlight: 'Highlight', line: 'Line', draw: 'Drawing', mark: 'Mark', link: 'Link', erase: 'Removed area', note: 'Comment',
 };
 /** the name of an object as shown (an underline is a "highlight" with a style) */
 export const objTitle = (o: EditorObject) => t(o.type === 'highlight' && o.style ? (o.style === 'underline' ? 'Underline' : 'Strike-through')
@@ -375,6 +375,20 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact,
           </div>
         </>
       )}
+      {o.type === 'note' && (
+        <>
+          <div className="field"><div className="label">{t('Comment')}</div>
+            <textarea className="input notearea" rows={4} value={o.text} placeholder={t('Write a comment…')} onChange={(e) => set({ text: e.target.value })} onKeyDown={(e) => e.stopPropagation()} />
+          </div>
+          <div className="field"><div className="label">{t('Colour')}</div><Swatches value={o.color} list={NOTE_COLORS} custom={false} onPick={(color) => set({ color: color ?? NOTE_COLORS[0] })} /></div>
+          {!compact && <div className="hint">{t('Saved as a comment that every PDF reader shows. It is not printed on the page.')}</div>}
+        </>
+      )}
+      {(o.type === 'rect' || o.type === 'ellipse' || o.type === 'line' || o.type === 'draw' || o.type === 'text' || (o.type === 'highlight' && !o.style)) && (
+        <div className="field"><div className="label">{t('Opacity')}</div>
+          <Stepper value={Math.round((o.opacity ?? (o.type === 'highlight' ? 0.4 : 1)) * 100)} min={10} max={100} step={10} unit="%" onChange={(v) => set({ opacity: v / 100 })} label="opacity" />
+        </div>
+      )}
       {(o.type === 'image' || o.type === 'signature') && (
         <div className="field"><div className="label">{t('Opacity')}</div>
           <Stepper value={Math.round((o.opacity ?? 1) * 100)} min={10} max={100} step={10} unit="%" onChange={(v) => set({ opacity: v / 100 })} label="opacity" />
@@ -414,13 +428,14 @@ function LinkProps({ o, order, onChange }: { o: Extract<EditorObject, { type: 'l
   );
 }
 
-const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', arrow: 'Arrow', draw: 'Draw', highlight: 'Highlight', underline: 'Underline', strike: 'Strike-through', whiteout: 'Whiteout', redact: 'Redact', link: 'Link', remove: 'Remove' };
+const TOOL_NAMES: Partial<Record<Tool, string>> = { text: 'Add text', rect: 'Box', ellipse: 'Circle', line: 'Line', arrow: 'Arrow', draw: 'Draw', highlight: 'Highlight', underline: 'Underline', strike: 'Strike-through', whiteout: 'Whiteout', redact: 'Redact', link: 'Link', remove: 'Remove', note: 'Comment' };
 const TOOL_HINTS: Partial<Record<Tool, string>> = {
   remove: 'Paint over a logo, stamp, note or text: it is taken out of the page, the background stays.',
   text: 'Click anywhere on a page to start typing.', rect: 'Drag on the page to draw a box.', ellipse: 'Drag on the page to draw a circle.',
   line: 'Drag on the page to draw a line.', arrow: 'Drag from where the arrow starts to where it points.', draw: 'Draw freely with mouse, finger or pen.',
   highlight: 'Drag across the text to highlight it, or tap a word.', underline: 'Drag across the text to underline it, or tap a word.', strike: 'Drag across the text to strike it through, or tap a word.',
   link: 'Drag a box over text or a picture, then type the web address or pick a page.',
+  note: 'Tap where the comment belongs, then type it. Every PDF reader shows it as a note.',
   whiteout: 'Drag over anything you want to hide. To change a line of text, use Edit and click it instead.',
   redact: 'Drag over what must go: names, numbers, signatures. On download it is deleted from the file, not only covered. Use the privacy check to find personal data.',
 };
@@ -442,6 +457,9 @@ export function ToolProps({ tool, style, onChange, compact }: { tool: Tool; styl
             </>
           )}
         </>
+      )}
+      {tool === 'note' && (
+        <div className="field"><div className="label">{t('Colour')}</div><Swatches value={style.note ?? NOTE_COLORS[0]} list={NOTE_COLORS} custom={false} onPick={(note) => onChange({ note: note ?? NOTE_COLORS[0] })} /></div>
       )}
       {(tool === 'rect' || tool === 'ellipse' || tool === 'line' || tool === 'arrow' || tool === 'draw') && (
         <>

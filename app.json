@@ -2,7 +2,7 @@
   "expo": {
     "name": "Paginka",
     "slug": "pdf-editor",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "orientation": "default",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
@@ -19,7 +19,8 @@
       "predictiveBackGestureEnabled": false,
       "package": "com.rezahossaini.pdfeditor",
       "permissions": [
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.VIBRATE"
       ],
       "blockedPermissions": [
         "android.permission.SYSTEM_ALERT_WINDOW",

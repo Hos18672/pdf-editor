@@ -9,15 +9,17 @@ export interface Hit { page: number; rects: Rect[]; text: string; kind?: string 
 type Seg = { start: number; end: number; quad: [number, number][]; len: number }; // quad: baseline start, baseline end, top end, top start
 interface PageText { text: string; segs: Seg[] }
 
-const cache = new WeakMap<object, Map<number, Promise<PageText>>>();
+const cache = new WeakMap<object, Map<string, Promise<PageText>>>();
 
 const apply = (m: M, x: number, y: number): [number, number] => [m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]];
 
 /** the page's text as one string, with where every piece of it sits */
-function pageText(pdf: any, src: number, vm: M, ocrRuns: TextRun[]): Promise<PageText> {
+function pageText(pdf: any, src: number, vm: M, ocrRuns: TextRun[], edited?: Edited | null): Promise<PageText> {
   let m = cache.get(pdf);
   if (!m) cache.set(pdf, (m = new Map()));
-  const key = src * 1000 + ocrRuns.length; // read again once a scan's lines are known
+  const key = `${src}:${ocrRuns.length}:${vm.join(',')}`; // read again once a scan's lines are known
+  // a page with changed lines: its lines as they read now (not kept, edits change)
+  if (edited) { ocrRuns = edited.runs; m = new Map(); }
   let p = m.get(key);
   if (!p) {
     p = (async () => {
@@ -34,7 +36,7 @@ function pageText(pdf: any, src: number, vm: M, ocrRuns: TextRun[]): Promise<Pag
         for (const r of ocrRuns) {
           const [ox, oy] = r.region.o, [ux, uy] = r.region.u, w = r.region.width, h = r.region.height;
           const q: [number, number][] = [[ox, oy - uy * 0], [ox + ux * w, oy + uy * w], [ox + ux * w - uy * h, oy + uy * w + ux * h], [ox - uy * h, oy + ux * h]];
-          push(r.str, q.map(([x, y]) => apply(vm, x, y)), true);
+          push(edited ? edited.text(r) : r.str, q.map(([x, y]) => apply(vm, x, y)), true);
         }
       } else {
         const page = await pdf.getPage(src + 1);
@@ -96,9 +98,20 @@ function rectsOf(pt: PageText, s: number, e: number): Rect[] {
   return out;
 }
 
+/** a page's text with where each piece sits, in PDF user space (y up) */
+export const userPageText = (pdf: any, src: number) => pageText(pdf, src, [1, 0, 0, 1, 0, 0], []);
+/** boxes (PDF user space) over characters [s, e) of a page's text */
+export const userRects = (pt: PageText, s: number, e: number) => rectsOf(pt, s, e);
+export type { PageText };
+
 const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
-export interface DocRef { pdf: any; pages: number[]; vm: (src: number) => M; ocrRuns: (src: number) => TextRun[] }
+type Edited = { runs: TextRun[]; text: (r: TextRun) => string };
+export interface DocRef {
+  pdf: any; pages: number[]; vm: (src: number) => M; ocrRuns: (src: number) => TextRun[];
+  /** a page with changed lines: all its lines and the text each has now (null: unchanged) */
+  edited?: (src: number) => Edited | null;
+}
 
 /** plain text search (case and accents ignored) */
 export async function findText(d: DocRef, query: string, limit = 500): Promise<Hit[]> {
@@ -106,7 +119,7 @@ export async function findText(d: DocRef, query: string, limit = 500): Promise<H
   if (!q) return [];
   const out: Hit[] = [];
   for (const src of d.pages) {
-    const pt = await pageText(d.pdf, src, d.vm(src), d.ocrRuns(src));
+    const pt = await pageText(d.pdf, src, d.vm(src), d.ocrRuns(src), d.edited?.(src));
     const t = fold(pt.text);
     // folding can change lengths only for rare characters; keep indexes aligned by folding per character
     const aligned = t.length === pt.text.length;
@@ -178,7 +191,7 @@ const MRZ = /^[A-Z0-9<]{30,44}$/;
 export async function privacyScan(d: DocRef): Promise<Hit[]> {
   const out: Hit[] = [];
   for (const src of d.pages) {
-    const pt = await pageText(d.pdf, src, d.vm(src), d.ocrRuns(src));
+    const pt = await pageText(d.pdf, src, d.vm(src), d.ocrRuns(src), d.edited?.(src));
     const taken: [number, number][] = [];
     const add = (s: number, e: number, kind: Kind) => {
       if (e <= s || taken.some(([a, b]) => s < b && e > a)) return;

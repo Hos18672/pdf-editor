@@ -1,3 +1,4 @@
+import { SavedBurst } from './motion';
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { css } from './styles';
 import { Icon } from './icons';
@@ -371,6 +372,7 @@ export default function EditorApp(host: HostProps) {
           </div>
         </div>
       )}
+      <SavedBurst />
       {toastMsg && (
         <div className={`toast${toastMsg.kind === 'err' ? ' err' : ''}${toastMsg.action ? '' : ' solo'}`} role="status">
           <span className="ti"><Icon name={toastMsg.kind === 'err' ? 'x:bold' : 'check'} size={15} /></span>

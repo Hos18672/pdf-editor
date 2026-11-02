@@ -4,11 +4,23 @@ import { Icon } from './icons';
 import { findText, privacyScan, KIND_LABEL, type DocRef, type Hit, type Kind } from './search';
 import { t, tn } from './i18n';
 
-export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile }: {
+export interface ReplaceOpts { matchCase: boolean; word: boolean }
+
+export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile, onReplace, replace: replaceStart = false }: {
   doc: () => DocRef; onHits: (h: Hit[], cur: number) => void; onGo: (h: Hit) => void;
   onRedact: (h: Hit[]) => void; onClose: () => void; mobile: boolean;
+  /** replace every match in the document (same font as the line); resolves to how many were replaced */
+  onReplace?: (q: string, by: string, o: ReplaceOpts) => Promise<number>;
+  /** open with the replace row */
+  replace?: boolean;
 }) {
   const [q, setQ] = useState('');
+  const [repl, setRepl] = useState(replaceStart);
+  const [by, setBy] = useState('');
+  const [opts, setOpts] = useState<ReplaceOpts>({ matchCase: false, word: false });
+  const [replacing, setReplacing] = useState(false);
+  const [gen, setGen] = useState(0); // search again after a replace
+  useEffect(() => { if (replaceStart) setRepl(true); }, [replaceStart]);
   const [hits, setHits] = useState<Hit[]>([]);
   const [cur, setCur] = useState(0);
   const [busy, setBusy] = useState(false);
@@ -45,22 +57,40 @@ export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile }: {
     }, 220);
     return () => { alive = false; clearTimeout(t); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [q, gen]);
+  const doReplace = async () => {
+    if (!onReplace || !q.trim() || replacing) return;
+    setReplacing(true);
+    try { await onReplace(q, by, opts); } finally { setReplacing(false); setGen((g) => g + 1); }
+  };
   const step = (d: number) => {
     if (!hits.length) return;
     const n = (cur + d + hits.length) % hits.length;
     setCur(n); onHits(hits, n); onGo(hits[n]);
   };
   return (
-    <div ref={bar} className={`findbar${mobile ? ' m' : ''}`} role="search" style={place}>
+    <div ref={bar} className={`findbar${mobile ? ' m' : ''}${repl ? ' repl' : ''}`} role="search" style={place}>
+      <div className="frow">
+      {onReplace && <button className={`ibtn rtog${repl ? ' on' : ''}`} onClick={() => setRepl((v) => !v)} aria-expanded={repl} aria-label={t('Replace')} title={t('Find and replace (Ctrl+H)')}><Icon name="caret-right" size={16} /></button>}
       <Icon name="magnifying-glass" size={18} />
       <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Find in document')} aria-label={t('Find in document')}
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') step(e.shiftKey ? -1 : 1); if (e.key === 'Escape') onClose(); }} />
       <span className="fcount" aria-live="polite">{busy ? '…' : q.trim() ? (hits.length ? `${cur + 1}/${hits.length}` : '0') : ''}</span>
       <button className="ibtn" onClick={() => step(-1)} disabled={!hits.length} aria-label={t('Previous match')}><Icon name="caret-up:bold" size={16} /></button>
       <button className="ibtn" onClick={() => step(1)} disabled={!hits.length} aria-label={t('Next match')}><Icon name="caret-down:bold" size={16} /></button>
-      <button className="ibtn" onClick={() => onRedact(hits)} disabled={!hits.length} aria-label={t('Black out all matches')} title={t('Black out all matches (redact)')}><Icon name="eye-slash" size={18} /></button>
+      <button className="ibtn rd" onClick={() => onRedact(hits)} disabled={!hits.length} aria-label={t('Black out all matches')} title={t('Black out all matches (redact)')}><Icon name="eye-slash" size={18} /></button>
       <button className="ibtn" onClick={onClose} aria-label={t('Close search')}><Icon name="close" size={17} /></button>
+      </div>
+      {repl && onReplace && (
+        <div className="frow rrow">
+          <Icon name="swap" size={18} />
+          <input value={by} onChange={(e) => setBy(e.target.value)} placeholder={t('Replace with')} aria-label={t('Replace with')}
+            onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') doReplace(); if (e.key === 'Escape') onClose(); }} />
+          <button className={`fopt${opts.matchCase ? ' on' : ''}`} onClick={() => setOpts((o) => ({ ...o, matchCase: !o.matchCase }))} aria-pressed={opts.matchCase} title={t('Match case')} aria-label={t('Match case')}>Aa</button>
+          <button className={`fopt${opts.word ? ' on' : ''}`} onClick={() => setOpts((o) => ({ ...o, word: !o.word }))} aria-pressed={opts.word} title={t('Whole words only')} aria-label={t('Whole words only')}>ab|</button>
+          <button className="btn primary sm" onClick={doReplace} disabled={!q.trim() || replacing}>{replacing ? <span className="spinner" /> : t('Replace all')}</button>
+        </div>
+      )}
     </div>
   );
 }

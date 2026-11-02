@@ -2,7 +2,7 @@ import { useCallback, useReducer } from 'react';
 import type { EditorObject, PageState, FontFamily, FormValues, Looks, CharLook } from '../engine/types';
 
 export type Tool =
-  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'redact' | 'highlight' | 'underline' | 'strike' | 'rect' | 'ellipse' | 'line' | 'arrow' | 'draw' | 'link' | 'remove';
+  | 'edit' | 'fill' | 'text' | 'sign' | 'image' | 'whiteout' | 'redact' | 'highlight' | 'underline' | 'strike' | 'rect' | 'ellipse' | 'line' | 'arrow' | 'draw' | 'link' | 'remove' | 'note' | 'stamp';
 
 export interface RunEdit {
   text: string;
@@ -64,6 +64,8 @@ export interface ToolStyle {
   match: boolean;
   /** Remove: the brush's radius (pt) */
   removeSize: number;
+  /** colour of new comments */
+  note?: string;
 }
 
 interface State {
@@ -115,5 +117,8 @@ export function useHistory() {
     past: state.past.length,
   };
 }
+
+/** sticky-note colours for comments */
+export const NOTE_COLORS = ['#FFC93C', '#FF8A65', '#7BD389', '#6FB7FF', '#C792EA'];
 
 export const uid = () => Math.random().toString(36).slice(2, 10);

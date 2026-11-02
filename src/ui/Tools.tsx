@@ -7,6 +7,8 @@ import { Seg, Stepper, Toggle } from './Panel';
 import { saveFile, HostProps, ToastMsg, BusyMsg, type EditorStart } from './Editor';
 import { parseRange, formatRange, loadDoc, pickPages, imageBytes, addImagePage, addOutline, save, baseName, fmtSize } from './pdfops';
 import { Convert } from './Convert';
+import { Compare } from './Compare';
+import { ProfileModal } from './ProfileModal';
 import { LegalLinks, LegalSheet, type LegalPage } from './Legal';
 import { ACCEPT, DropBox, DropOverlay, isImage, isPdf, useFileDrop } from './drop';
 import { Compress, Password, PageNumbers, Watermark, Split, ToImages, ExtractText, Deadlines, SafeCopy } from './MoreTools';
@@ -16,7 +18,7 @@ import type { PageState } from '../engine/types';
 import { PDFDocument } from 'pdf-lib';
 import { t, tn, tj } from './i18n';
 
-export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert' | 'compress' | 'password' | 'numbers' | 'watermark' | 'split' | 'images' | 'text' | 'deadlines' | 'safecopy';
+export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert' | 'compress' | 'password' | 'numbers' | 'watermark' | 'split' | 'images' | 'text' | 'deadlines' | 'safecopy' | 'compare';
 
 export interface Current { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; changed: boolean }
 export interface Src { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; fromEditor: boolean }
@@ -30,13 +32,14 @@ export interface Props {
   onScan: () => void;
 }
 
-const TILE = { edit: '#FFE14D', org: '#DDE2FF', conv: '#E3F1E9' };
+const TILE = { edit: '#FFE14D', org: '#DDE2FF', conv: '#E3F1E9', smart: '#EBDDFF' };
 type HubItem = { name: string; desc: string; icon: string; tile: string; go: () => void };
 
 export function Tools(p: Props) {
   const [tool, setTool] = useState<ToolId>(p.initial);
   const [convertKind, setConvertKind] = useState<string>('');
   const [legal, setLegal] = useState<LegalPage | null>(null);
+  const [profile, setProfile] = useState(false);
   const mobile = p.bp === 'mobile', desk = p.bp === 'desktop' || p.bp === 'large';
   // a tool opened straight from a start-screen chip goes back to where it came from, not to the list
   const back = () => (tool === 'hub' || tool === p.initial ? p.onBack() : setTool('hub'));
@@ -57,6 +60,7 @@ export function Tools(p: Props) {
     text: ['Extract text', 'All the text, also from scans'],
     deadlines: ['Deadline finder', 'Dates from a letter into your calendar'],
     safecopy: ['Safe ID copy', 'A copy that can only be used for one purpose'],
+    compare: ['Compare PDFs', 'Every word added, removed or changed'],
   };
   const conv = (k: string) => () => { setConvertKind(k); setTool('convert'); };
   // one entry per screen: kinds of the same job (file types, scan modes, extract/remove) are chosen inside the tool
@@ -65,9 +69,13 @@ export function Tools(p: Props) {
       { name: 'Edit PDF', desc: t('Retype text, add text, images, shapes'), icon: 'pencil-simple-line:duotone', tile: TILE.edit, go: () => p.onEdit('edit') },
       { name: 'Fill a form', desc: t('Type in fields, tick boxes'), icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
       { name: 'Sign', desc: t('Draw, type or upload a signature'), icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
-      { name: 'Privacy check', desc: t('Find personal data, black it out'), icon: 'shield-check:duotone', tile: TILE.edit, go: () => p.onEdit('privacy') },
-      { name: 'Safe ID copy', desc: t('“COPY – only for …” on ID scans'), icon: 'identification-badge:duotone', tile: TILE.edit, go: () => setTool('safecopy') },
-      { name: 'Deadline finder', desc: t('Dates in a letter, to your calendar'), icon: 'calendar-plus:duotone', tile: TILE.edit, go: () => setTool('deadlines') },
+    ] },
+    { name: 'Smart tools', items: [
+      { name: 'Compare PDFs', desc: t('What changed between two versions'), icon: 'git-diff:duotone', tile: TILE.smart, go: () => setTool('compare') },
+      { name: 'My details', desc: t('Fill in any form in one tap'), icon: 'address-book:duotone', tile: TILE.smart, go: () => setProfile(true) },
+      { name: 'Privacy check', desc: t('Find personal data, black it out'), icon: 'shield-check:duotone', tile: TILE.smart, go: () => p.onEdit('privacy') },
+      { name: 'Safe ID copy', desc: t('“COPY – only for …” on ID scans'), icon: 'identification-badge:duotone', tile: TILE.smart, go: () => setTool('safecopy') },
+      { name: 'Deadline finder', desc: t('Dates in a letter, to your calendar'), icon: 'calendar-plus:duotone', tile: TILE.smart, go: () => setTool('deadlines') },
     ] },
     { name: 'Pages', items: [
       { name: 'Combine PDFs', desc: t('Merge files and images into one'), icon: 'stack:duotone', tile: TILE.org, go: () => setTool('combine') },
@@ -104,12 +112,12 @@ export function Tools(p: Props) {
               <h1>{t('What do you want to do?')}</h1>
               <div className="sub">{p.host.isNative ? t('Every tool runs on your phone.') : t('Every tool runs in your browser.')} {t('Files never leave this device.')}</div>
             </div>
-            {groups.map((g) => (
+            {groups.map((g, gi) => (
               <section key={g.name} className="grp">
                 <div className="kicker">{t(g.name)}</div>
                 <div className="cards">
-                  {g.items.map((it) => (
-                    <button key={it.name} className="hcard" onClick={it.go} title={`${t(it.name)}: ${it.desc}`}>
+                  {g.items.map((it, i) => (
+                    <button key={it.name} className="hcard" onClick={it.go} title={`${t(it.name)}: ${it.desc}`} style={{ ['--i' as any]: Math.min(14, gi * 3 + i) }}>
                       <span className="ti" style={{ background: it.tile }}><Icon name={it.icon} size={21} /></span>
                       <span className="tt"><b>{t(it.name)}</b><span>{it.desc}</span></span>
                       <Icon name="right" size={16} />
@@ -123,6 +131,8 @@ export function Tools(p: Props) {
         </div>
       )}
       {legal && <LegalSheet page={legal} onClose={() => setLegal(null)} />}
+      {profile && <ProfileModal sheet={mobile} onClose={() => setProfile(false)} onSaved={() => { setProfile(false); p.toast({ msg: t('Your details are saved on this device') }); }} />}
+      {tool === 'compare' && <Compare {...p} desk={desk} mobile={mobile} />}
       {tool === 'combine' && <Combine {...p} desk={desk} mobile={mobile} />}
       {(tool === 'extract' || tool === 'remove') && <PagePick {...p} desk={desk} mobile={mobile} mode={tool} onMode={setTool} />}
       {tool === 'insert' && <Insert {...p} desk={desk} mobile={mobile} />}

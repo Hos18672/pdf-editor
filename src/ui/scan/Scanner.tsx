@@ -18,7 +18,8 @@ import { Pager } from './Pager';
 import { aiKey, eraseTag, stopAi, DEFAULT_FILTER, decode, findDocument, flattenPage, forget, forgetBases, gridOf, looksCurved, newId, outputSize, pixelsOf, renderLook, renderPage, renderThumbs, shapeOf, turnsFor, type Quality, type ScanMode, type ScanPage } from './engine';
 import { findGutter, splitSpread } from './book';
 import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
-import { t, tn } from '../i18n';
+import { t, tn, getLang } from '../i18n';
+import type { Payment } from '../smart';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'original', label: 'Original' }, { id: 'lighten', label: 'Lighten|scan' }, { id: 'enhance', label: 'Enhance|scan' }, { id: 'auto', label: 'Magic' },
@@ -72,6 +73,10 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
   const [cardSheet, setCardSheet] = useState(true);
   const [ocr, setOcr] = useState(false);
   const [name, setName] = useState(stamp);
+  // payment codes found on pages (by render), and the one shown
+  const [pay, setPay] = useState<Record<string, Payment | null>>({});
+  const [payOpen, setPayOpen] = useState<Payment | null>(null);
+  const [naming, setNaming] = useState(false);
   const [saved, setSaved] = useState(false);
   const [askClose, setAskClose] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -471,6 +476,24 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     </>
   );
 
+  const pr = page ? renders[page.id] : undefined;
+  const payKey = page && pr && !pr.quick ? `${page.id}:${pr.key}` : null;
+  const payHere = payKey ? pay[payKey] : undefined;
+  const imgOf = (url: string) => new Promise<HTMLImageElement>((res, rej) => { const im = new Image(); im.onload = () => res(im); im.onerror = rej; im.src = url; });
+  // the page shown: look for a payment code ("Zahlen mit Code") once it is rendered
+  useEffect(() => {
+    if (!payKey || payHere !== undefined || !pr) return;
+    let alive = true;
+    const url = pr.url;
+    const tm = setTimeout(async () => {
+      try {
+        const [{ findPayment }, im] = await Promise.all([import('../smart'), imgOf(url)]);
+        const found = await findPayment(im);
+        if (alive) setPay((m) => ({ ...m, [payKey]: found }));
+      } catch { if (alive) setPay((m) => ({ ...m, [payKey]: null })); }
+    }, 400);
+    return () => { alive = false; clearTimeout(tm); };
+  }, [payKey]); // eslint-disable-line react-hooks/exhaustive-deps
   if (view === 'camera' && google) {
     return (
       <>
@@ -492,11 +515,36 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
 
   const r = page ? renders[page.id] : undefined;
   const stale = !!page && r?.key !== keyOf(page);
+  /** a file name from the first page's text (date, kind of letter, sender) */
+  const suggest = async () => {
+    const first = pages[0], fr = first ? renders[first.id] : undefined;
+    if (!fr || naming) return;
+    setNaming(true);
+    try {
+      const [{ loadOcr }, { suggestName }, im] = await Promise.all([import('../ocr'), import('../smart'), imgOf(fr.url)]);
+      const k = Math.min(1, 1800 / im.width);
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.width * k); c.height = Math.round(im.height * 0.55 * k);
+      const x = c.getContext('2d')!;
+      x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
+      x.drawImage(im, 0, 0, im.width, im.height * 0.55, 0, 0, c.width, c.height);
+      const w = await loadOcr();
+      const text = ((await w.recognize(c)).data.text ?? '') as string;
+      c.width = c.height = 0;
+      const n = suggestName(text, getLang() === 'de');
+      if (n) { setName(n); toast({ msg: t('Named after the letter: {n}', { n }) }); }
+      else toast({ msg: t('No date or sender found on the first page'), kind: 'err' });
+    } catch { toast({ msg: t('Couldn’t read the page'), kind: 'err' }); }
+    finally { setNaming(false); }
+  };
+  const copy = (v: string) => navigator.clipboard?.writeText(v).then(() => toast({ msg: t('Copied') }), () => toast({ msg: t('Couldn’t copy'), kind: 'err' }));
   const settings = (
     <div className="sc-settings">
       <label className="sc-field">
         <span className="kicker">{t('File name')}</span>
-        <span className="sc-name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} aria-label={t('File name')} /><em>.pdf</em></span>
+        <span className="sc-name"><input className="input" value={name} onChange={(e) => setName(e.target.value)} aria-label={t('File name')} /><em>.pdf</em>
+          <button type="button" className={`ibtn sc-magic${naming ? ' busy' : ''}`} onClick={suggest} disabled={!pages.length || naming} aria-label={t('Name it after the letter')} title={t('Name it after the letter: date, kind and sender')}>
+            {naming ? <span className="spinner" /> : <Icon name="magic-wand:duotone" size={19} />}</button></span>
       </label>
       <div className="sc-field">
         <span className="kicker">{t('Page size')}</span>
@@ -544,6 +592,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
                 ? <button className={`sc-cmp${page.aiOff ? '' : ' on'}`} onClick={() => patch(page.id, (p) => ({ aiOff: !p.aiOff }))} aria-pressed={!page.aiOff}
                   title={page.aiOff ? t('Flatten the curved page with AI (on this device)') : t('Curved page flattened with AI (on this device). Tap to undo')}><Icon name="sparkle" size={17} />{page.aiOff ? t('Flatten') : t('Flattened')}</button>
                 : flattening > 0 && !page.ai ? <span className="sc-count" role="status"><span className="spinner" /> {' '}{t('Flattening…')}</span> : null}
+              {payHere && <button className="sc-cmp sc-pay" onClick={() => setPayOpen(payHere)}><Icon name="seal-check:fill" size={17} />{payHere.amount !== null ? t('Pay {a}', { a: payHere.amount.toLocaleString(getLang() === 'de' ? 'de-AT' : undefined, { style: 'currency', currency: payHere.currency }) }) : t('Payment code')}</button>}
               <button className={`sc-cmp${compare ? ' on' : ''}`} onClick={() => setCompare(!compare)} aria-pressed={compare}><Icon name="split-horizontal" size={17} />{t('Compare')}</button>
             </div>
           )}
@@ -594,6 +643,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
           </aside>
         )}
       </div>
+      {payOpen && <PayModal p={payOpen} mobile={mobile} onClose={() => setPayOpen(null)} copy={copy} />}
       {mobile && sheetOpen && createPortal(
         <div className="scrim sheet" onPointerDown={(e) => e.target === e.currentTarget && setSheetOpen(false)}>
           <div className="modal sc-sheet" role="dialog" aria-modal="true" aria-label={t('Save as PDF')}>
@@ -633,3 +683,26 @@ function SortThumb({ p, r, i, on, onClick }: { p: ScanPage; r?: Render; i: numbe
 
 export { MODES };
 
+/** the payment details of a QR code on a letter, each copied with a tap */
+function PayModal({ p, mobile, onClose, copy }: { p: Payment; mobile: boolean; onClose: () => void; copy: (v: string) => void }) {
+  useBack(onClose);
+  return createPortal(
+        <div className={`scrim${mobile ? ' sheet' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+          <div className="modal paymodal" role="dialog" aria-modal="true" aria-label={t('Payment code')}>
+            <div className="grab" />
+            <div className="mhead"><h2><Icon name="seal-check:duotone" size={24} />{t('Payment code found')}</h2>
+              <button className="ibtn" onClick={() => onClose()} aria-label={t('Close')}><Icon name="close" /></button></div>
+            <span className="label">{t('The QR code printed on this letter. Copy the details into your banking app – or scan the code there.')}</span>
+            {p.amount !== null && <div className="pay-amt">{p.amount.toLocaleString(getLang() === 'de' ? 'de-AT' : undefined, { style: 'currency', currency: p.currency })}</div>}
+            <div className="pay-rows">
+              {([['Recipient', p.name], ['IBAN', (p.iban.match(/.{1,4}/g) ?? []).join(' ')], ['BIC', p.bic], ['Reference', p.ref], ['Purpose', p.text],
+                ['Amount', p.amount !== null ? p.amount.toFixed(2).replace('.', getLang() === 'de' ? ',' : '.') : '']] as [string, string][]).filter(([, v]) => v).map(([k, v]) => (
+                <button key={k} className="pay-row" onClick={() => copy(k === 'IBAN' ? p.iban : v)}>
+                  <span><small>{t(k)}</small><b>{v}</b></span><Icon name="copy-simple" size={18} />
+                </button>
+              ))}
+            </div>
+            <p className="sc-note"><Icon name="lock" size={13} />{t('Read on this device. Nothing is paid or sent from here.')}</p>
+          </div>
+        </div>, document.body);
+}

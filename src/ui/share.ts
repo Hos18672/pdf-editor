@@ -1,4 +1,5 @@
 // Handing a finished file over: download / share sheet / print. Small, so the start screen can use it too.
+import { celebrate } from './motion';
 import { t } from './i18n';
 import type { HostProps, ToastMsg } from './Editor';
 
@@ -12,6 +13,7 @@ export const toB64 = (bytes: Uint8Array) => {
 export async function saveFile(host: HostProps, bytes: Uint8Array, name: string, type: string, toast: (t: ToastMsg) => void) {
   if (host.isNative && host.savePdf) {
     await host.savePdf(toB64(bytes), name);
+    celebrate();
     return;
   }
   const url = URL.createObjectURL(new Blob([bytes as Uint8Array<ArrayBuffer>], { type }));
@@ -19,6 +21,7 @@ export async function saveFile(host: HostProps, bytes: Uint8Array, name: string,
   a.href = url; a.download = name;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 120000);
+  celebrate();
   // phones (and browsers that can share files): offer to send it on; otherwise to open it
   const file = canShareFiles() ? new File([bytes as Uint8Array<ArrayBuffer>], name, { type }) : null;
   toast({ msg: t('Saved {name}', { name }), action: file ? { label: t('Share'), run: () => { (navigator as any).share({ files: [file], title: name }).catch(() => null); } }
