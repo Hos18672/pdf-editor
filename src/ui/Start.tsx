@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Icon } from './icons';
-import { LegalLinks, LegalSheet, type LegalPage } from './Legal';
+import { LegalLinks, LegalSheet, LEGAL_PAGES, legalUrl, type LegalPage } from './Legal';
 import { isPdf, useFileDrop } from './drop';
 import { appBase } from './assets';
 import type { Theme } from './hooks';
@@ -357,6 +357,8 @@ function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent,
   legal: LegalPage | null; setLegal: (p: LegalPage | null) => void; sheet: React.ReactNode;
 }) {
   useBack(() => onTab?.('home'), tab === 'files' && !!onTab);
+  const [menu, setMenu] = useState(false);
+  const [lang, setLang] = useLang();
   const last = recent.find((d) => d.hasBytes);
   const row = (d: RecentDoc) => (
     <div key={d.id} className={`hx-row${d.hasBytes ? '' : ' off'}`}>
@@ -376,8 +378,8 @@ function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent,
       <LogoMark size={36} />
       <span className="hx-brand">{tab === 'files' ? t('Files') : t('Paginka')}</span>
       <span className="sp" />
-      <LangButton round />
       <ThemeButton theme={theme} onToggle={onTheme} round />
+      <button className="s2-round hx-menubtn" onClick={() => setMenu(true)} aria-label={t('Menu')} aria-haspopup="dialog" title={t('Menu')}><Icon name="list" size={20} /></button>
     </header>
   );
   const QT: [QuickAction, string, string, string, string][] = [
@@ -451,10 +453,47 @@ function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent,
             {!over && <p className="hx-priv"><Icon name="lock-simple:fill" size={14} /><span><b>{t('Files stay on this phone.')}</b> {t('Nothing is uploaded, ever.')}</span></p>}
           </>
         )}
-        <footer className="hx-foot"><LegalLinks onOpen={setLegal} /></footer>
       </div>
       {sheet}
+      {menu && <HomeMenu lang={lang} setLang={setLang} theme={theme} onTheme={onTheme} onLegal={setLegal} onClose={() => setMenu(false)} />}
       {legal && <LegalSheet page={legal} onClose={() => setLegal(null)} />}
+    </div>
+  );
+}
+
+/** Phones: the home menu (language, appearance, legal pages) as a bottom sheet. */
+function HomeMenu({ lang, setLang, theme, onTheme, onLegal, onClose }: {
+  lang: string; setLang: (l: 'de' | 'en') => void; theme: Theme; onTheme: () => void; onLegal: (p: LegalPage) => void; onClose: () => void;
+}) {
+  useBack(onClose);
+  const LI: Record<LegalPage, string> = { impressum: 'identification-card', privacy: 'shield-check', terms: 'file-text', licenses: 'code' };
+  return (
+    <div className="scrim sheet" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="modal hx-msheet" role="dialog" aria-modal="true" aria-label={t('Menu')}>
+        <div className="grab" />
+        <div className="mhead"><h2>{t('Menu')}</h2><button className="ibtn" onClick={onClose} aria-label={t('Close')}><Icon name="close" /></button></div>
+        <div className="hx-mgrp">
+          <div className="hx-mrow"><span className="ic"><Icon name="translate" size={19} /></span><b>{t('Language')}</b>
+            <span className="hx-seg" role="radiogroup" aria-label={t('Language')}>
+              <button role="radio" aria-checked={lang === 'de'} className={lang === 'de' ? 'on' : ''} onClick={() => setLang('de')}>Deutsch</button>
+              <button role="radio" aria-checked={lang !== 'de'} className={lang !== 'de' ? 'on' : ''} onClick={() => setLang('en')}>English</button>
+            </span></div>
+          <div className="hx-mrow"><span className="ic"><Icon name={theme === 'dark' ? 'moon' : 'sun'} size={19} /></span><b>{t('Appearance')}</b>
+            <span className="hx-seg" role="radiogroup" aria-label={t('Appearance')}>
+              <button role="radio" aria-checked={theme !== 'dark'} className={theme !== 'dark' ? 'on' : ''} onClick={() => theme === 'dark' && onTheme()}>{t('Light|theme')}</button>
+              <button role="radio" aria-checked={theme === 'dark'} className={theme === 'dark' ? 'on' : ''} onClick={() => theme !== 'dark' && onTheme()}>{t('Dark|theme')}</button>
+            </span></div>
+        </div>
+        <span className="kicker">{t('Legal')}</span>
+        <nav className="hx-mgrp" aria-label={t('Legal')}>
+          {LEGAL_PAGES.map(([p, label]) => (
+            <a key={p} className="hx-mrow link" href={legalUrl(p)} onClick={(e) => { e.preventDefault(); onLegal(p); }}>
+              <span className="ic"><Icon name={LI[p]} size={19} /></span><b>{t(label)}</b><Icon name="right" size={16} />
+            </a>
+          ))}
+        </nav>
+        <p className="hx-mnote"><Icon name="lock-simple:fill" size={14} />{t('Files stay on this phone.')} {t('Nothing is uploaded, ever.')}</p>
+      </div>
     </div>
   );
 }
@@ -467,7 +506,7 @@ export function BottomNav({ active, onHome, onFiles, onOpen, onScan, onTools }: 
     const on = active === k;
     return (
       <button key={k} className={`bn-it${on ? ' on' : ''}`} onClick={go} aria-current={on ? 'page' : undefined} data-tab={k}>
-        <span className="ic"><Icon name={icon} size={22} weight={on ? 'fill' : 'regular'} /></span>{label}
+        <span className="ic"><Icon name={icon} size={22} weight={on ? 'fill' : 'regular'} /></span><span className="lb">{label}</span>
       </button>
     );
   };

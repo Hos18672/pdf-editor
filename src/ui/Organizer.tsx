@@ -42,7 +42,7 @@ export function Organizer({ pdf, pages, onChange, onDone, onAdd, mobile }: {
         <button className="btn primary lg" onClick={onDone}>{t('Done')}</button>
       </div>
       <SortableArea items={pages} idOf={(p) => String(p.src)} onReorder={onChange} layout="grid"
-        overlay={(p) => <div className={`ocard${sel.has(p.src) ? ' on' : ''}`}><CardBody pdf={pdf} p={p} i={pages.indexOf(p)} mobile={mobile} on={sel.has(p.src)} /></div>}>
+        overlay={(p) => <div className={`ocard${sel.has(p.src) ? ' on' : ''}${mobile ? ' m' : ''}`}><CardBody pdf={pdf} p={p} i={pages.indexOf(p)} mobile={mobile} on={sel.has(p.src)} /></div>}>
         <div className="grid">
           {pages.map((p, i) => (
             <PageCard key={p.src} pdf={pdf} p={p} i={i} mobile={mobile} on={sel.has(p.src)} only={pages.length === 1}
@@ -67,7 +67,7 @@ function PageCard({ pdf, p, i, mobile, on, only, onToggle, onRotate, onRemove }:
   const s = useSortableItem(String(p.src));
   return (
     <div ref={s.ref} style={s.style} className={`oslot${s.dragging ? ' hole' : ''}`}>
-      <div className={`ocard${on ? ' on' : ''}`} {...s.pointer}>
+      <div className={`ocard${on ? ' on' : ''}${mobile ? ' m' : ''}`} {...s.pointer}>
         <CardBody pdf={pdf} p={p} i={i} mobile={mobile} on={on} grip={s.grip} only={only}
           onToggle={onToggle} onRotate={onRotate} onRemove={onRemove} />
       </div>

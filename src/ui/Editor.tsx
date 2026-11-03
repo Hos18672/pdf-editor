@@ -2015,14 +2015,14 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
               const on = railActive(r) && !(r.t === tool && r.t !== 'sign' && selObj?.type === 'signature');
               return (
                 <button key={r.t} className={`dk3${on ? ' on' : ''}`} aria-pressed={on} onClick={() => railClick(r)} data-t={r.t}>
-                  <span className="ic"><Icon name={r.icon} size={22} weight={on ? 'fill' : 'regular'} /></span>{t(r.label)}
+                  <span className="ic"><Icon name={r.icon} size={22} weight={on ? 'fill' : 'regular'} /></span><span className="lb">{t(r.label + '|tray')}</span>
                 </button>
               );
             })}
           </div>
           <span className="sep" aria-hidden />
           <button className={`dk3 more${moreOpen ? ' on' : ''}`} aria-haspopup="dialog" onClick={() => { setFlyout(null); setSelected(null); setMoreOpen(true); }}>
-            <span className="ic"><Icon name="dots-nine:bold" size={22} /></span>{t('More')}
+            <span className="ic"><Icon name="dots-nine:bold" size={22} /></span><span className="lb">{t('More')}</span>
           </button>
         </nav>
       )}

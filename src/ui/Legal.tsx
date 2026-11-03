@@ -5,7 +5,7 @@ import { useBack } from './back';
 import { t, tn } from './i18n';
 
 export type LegalPage = 'impressum' | 'privacy' | 'terms' | 'licenses';
-const PAGES: [LegalPage, string][] = [['impressum', 'Impressum'], ['privacy', 'Privacy'], ['terms', 'Terms'], ['licenses', 'Licenses']];
+export const LEGAL_PAGES: [LegalPage, string][] = [['impressum', 'Impressum'], ['privacy', 'Privacy'], ['terms', 'Terms'], ['licenses', 'Licenses']];
 const TITLE: Record<LegalPage, string> = { impressum: 'Impressum', privacy: 'Privacy policy', terms: 'Terms of use', licenses: 'Open-source licenses' };
 
 /** The legal pages ship with the app (public/legal), so they also open offline in the Android app. */
@@ -15,7 +15,7 @@ export const legalUrl = (p: LegalPage) => `${appBase()}legal/${p}.html`;
 export function LegalLinks({ onOpen, className = '' }: { onOpen: (p: LegalPage) => void; className?: string }) {
   return (
     <nav className={`legal-links ${className}`} aria-label={t('Legal')}>
-      {PAGES.map(([p, label], i) => (
+      {LEGAL_PAGES.map(([p, label], i) => (
         <React.Fragment key={p}>
           {i > 0 && <span aria-hidden="true">·</span>}
           <a href={legalUrl(p)} onClick={(e) => { e.preventDefault(); onOpen(p); }}>{t(label)}</a>

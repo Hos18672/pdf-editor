@@ -1135,4 +1135,12 @@ export const DE: Record<string, string> = {
   "Merge PDFs into one": "PDFs zu einem zusammenfügen",
   "Photos, Word, Excel to PDF": "Fotos, Word, Excel als PDF",
   "Home|nav": "Start",
+  "Edit|tray": "Ändern",
+  "Sign|tray": "Signieren",
+  "Highlight|tray": "Markieren",
+  "Menu": "Menü",
+  "Language": "Sprache",
+  "Appearance": "Darstellung",
+  "Light|theme": "Hell",
+  "Dark|theme": "Dunkel",
 };
