@@ -162,6 +162,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   // looks of scanned lines belong to this document
   useState(() => { scanStyles.clear(); return 0; });
   const mobile = bp === 'mobile', tablet = bp === 'tablet', large = bp === 'large', desk = bp === 'desktop' || large;
+  // touch tablets type like phones: the properties bar sits on the keyboard
+  const touchTab = tablet && typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
+  const typer = mobile || touchTab;
   const [tool, setTool] = useState<Tool>('edit');
   const [style, setStyle] = useState<ToolStyle>({
     color: '#000000', stroke: '#1E2559', fill: null, strokeWidth: 2, fontSize: 14, family: 'Helvetica', highlight: '#FFE14D', ink: '#D93025', match: true, removeSize: 9,
@@ -1671,7 +1674,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 
   // phone: keep the line being edited in the top third, above the keyboard
   useEffect(() => {
-    if (!mobile || !editing) return;
+    if (!typer || !editing) return;
     const go = () => {
       const wrap = wrapRef.current;
       const sel = editing.includes(':') ? `[data-key="${CSS.escape(editing)}"]` : `[data-id="${CSS.escape(editing)}"]`;
@@ -1685,12 +1688,12 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     };
     const t1 = setTimeout(go, 60), t2 = setTimeout(go, 450);
     return () => { clearTimeout(t1); clearTimeout(t2); };
-  }, [editing, mobile]);
+  }, [editing, typer]);
   // phone: when typing ends, go back to the tool dock
   useEffect(() => {
-    if (!mobile) return;
+    if (!typer) return;
     if (!editing) { setSlimOpen(false); if (selected?.includes(':')) setSelected(null); }
-  }, [editing, mobile]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [editing, typer]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // tablet: the floating card moves left when it would cover the selection
   const cardRef = useRef<HTMLElement>(null);
@@ -1752,7 +1755,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const panel = selRun ? runProps(false) : selObj ? objProps(false) : tool === 'fill' ? fillPanel
     : null; // tool options live in the rail flyout
 
-  const mobileEditing = mobile && editing && (editing.includes(':') || snap.objects.find((o) => o.id === editing)?.type === 'text');
+  const mobileEditing = typer && editing && (editing.includes(':') || snap.objects.find((o) => o.id === editing)?.type === 'text');
   const fieldNav = !desk && tool === 'fill' && activeField && fillable.length > 0;
   useEffect(() => {
     const el = dockRef.current?.querySelector<HTMLElement>('.dk3.on');
@@ -1948,7 +1951,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             {panel ?? <IdleProps changes={changes} onPick={pickChange} />}
           </aside>
         )}
-        {tablet && view === 'doc' && panel && !(tool === 'fill' && activeField) && (
+        {tablet && view === 'doc' && panel && !(tool === 'fill' && activeField) && !mobileEditing && (
           <aside ref={cardRef} className={`floatcard ${cardLeft ? 'l' : 'r'}`} aria-label={t('Properties')}>{panel}</aside>
         )}
         {flyout && (() => {
