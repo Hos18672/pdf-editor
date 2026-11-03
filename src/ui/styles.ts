@@ -1999,6 +1999,20 @@ select.ff { appearance: none; -webkit-appearance: none; cursor: pointer; }
 }
 @keyframes busy-morph { from { transform: scaleX(.86); opacity: .4; border-radius: 40px; } to { transform: none; opacity: 1; } }
 @keyframes toast-up { from { opacity: 0; transform: translateY(24px); } to { opacity: 1; transform: none; } }
+/* screens: a view transition (fade, 16px slide); back runs it in reverse */
+@media (max-width: 1199px) {
+  ::view-transition-old(root) { animation: vt-out .28s var(--e) both; }
+  ::view-transition-new(root) { animation: vt-in .32s var(--e) both; }
+  :root[data-nav="back"]::view-transition-old(root) { animation-name: vt-out-back; }
+  :root[data-nav="back"]::view-transition-new(root) { animation-name: vt-in-back; }
+  .app, .tscreen, .scr { animation: screen-in-m .32s var(--e); }
+}
+@keyframes vt-out { to { opacity: 0; transform: translateY(-8px); } }
+@keyframes vt-in { from { opacity: 0; transform: translateY(16px); } }
+@keyframes vt-out-back { to { opacity: 0; transform: translateY(16px); } }
+@keyframes vt-in-back { from { opacity: 0; transform: translateY(-8px); } }
+@keyframes screen-in-m { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+
 :root[data-theme="dark"] .toolsheet .tile .chip { color: var(--on-tint); }
 :root[data-theme="dark"] .toolsheet .tile.on .chip { color: #1E2559; }
 @media (max-width: 359px) {

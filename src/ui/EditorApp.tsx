@@ -1,5 +1,6 @@
 import { SavedBurst, useSheetPull } from './motion';
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { css } from './styles';
 import { Icon } from './icons';
 import { useNoStrayDrops } from './drop';
@@ -93,6 +94,7 @@ function registerServiceWorker() {
 }
 
 type Route = { name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' } | { name: 'scan'; back: 'home' | 'tools'; initial?: string[] };
+const DEPTH: Record<Route['name'], number> = { home: 0, tools: 1, scan: 2, editor: 2 };
 
 export default function EditorApp(host: HostProps) {
   // the interface language: changing it re-renders everything below
@@ -107,7 +109,16 @@ export default function EditorApp(host: HostProps) {
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
   useSheetPull();
   const narrow = useNarrow();
-  const [route, setRoute] = useState<Route>({ name: 'home' });
+  const [route, setRouteNow] = useState<Route>({ name: 'home' });
+  // phones and tablets: screens change with a view transition (fade and a short slide; back runs it in reverse)
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const setRoute = useCallback((r: Route) => {
+    const doc = document as any;
+    if (!doc.startViewTransition || window.innerWidth >= 1200 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || r.name === routeRef.current.name) { setRouteNow(r); return; }
+    document.documentElement.dataset.nav = DEPTH[r.name] < DEPTH[routeRef.current.name] ? 'back' : 'fwd';
+    try { doc.startViewTransition(() => flushSync(() => setRouteNow(r))); } catch { setRouteNow(r); }
+  }, []);
   // a tools card asked for a file first: where to land once it is open
   const startAfterOpen = useRef<EditorStart | undefined>(undefined);
   const pending = useRef<{ name: string; bytes: Uint8Array } | null>(null);
