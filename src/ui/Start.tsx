@@ -6,6 +6,7 @@ import { appBase } from './assets';
 import type { Theme } from './hooks';
 import { ago, listRecent, onRecentChange, removeRecent, type RecentDoc } from './recent';
 import { t, tn, useLang } from './i18n';
+import { useBack } from './back';
 
 export type OpenState =
   | { kind: 'idle' }
@@ -13,6 +14,7 @@ export type OpenState =
   | { kind: 'password'; name: string; wrong: boolean }
   | { kind: 'error'; message: string };
 
+export type HomeTab = 'home' | 'files';
 export type QuickAction = 'scan' | 'sign' | 'fill' | 'combine' | 'convert' | 'tools';
 
 const ANDROID_URL = 'https://github.com/Hos18672/pdf-editor/releases/latest';
@@ -50,13 +52,15 @@ const QUICK: [QuickAction, string, string, string][] = [
   ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
 ];
 
-export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative, v3 }: {
+export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative, v3, tab = 'home', onTab }: {
   state: OpenState; onFile: (f: File) => void;
   /** files that aren't PDFs (pictures, Office files, text): turned into one PDF and opened */
   onImport?: (files: File[]) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
   onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; onShareRecent?: (d: RecentDoc) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
   /** phones and tablets: the v3 home (navy open card, recent row, tool tiles) */
   v3?: boolean;
+  /** phones: which tab of the bottom bar is shown */
+  tab?: HomeTab; onTab?: (t: HomeTab) => void;
 }) {
   const [recent, setRecent] = useState<RecentDoc[]>([]);
   useEffect(() => {
@@ -161,6 +165,35 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
       );
     }
     const sheet = state.kind === 'password' || state.kind === 'error';
+    const sheetEl = sheet ? (
+          <div className={`scrim${mobile ? ' sheet' : ''} h3-scrim`}>
+            {state.kind === 'password' ? (
+              <form className="modal h3-sheet" role="dialog" aria-modal="true" aria-label={t('This PDF is password-protected')} onSubmit={(e) => { e.preventDefault(); if (pw) onPassword(pw); }}>
+                <div className="grab" />
+                <span className="h3-sic warn"><Icon name="lock-key:fill" size={26} /></span>
+                <h2>{t('This PDF is password-protected')}</h2>
+                <p>{state.wrong ? t('That password didn’t work. Try again.') : t('Enter the password for {name}. It’s checked on this device only.', { name: state.name })}</p>
+                <label className="h3-pw"><span>{t('Password')}</span>
+                  <span className="f"><input className="input" type={showPw ? 'text' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} autoFocus aria-invalid={state.wrong || undefined} />
+                    <button type="button" className="ibtn" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? t('Hide password') : t('Show password')} aria-pressed={showPw}><Icon name={showPw ? 'eye-slash' : 'eye'} size={20} /></button></span>
+                </label>
+                <div className="h3-sacts">
+                  <button type="button" className="btn outline lg" onClick={onPick}>{t('Choose another file')}</button>
+                  <button className="btn primary lg" type="submit" disabled={!pw}><Icon name="lock-key-open" size={18} />{t('Unlock')}</button>
+                </div>
+              </form>
+            ) : state.kind === 'error' ? (
+              <div className="modal h3-sheet" role="alertdialog" aria-modal="true" aria-label={t('This file couldn’t be opened')}>
+                <div className="grab" />
+                <span className="h3-sic err"><Icon name="warning-circle" size={28} /></span>
+                <h2>{t('This file couldn’t be opened')}</h2>
+                <p>{state.message}</p>
+                <div className="h3-sacts"><button className="btn primary lg" onClick={onPick} autoFocus><Icon name="open" size={18} />{t('Choose another file')}</button></div>
+              </div>
+            ) : null}
+          </div>
+    ) : null;
+    if (mobile) return <PhoneHome {...{ state, recent, over, drop, card, onPick, onQuick, onRecent, onShareRecent, theme, onTheme, isNative, tab, onTab, legal, setLegal }} sheet={sheetEl} />;
     return (
       <div className={cls} {...drop}>
         <div className="h3-main" inert={sheet || undefined}>
@@ -225,34 +258,7 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
           {mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>{t('Files stay on this phone.')}</b> {t('Nothing is uploaded, ever.')}</span></div>}
           <footer className="h3-foot"><LegalLinks onOpen={setLegal} /></footer>
         </div>
-        {sheet && (
-          <div className={`scrim${mobile ? ' sheet' : ''} h3-scrim`}>
-            {state.kind === 'password' ? (
-              <form className="modal h3-sheet" role="dialog" aria-modal="true" aria-label={t('This PDF is password-protected')} onSubmit={(e) => { e.preventDefault(); if (pw) onPassword(pw); }}>
-                <div className="grab" />
-                <span className="h3-sic warn"><Icon name="lock-key:fill" size={26} /></span>
-                <h2>{t('This PDF is password-protected')}</h2>
-                <p>{state.wrong ? t('That password didn’t work. Try again.') : t('Enter the password for {name}. It’s checked on this device only.', { name: state.name })}</p>
-                <label className="h3-pw"><span>{t('Password')}</span>
-                  <span className="f"><input className="input" type={showPw ? 'text' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} autoFocus aria-invalid={state.wrong || undefined} />
-                    <button type="button" className="ibtn" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? t('Hide password') : t('Show password')} aria-pressed={showPw}><Icon name={showPw ? 'eye-slash' : 'eye'} size={20} /></button></span>
-                </label>
-                <div className="h3-sacts">
-                  <button type="button" className="btn outline lg" onClick={onPick}>{t('Choose another file')}</button>
-                  <button className="btn primary lg" type="submit" disabled={!pw}><Icon name="lock-key-open" size={18} />{t('Unlock')}</button>
-                </div>
-              </form>
-            ) : state.kind === 'error' ? (
-              <div className="modal h3-sheet" role="alertdialog" aria-modal="true" aria-label={t('This file couldn’t be opened')}>
-                <div className="grab" />
-                <span className="h3-sic err"><Icon name="warning-circle" size={28} /></span>
-                <h2>{t('This file couldn’t be opened')}</h2>
-                <p>{state.message}</p>
-                <div className="h3-sacts"><button className="btn primary lg" onClick={onPick} autoFocus><Icon name="open" size={18} />{t('Choose another file')}</button></div>
-              </div>
-            ) : null}
-          </div>
-        )}
+        {sheetEl}
         {legal && <LegalSheet page={legal} onClose={() => setLegal(null)} />}
       </div>
     );
@@ -339,5 +345,139 @@ function Demo() {
       </div>
       <div className="s2-badge"><span><Icon name="check" size={16} /></span><span className="t">{t('Font matched')}<small>{t('Source Serif · 11 pt')}</small></span></div>
     </div>
+  );
+}
+
+/** Phones: the home tab (continue card, quick tools, recent files) and the Files tab; the bottom bar
+ *  that switches between them lives in the app (BottomNav). */
+function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent, onShareRecent, theme, onTheme, isNative, tab, onTab, legal, setLegal, sheet }: {
+  state: OpenState; recent: RecentDoc[]; over: boolean; drop: any; card: React.ReactNode;
+  onPick: () => void; onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; onShareRecent?: (d: RecentDoc) => void;
+  theme: Theme; onTheme: () => void; isNative?: boolean; tab: HomeTab; onTab?: (t: HomeTab) => void;
+  legal: LegalPage | null; setLegal: (p: LegalPage | null) => void; sheet: React.ReactNode;
+}) {
+  useBack(() => onTab?.('home'), tab === 'files' && !!onTab);
+  const last = recent.find((d) => d.hasBytes);
+  const row = (d: RecentDoc) => (
+    <div key={d.id} className={`hx-row${d.hasBytes ? '' : ' off'}`}>
+      <button className="ro" onClick={() => d.hasBytes && onRecent(d)} disabled={!d.hasBytes} aria-label={t('Open {name}', { name: d.name })}>
+        <span className="th">{d.thumb ? <img src={d.thumb} alt="" draggable={false} /> : <Icon name="file-pdf:duotone" size={24} />}</span>
+        <span className="tx">
+          <b title={d.name}>{d.name.replace(/\.pdf$/i, '')}</b>
+          <small>{d.kind !== 'opened' && <i className={`pill ${d.kind}`}>{d.kind === 'edited' ? t('Edited') : t('Scanned')}</i>}<span className="num">{tn(d.pages, '{n} page', '{n} pages')} · {ago(d.at)}</span></small>
+        </span>
+      </button>
+      {d.hasBytes && onShareRecent && <button className="ra" onClick={() => onShareRecent(d)} aria-label={t('Share {name}', { name: d.name })} title={t('Share')}><Icon name="share-network" size={19} /></button>}
+      <button className="ra" onClick={() => removeRecent(d.id)} aria-label={t('Remove {name} from the list', { name: d.name })} title={t('Remove from the list')}><Icon name="x" size={18} /></button>
+    </div>
+  );
+  const top = (
+    <header className="hx-nav">
+      <LogoMark size={36} />
+      <span className="hx-brand">{tab === 'files' ? t('Files') : t('Paginka')}</span>
+      <span className="sp" />
+      <LangButton round />
+      <ThemeButton theme={theme} onToggle={onTheme} round />
+    </header>
+  );
+  const QT: [QuickAction, string, string, string, string][] = [
+    ['sign', 'Sign', 'Draw or type your name', 'signature:duotone', '#FFE14D'],
+    ['fill', 'Fill a form', 'Type into any form', 'textbox:duotone', '#DDE2FF'],
+    ['combine', 'Combine', 'Merge PDFs into one', 'stack:duotone', '#E3F1E9'],
+    ['convert', 'Convert', 'Photos, Word, Excel to PDF', 'file-arrow-down:duotone', '#FCE3D8'],
+  ];
+  return (
+    <div className={`start hx${over ? ' dragging' : ''}`} {...drop}>
+      <div className="hx-main" inert={!!sheet || undefined} key={tab}>
+        {top}
+        {tab === 'files' ? (
+          <>
+            <p className="hx-sub"><Icon name="lock-simple:fill" size={14} />{t('Kept on this device only')}</p>
+            {recent.length ? <div className="hx-list">{recent.map(row)}</div> : (
+              <div className="hx-empty">
+                <span className="ic"><Icon name="files:duotone" size={34} /></span>
+                <b>{t('No files yet')}</b>
+                <span>{t('PDFs you open, edit or scan show up here.')}</span>
+                <button className="hx-cta" onClick={onPick}>{t('Choose PDF')}<Icon name="arrow-right:bold" size={18} /></button>
+              </div>
+            )}
+          </>
+        ) : (
+          <>
+            <h1 className="hx-h1">{t('Edit any PDF.')}<br /><span className="mk">{t('Right here.')}</span></h1>
+            {over ? card : last ? (
+              <div className="hx-hero cont">
+                <button className="hx-doc" onClick={() => onRecent(last)} aria-label={t('Open {name}', { name: last.name })}>
+                  <span className="th">{last.thumb ? <img src={last.thumb} alt="" draggable={false} /> : <Icon name="file-pdf:duotone" size={30} />}</span>
+                  <span className="tx">
+                    <small>{t('Continue editing')}</small>
+                    <b>{last.name.replace(/\.pdf$/i, '')}</b>
+                    <span className="num">{tn(last.pages, '{n} page', '{n} pages')} · {ago(last.at)}</span>
+                  </span>
+                </button>
+                <div className="hx-acts">
+                  <button className="hx-cta" onClick={() => onRecent(last)}>{t('Open')}<Icon name="arrow-right:bold" size={18} /></button>
+                  <button className="hx-ghost" onClick={onPick}><Icon name="file-plus" size={19} />{t('Another PDF')}</button>
+                </div>
+              </div>
+            ) : (
+              <div className="hx-hero" onClick={onPick}>
+                <div className="hx-sheets" aria-hidden="true"><i className="b" /><i className="f"><em className="t" /><em /><em className="w" /><em className="y" /><em /></i></div>
+                <div className="tx"><b>{t('Open a PDF')}</b><span>{isNative ? t('From your files, Drive, or share one to this app') : t('From Files, Drive or Downloads')}</span></div>
+                <div className="hx-acts">
+                  <button className="hx-cta" onClick={(e) => { e.stopPropagation(); onPick(); }}>{t('Choose PDF')}<Icon name="arrow-right:bold" size={18} /></button>
+                </div>
+              </div>
+            )}
+            {!over && (
+              <section className="hx-sec" aria-label={t('Quick tools')}>
+                <h2>{t('Quick tools')}</h2>
+                <div className="hx-tools">
+                  {QT.map(([q, label, desc, icon, bg]) => (
+                    <button key={q} className="hx-tool" onClick={() => onQuick(q)}>
+                      <span className="ic" style={{ background: bg }}><Icon name={icon} size={21} /></span>
+                      <span className="tx"><b>{t(label)}</b><small>{t(desc)}</small></span>
+                    </button>
+                  ))}
+                </div>
+              </section>
+            )}
+            {!over && recent.length > 0 && (
+              <section className="hx-sec" aria-label={t('Recent documents')}>
+                <h2>{t('Recent')}{onTab && recent.length > 2 && <button className="hx-all" onClick={() => onTab('files')}>{t('See all')}<Icon name="right" size={14} /></button>}</h2>
+                <div className="hx-list">{recent.slice(0, 2).map(row)}</div>
+              </section>
+            )}
+            {!over && <p className="hx-priv"><Icon name="lock-simple:fill" size={14} /><span><b>{t('Files stay on this phone.')}</b> {t('Nothing is uploaded, ever.')}</span></p>}
+          </>
+        )}
+        <footer className="hx-foot"><LegalLinks onOpen={setLegal} /></footer>
+      </div>
+      {sheet}
+      {legal && <LegalSheet page={legal} onClose={() => setLegal(null)} />}
+    </div>
+  );
+}
+
+/** Phones: the rounded bottom bar of the home screens (Home, Files, open a PDF, Scan, Tools). */
+export function BottomNav({ active, onHome, onFiles, onOpen, onScan, onTools }: {
+  active: 'home' | 'files' | 'tools'; onHome: () => void; onFiles: () => void; onOpen: () => void; onScan: () => void; onTools: () => void;
+}) {
+  const item = (k: string, label: string, icon: string, go: () => void) => {
+    const on = active === k;
+    return (
+      <button key={k} className={`bn-it${on ? ' on' : ''}`} onClick={go} aria-current={on ? 'page' : undefined} data-tab={k}>
+        <span className="ic"><Icon name={icon} size={22} weight={on ? 'fill' : 'regular'} /></span>{label}
+      </button>
+    );
+  };
+  return (
+    <nav className="bnav" aria-label={t('Main')}>
+      {item('home', t('Home|nav'), 'house', onHome)}
+      {item('files', t('Files'), 'files', onFiles)}
+      <button className="bn-open" onClick={onOpen} aria-label={t('Open a PDF')} title={t('Open a PDF')}><Icon name="plus:bold" size={26} /></button>
+      {item('scan', t('Scan'), 'scan', onScan)}
+      {item('tools', t('Tools'), 'squares-four', onTools)}
+    </nav>
   );
 }

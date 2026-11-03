@@ -9,7 +9,7 @@ import { useHistory } from './store';
 import type { PageInfo } from './PageView';
 import { appBase } from './assets';
 import type { HostProps, ToastMsg, BusyMsg, EditorStart, Incoming } from './Editor';
-import { Start, OpenState, type QuickAction } from './Start';
+import { Start, OpenState, BottomNav, type QuickAction, type HomeTab } from './Start';
 import type { ToolId } from './Tools';
 import { recentBytes, saveRecent, type RecentKind } from './recent';
 import type { AddWhat } from './AddPages';
@@ -109,6 +109,9 @@ export default function EditorApp(host: HostProps) {
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
   useSheetPull();
   const narrow = useNarrow();
+  // phones: the bottom bar's tab on the home screen, and whether the tools screen shows its list
+  const [homeTab, setHomeTab] = useState<HomeTab>('home');
+  const [toolsAt, setToolsAt] = useState<ToolId>('hub');
   const [route, setRouteNow] = useState<Route>({ name: 'home' });
   // phones and tablets: screens change with a view transition (fade and a short slide; back runs it in reverse)
   const routeRef = useRef(route);
@@ -357,9 +360,9 @@ export default function EditorApp(host: HostProps) {
           onOpenInEditor={(name, bytes) => open(name, bytes)}
           onEdit={(start) => { if (file) setRoute({ name: 'editor', start }); else { startAfterOpen.current = start; pick(); } }}
           onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }}
-          onScan={() => setRoute({ name: 'scan', back: 'tools' })} />
+          onScan={() => setRoute({ name: 'scan', back: 'tools' })} onAt={setToolsAt} />
       ) : (
-        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'} v3={narrow}
+        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'} v3={narrow} tab={homeTab} onTab={setHomeTab}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
           onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme}
           onRecent={async (d) => {
@@ -376,6 +379,14 @@ export default function EditorApp(host: HostProps) {
           }} />
       )}
       </Suspense>
+      {bp === 'mobile' && ((route.name === 'home' && openState.kind !== 'loading') || (route.name === 'tools' && toolsAt === 'hub')) && (
+        <BottomNav active={route.name === 'tools' ? 'tools' : homeTab}
+          onHome={() => { setHomeTab('home'); if (route.name !== 'home') setRoute({ name: 'home' }); }}
+          onFiles={() => { setHomeTab('files'); if (route.name !== 'home') setRoute({ name: 'home' }); }}
+          onOpen={() => { startAfterOpen.current = undefined; pick(); }}
+          onScan={() => quick('scan')}
+          onTools={() => { if (route.name !== 'tools') openTools('home'); }} />
+      )}
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { readFile(e.target.files?.[0]); e.target.value = ''; }} />
       {busy && (
         <div className="busy" role="status" aria-live="polite">

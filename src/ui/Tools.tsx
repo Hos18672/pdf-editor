@@ -30,6 +30,8 @@ export interface Props {
   onOpenInEditor: (name: string, bytes: Uint8Array) => void;
   onApplyPages: (pages: PageState[]) => void;
   onScan: () => void;
+  /** which tool is open (the hub shows the app's bottom bar on phones) */
+  onAt?: (t: ToolId) => void;
 }
 
 const TILE = { edit: '#FFE14D', org: '#DDE2FF', conv: '#E3F1E9', smart: '#EBDDFF' };
@@ -37,6 +39,7 @@ type HubItem = { name: string; desc: string; icon: string; tile: string; go: () 
 
 export function Tools(p: Props) {
   const [tool, setTool] = useState<ToolId>(p.initial);
+  useEffect(() => { p.onAt?.(tool); }, [tool]); // eslint-disable-line react-hooks/exhaustive-deps
   const [convertKind, setConvertKind] = useState<string>('');
   const [legal, setLegal] = useState<LegalPage | null>(null);
   const [profile, setProfile] = useState(false);

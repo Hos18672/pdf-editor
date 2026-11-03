@@ -9,7 +9,7 @@ adb shell am start -n com.rezahossaini.pdfeditor/.MainActivity
 sleep 25
 sock=$(adb shell cat /proc/net/unix | grep -o 'webview_devtools_remote_[0-9]*' | head -1)
 adb forward tcp:9222 "localabstract:$sock"
-node .github/scripts/cdp-eval.mjs "(() => { const b = document.querySelector('.h3-cam') || [...document.querySelectorAll('button, .s2-chip')].find((e) => /^\s*Scan\s*$/.test(e.textContent || '')); if (!b) return 'no scan button'; b.click(); return 'clicked ' + b.className; })()" | tee out/flow.txt
+node .github/scripts/cdp-eval.mjs "(() => { const b = document.querySelector('.bn-it[data-tab=scan]') || document.querySelector('.h3-cam') || [...document.querySelectorAll('button, .s2-chip')].find((e) => /^\s*Scan\s*$/.test(e.textContent || '')); if (!b) return 'no scan button'; b.click(); return 'clicked ' + b.className; })()" | tee out/flow.txt
 for t in 3 8 15; do sleep 5; adb exec-out screencap -p > out/scan-$t.png; adb shell dumpsys window | grep -E "mCurrentFocus" | tee -a out/flow.txt; done
 adb shell pidof com.rezahossaini.pdfeditor | tee -a out/flow.txt
 sock=$(adb shell cat /proc/net/unix | grep -o 'webview_devtools_remote_[0-9]*' | head -1)
