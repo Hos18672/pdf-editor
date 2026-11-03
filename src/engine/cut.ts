@@ -7,6 +7,8 @@ import type { Op } from './contentStream';
 import { tokenize, rebuild } from './contentStream';
 import { interpret, hideGlyphs, apply, invert, mul, Glyph, M, PathDraw } from './interpreter';
 import { readFontMetrics, FontMetrics } from './fonts';
+import { decodeImage, writeJpeg } from './images';
+import { scanKernels } from '../ui/scan/kernels';
 
 /** a brush stroke in page view units (scale 1, the page's own rotation): points as x, y pairs, radius */
 export interface CutStroke { r: number; pts: number[] }
@@ -175,8 +177,6 @@ const CACHE_MAX = 4;
 export async function erasePictures(doc: PDFDocument, resources: PDFDict | undefined, pictures: { name: string; ctm: M }[], strokes: CutStroke[], vm: M): Promise<void> {
   const xo = resources?.lookupMaybe(PDFName.of('XObject'), PDFDict);
   if (!xo || !pictures.length) return;
-  const { decodeImage, writeJpeg } = await import('./images');
-  const { scanKernels } = await import('../ui/scan/kernels');
   const K = scanKernels();
   const back = invert(vm), k = Math.hypot(vm[0], vm[1]) || 1;
   const done = new Set<string>();

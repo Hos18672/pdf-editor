@@ -6,7 +6,7 @@ import type { TextRun } from '../engine/pdfText';
 import type { M } from '../engine/types';
 import type { FontInfo } from '../engine/pdfText';
 import { runBox, sampleColors } from './geometry';
-import { newOcrWorker, OcrWorker, grayOf, toPgm, linesOf, OcrLine, findRules, grayThreshold, inkOf } from './ocr';
+import { newOcrWorker, OcrWorker, grayOf, flattenBackground, secondLook, toPgm, linesOf, OcrLine, findRules, grayThreshold, inkOf } from './ocr';
 
 export const OCR_FONT = 'ocr';
 export const isOcrRun = (r: TextRun) => r.fontName === OCR_FONT;
@@ -319,7 +319,9 @@ export class PageReader {
         ctx.fillStyle = '#fff';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         await page.render({ canvasContext: ctx, viewport: vp }).promise;
-        const raw = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+        const read = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+        // (a patterned background is taken out first)
+        const raw = flattenBackground(read, canvas.width, canvas.height) ?? read;
         const thr = grayThreshold(raw);
         const { clean, cut } = findRules(raw, canvas.width, canvas.height, thr, s);
         return {
@@ -352,6 +354,7 @@ export class PageReader {
     y1 = Math.min(img.h, Math.ceil(y1));
     if (y1 - y0 < 4) return;
     const { data } = await w.recognize(toPgm(img.gray, img.w, img.h, y0, y1), {}, { blocks: true, text: false, hocr: false, tsv: false });
+    await secondLook(w, img.gray, img.w, img.h, y0, data);
     const bandH = y1 - y0;
     const all = linesOf(data, (x, y) => img.toPdf(x, y + y0), 1 / img.s, (xa, xb, ya, yb) => img.cut(xa, xb, ya + y0, yb + y0), inkOf(img.gray, img.w, img.h, img.thr, y0));
     if ((globalThis as any).__ocrDebug) console.log('ocr band', src, y0, y1, all.map((l) => `${Math.round(l.conf)} ${l.size.toFixed(1)} [${Math.round(l.box.y0)}-${Math.round(l.box.y1)}] ${l.text}`));

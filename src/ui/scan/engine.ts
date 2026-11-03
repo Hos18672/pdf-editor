@@ -577,11 +577,11 @@ function startAi(): Promise<Worker> {
   aiWorker ??= (async () => {
     const t0 = performance.now();
     const base = appBase() + 'scan/';
-    const [js, wasm, model] = await Promise.all([loadBytes(base + `ai.js?v=${WORKER_VERSION}`), loadBytes(base + `ort.wasm?v=${WORKER_VERSION}`), loadBytes(base + `uvdoc.onnx?v=${WORKER_VERSION}`)]);
+    const [js, wasm, model, weights] = await Promise.all(['ai.js', 'ort.wasm', 'uvdoc.onnx', 'uvdoc.q8'].map((f) => loadBytes(base + `${f}?v=${WORKER_VERSION}`)));
     const w = new Worker(URL.createObjectURL(new Blob([js], { type: 'application/javascript' })));
     w.onmessage = (e) => { const t = aiWaiting.get(e.data.id); aiWaiting.delete(e.data.id); if (t) { if (e.data.err) t.fail(new Error(e.data.err)); else t.ok(e.data.r); } };
     w.onerror = (e) => { console.warn('scan AI worker failed', e.message); aiBroken = true; for (const t of aiWaiting.values()) t.fail(new Error('AI worker')); aiWaiting.clear(); };
-    await aiPost(w, { type: 'init', wasm, model }, [wasm, model]);
+    await aiPost(w, { type: 'init', wasm, model, weights }, [wasm, model, weights]);
     tlog('ai ready', t0);
     return w;
   })().catch((e) => { aiBroken = true; aiWorker = null; throw e; });

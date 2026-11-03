@@ -56,13 +56,13 @@ async function decryptIfNeeded(bytes: Uint8Array, password: string): Promise<Uin
   const any = head.includes('/Encrypt') || new TextDecoder('latin1').decode(bytes.subarray(0, Math.min(bytes.length, 4096))).includes('/Encrypt');
   if (!any) {
     // the trailer may be in a cross-reference stream; check with pdf-lib
-    const { PDFDocument } = await import('pdf-lib');
+    const { PDFDocument } = await loadScreens();
     try {
       const d = await PDFDocument.load(bytes, { ignoreEncryption: true, updateMetadata: false });
       if (!d.isEncrypted) return bytes;
     } catch { return bytes; }
   }
-  const lib = await import('@cantoo/pdf-lib');
+  const lib = await (await loadScreens()).loadCantoo();
   const doc = await lib.PDFDocument.load(bytes, { password, ignoreEncryption: false, updateMetadata: false } as any);
   return doc.save({ useObjectStreams: true });
 }
@@ -70,7 +70,7 @@ async function decryptIfNeeded(bytes: Uint8Array, password: string): Promise<Uin
 // CI smoke-test build only: lets the emulator test run text recognition end to end
 if (process.env.EXPO_PUBLIC_WEBVIEW_DEBUG === '1' && typeof window !== 'undefined') {
   (window as any).__peOcrTest = async () => {
-    const { loadOcr } = await import('./ocr');
+    const { loadOcr } = await loadScreens();
     const w = await loadOcr();
     const c = document.createElement('canvas');
     c.width = 900; c.height = 160;
@@ -182,7 +182,7 @@ export default function EditorApp(host: HostProps) {
     setBusy({ title: t('Adding pages'), detail: t('On this device. Your edits stay.') });
     try {
       // pdf-lib is loaded only when needed
-      const { loadDoc, addImagePage, imageBytes, save: saveDoc } = await import('./pdfops');
+      const { loadDoc, addImagePage, imageBytes, save: saveDoc } = await loadScreens();
       const doc = await loadDoc(file.bytes);
       const before = doc.getPageCount();
       if (what.kind === 'blank') {
@@ -236,8 +236,7 @@ export default function EditorApp(host: HostProps) {
     const name = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, '') + '.pdf' : 'Combined.pdf';
     setOpenState({ kind: 'loading', name, progress: 0.05, detail: tn(files.length, 'Turning the file into a PDF…', 'Turning {n} files into a PDF…') });
     try {
-      const { convertFile } = await import('./convert');
-      const { PDFDocument } = await import('pdf-lib');
+      const { convertFile, PDFDocument } = await loadScreens();
       const opt = { size: 'a4', orient: 'auto', margin: 'small' } as const;
       const parts: Uint8Array[] = [];
       for (let i = 0; i < files.length; i++) {
@@ -293,7 +292,7 @@ export default function EditorApp(host: HostProps) {
       const read = await Promise.all(files.map(async (f) => ({ ...f, bytes: fromB64(await host.readShared!(f.uri)) })));
       if (inc.mode === 'open' && read.length === 1) { setBusy(null); open(read[0].name, read[0].bytes); return; }
       // several PDFs are put together; pictures, office files and text are turned into PDF pages
-      const { sharedToPdf, savePdfFile } = await import('./sharedPdf');
+      const { sharedToPdf, savePdfFile } = await loadScreens();
       const out = await sharedToPdf(read, inc.text, inc.subject, (f) => setBusy((b) => (b ? { ...b, progress: f } : b)));
       setBusy(null);
       if (!convert) { open(out.name, out.bytes, undefined, 'opened'); return; }
@@ -357,7 +356,7 @@ export default function EditorApp(host: HostProps) {
           onShareRecent={async (d) => {
             const b = await recentBytes(d.id);
             if (!b) { setToastMsg({ msg: t('That file is no longer stored here'), kind: 'err' }); return; }
-            const { shareFile } = await import('./share');
+            const { shareFile } = await loadScreens();
             await shareFile(host, b, /\.pdf$/i.test(d.name) ? d.name : d.name + '.pdf', 'application/pdf', setToastMsg);
           }} />
       )}

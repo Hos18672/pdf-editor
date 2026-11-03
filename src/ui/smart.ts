@@ -96,6 +96,9 @@ function sender(lines: string[]): string | null {
   return hit.replace(/[^\p{L}\p{N}&.\- ]+/gu, ' ').replace(/\s+/g, ' ').trim().split(' ').slice(0, 4).join(' ') || null;
 }
 
+/** who sent a letter (a company-like line near the top), from its text */
+export const senderOf = (text: string) => sender(text.split('\n').map((l) => l.trim()).filter(Boolean));
+
 /** "2026-11-02 Rechnung Wien Energie" from the letter's text (null: nothing useful found) */
 export function suggestName(text: string, de: boolean, today = new Date()): string | null {
   const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);

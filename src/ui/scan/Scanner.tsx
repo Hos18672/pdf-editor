@@ -20,6 +20,9 @@ import { findGutter, splitSpread } from './book';
 import { buildScanPdf, jpegFor, sheetsOf, type PaperOpt } from './scanPdf';
 import { t, tn, getLang } from '../i18n';
 import type { Payment } from '../smart';
+// (loaded with this chunk: a separate chunk would pull shared code into the start screen)
+import * as L_smart from '../smart';
+import * as L_ocr from '../ocr';
 
 const FILTERS: { id: Filter; label: string }[] = [
   { id: 'original', label: 'Original' }, { id: 'lighten', label: 'Lighten|scan' }, { id: 'enhance', label: 'Enhance|scan' }, { id: 'auto', label: 'Magic' },
@@ -487,7 +490,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     const url = pr.url;
     const tm = setTimeout(async () => {
       try {
-        const [{ findPayment }, im] = await Promise.all([import('../smart'), imgOf(url)]);
+        const [{ findPayment }, im] = await Promise.all([Promise.resolve(L_smart), imgOf(url)]);
         const found = await findPayment(im);
         if (alive) setPay((m) => ({ ...m, [payKey]: found }));
       } catch { if (alive) setPay((m) => ({ ...m, [payKey]: null })); }
@@ -521,7 +524,7 @@ export function Scanner({ host, bp, toast, setBusy, onClose, onOpenInEditor, onS
     if (!fr || naming) return;
     setNaming(true);
     try {
-      const [{ loadOcr }, { suggestName }, im] = await Promise.all([import('../ocr'), import('../smart'), imgOf(fr.url)]);
+      const [{ loadOcr }, { suggestName }, im] = await Promise.all([Promise.resolve(L_ocr), Promise.resolve(L_smart), imgOf(fr.url)]);
       const k = Math.min(1, 1800 / im.width);
       const c = document.createElement('canvas');
       c.width = Math.round(im.width * k); c.height = Math.round(im.height * 0.55 * k);

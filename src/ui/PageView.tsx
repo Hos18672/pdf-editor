@@ -13,7 +13,7 @@ import { Icon } from './icons';
 import { isRefocusing, editingHeld } from './hooks';
 import { FormLayer, FormField } from './Fields';
 import { matchScanStyle, scanStyles } from './scanStyle';
-import { coverPixels } from './rules';
+import { coverPixels, ctxReach } from './rules';
 import { fillField, readField, fieldSelection, setFieldSelection, setLineEditor, lineEditor, lineEditorChanged, fieldEditor, lookCss, type FieldContent, type LookMode } from './lineEdit';
 import { t, tn } from './i18n';
 
@@ -617,6 +617,8 @@ export function lineRooms(runs: TextRun[]): Record<string, { up: number; down: n
 }
 
 type PageRef = { canvas: React.RefObject<HTMLCanvasElement | null>; w: number; paints: number };
+/** covers already worked out, per page canvas (a cover on a patterned page takes a moment) */
+const coverCache = new WeakMap<HTMLCanvasElement, Map<string, ImageData>>();
 
 /**
  * Cover over the original letters of an edited line, placed in the line's own frame (x, y from the
@@ -634,14 +636,36 @@ function Cover({ page, b, bg, fg, zoom, x, y, w, h }: { page: PageRef; b: Return
     const x0 = Math.round((b.x + x) * k) - m, y0 = Math.round((b.top + y) * k) - m;
     const W = Math.round(w * k) + 2 * m, H = Math.round(h * k) + 2 * m;
     if (W <= 2 * m || H <= 2 * m || W * H > 4e6) { c.width = c.height = 0; return; }
+    // (the same cover again, after a repaint of the page at the same size: kept)
+    const key = `${pc.width}|${x0}|${y0}|${W}|${H}|${bg}|${fg}`;
+    let kept = coverCache.get(pc);
+    if (!kept) coverCache.set(pc, (kept = new Map()));
+    const was = kept.get(key);
+    if (was) { c.width = was.width; c.height = was.height; c.getContext('2d')!.putImageData(was, 0, 0); return; }
     try {
-      const sx = Math.max(0, x0), sy = Math.max(0, y0);
+      // the line with the page around it (a patterned background is filled from there)
+      const reach = ctxReach(b.h * k);
+      const cx0 = Math.max(0, x0 - reach.x), cy0 = Math.max(0, y0 - reach.y);
+      const cx1 = Math.min(pc.width, x0 + W + reach.x), cy1 = Math.min(pc.height, y0 + H + reach.y);
+      const CW = Math.max(W, cx1 - cx0), CH = Math.max(H, cy1 - cy0);
       const src = document.createElement('canvas');
-      src.width = W; src.height = H;
+      src.width = CW; src.height = CH;
       const sc = src.getContext('2d', { willReadFrequently: true })!;
-      sc.fillStyle = bg; sc.fillRect(0, 0, W, H);
-      sc.drawImage(pc, sx, sy, Math.min(pc.width, x0 + W) - sx, Math.min(pc.height, y0 + H) - sy, sx - x0, sy - y0, Math.min(pc.width, x0 + W) - sx, Math.min(pc.height, y0 + H) - sy);
-      const img = coverPixels(sc.getImageData(0, 0, W, H).data, W, H, m, bg, b.h * k, fg);
+      sc.fillStyle = bg; sc.fillRect(0, 0, CW, CH);
+      if (cx1 > cx0 && cy1 > cy0) sc.drawImage(pc, cx0, cy0, cx1 - cx0, cy1 - cy0, 0, 0, cx1 - cx0, cy1 - cy0);
+      const all = sc.getImageData(0, 0, CW, CH).data;
+      const rx = x0 - cx0, ry = y0 - cy0;
+      const reg = new Uint8ClampedArray(W * H * 4);
+      const v = parseInt(bg.replace('#', ''), 16);
+      for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+        const o = (y * W + x) * 4, X = x + rx, Y = y + ry;
+        if (X >= 0 && Y >= 0 && X < CW && Y < CH && x0 + x >= 0 && y0 + y >= 0 && x0 + x < pc.width && y0 + y < pc.height) { const i = (Y * CW + X) * 4; reg[o] = all[i]; reg[o + 1] = all[i + 1]; reg[o + 2] = all[i + 2]; reg[o + 3] = 255; }
+        else { reg[o] = (v >> 16) & 255; reg[o + 1] = (v >> 8) & 255; reg[o + 2] = v & 255; reg[o + 3] = 255; }
+      }
+      src.width = src.height = 0;
+      const img = coverPixels(reg, W, H, m, bg, b.h * k, fg, { px: all, W: CW, H: CH, x: rx, y: ry });
+      kept.set(key, img);
+      if (kept.size > 60) kept.delete(kept.keys().next().value!);
       c.width = img.width; c.height = img.height;
       c.getContext('2d')!.putImageData(img, 0, 0);
     } catch { c.width = c.height = 0; }

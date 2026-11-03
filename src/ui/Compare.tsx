@@ -12,6 +12,11 @@ import { Thumb } from './Thumb';
 import { t, tn } from './i18n';
 import type { Change } from './diff';
 import type { PageText } from './search';
+// (loaded with this chunk: a separate chunk would pull shared code into the start screen)
+import * as L_search from './search';
+import * as L_ocr from './ocr';
+import * as L_pdf_lib from 'pdf-lib';
+import * as L_diff from './diff';
 
 type TP = Props & { desk: boolean; mobile: boolean };
 type Read = { text: string[]; pts: (PageText | null)[]; scanned: number };
@@ -25,7 +30,7 @@ async function loadSrc(f: File): Promise<Src> {
 
 /** every page's text (scans read on the device when asked), with where its letters are */
 async function readDoc(src: Src, ocr: boolean, prog: (f: number) => void): Promise<Read> {
-  const { userPageText } = await import('./search');
+  const { userPageText } = L_search;
   const text: string[] = [], pts: (PageText | null)[] = [];
   let scanned = 0, worker: any = null;
   for (let k = 0; k < src.pages.length; k++) {
@@ -33,7 +38,7 @@ async function readDoc(src: Src, ocr: boolean, prog: (f: number) => void): Promi
     const pt = await userPageText(src.pdf, i);
     if (pt.text.replace(/\s/g, '').length < 4 && ocr) {
       const page = await src.pdf.getPage(i + 1);
-      if (!worker) worker = await (await import('./ocr')).loadOcr();
+      if (!worker) worker = await (L_ocr).loadOcr();
       const vp = page.getViewport({ scale: 2.4 });
       const c = document.createElement('canvas');
       c.width = Math.round(vp.width); c.height = Math.round(vp.height);
@@ -55,8 +60,8 @@ const kindOf = (c: Change): Exclude<Filter, 'all'> => (c.del.length && c.ins.len
 
 /** the new version with the changes marked */
 async function markedPdf(b: Src, rb: Read, changes: Change[], removedLabel: string, wasLabel: string): Promise<Uint8Array> {
-  const { PDFDocument, rgb, BlendMode, PDFName, PDFArray, PDFHexString } = await import('pdf-lib');
-  const { userRects } = await import('./search');
+  const { PDFDocument, rgb, BlendMode, PDFName, PDFArray, PDFHexString } = L_pdf_lib;
+  const { userRects } = L_search;
   const doc = await PDFDocument.load(b.bytes, { ignoreEncryption: true });
   const pages = doc.getPages();
   for (const c of changes) {
@@ -145,7 +150,7 @@ export function Compare(p: TP) {
     try {
       const ra = await readDoc(a, ocr, (f) => p.setBusy({ title, progress: f * 0.48 }));
       const rb = await readDoc(b, ocr, (f) => p.setBusy({ title, progress: 0.48 + f * 0.48 }));
-      const { compareDocs } = await import('./diff');
+      const { compareDocs } = L_diff;
       const changes = compareDocs(ra.text, rb.text);
       p.setBusy(null);
       if (!changes) { p.toast({ msg: t('These files are too different to compare word by word.'), kind: 'err' }); return; }

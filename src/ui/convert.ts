@@ -2,6 +2,9 @@
 import { PDFDocument } from 'pdf-lib';
 import { addImagePage, imageBytes, PageSize } from './pdfops';
 import { t } from './i18n';
+// (loaded with this chunk: a separate chunk would pull shared code into the start screen)
+import * as L_textLayer from '../engine/textLayer';
+import * as L_pdf_lib from 'pdf-lib';
 
 export interface ConvertOptions { size: PageSize; orient: 'auto' | 'portrait' | 'landscape'; margin: 'none' | 'small' | 'normal' }
 export type Progress = (f: number) => void;
@@ -147,8 +150,8 @@ async function htmlToPdf(doc: PDFDocument, html: string, css: string, opt: Conve
     // the text as laid out (lines with position and size), written as an invisible layer so the
     // converted PDF can be searched and edited like an OCR'd scan
     const lines = layoutLines(root);
-    const { addTextLayer } = await import('../engine/textLayer');
-    const { StandardFonts } = await import('pdf-lib');
+    const { addTextLayer } = L_textLayer;
+    const { StandardFonts } = L_pdf_lib;
     const helv = await doc.embedFont(StandardFonts.Helvetica);
     // print each page through a window the size of the page
     host.style.overflow = 'hidden';

@@ -94,6 +94,95 @@ export function grayOf(rgba: Uint8ClampedArray): Uint8Array {
   return g;
 }
 
+/**
+ * Pages printed on a patterned background (certificates, forms with a guilloche, security paper): the
+ * pattern is a little darker than the paper and much lighter than the letters, and reading it as ink
+ * breaks lines apart. When a page has such a light layer spread over much of it, every pixel that is
+ * not clearly dark is made paper. Null: no such layer (the page is read as it is).
+ */
+export function flattenBackground(gray: Uint8Array, w: number, h: number): Uint8Array | null {
+  const B = 32, bw = Math.ceil(w / B), bh = Math.ceil(h / B);
+  // the paper: the brightest value of each block and its neighbours (a block can be all letters)
+  const mx = new Uint8Array(bw * bh);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) { const b = ((y / B) | 0) * bw + ((x / B) | 0); if (gray[y * w + x] > mx[b]) mx[b] = gray[y * w + x]; }
+  const paper = new Uint8Array(bw * bh);
+  for (let by = 0; by < bh; by++) for (let bx = 0; bx < bw; bx++) {
+    let v = 0;
+    for (let yy = Math.max(0, by - 1); yy <= Math.min(bh - 1, by + 1); yy++) for (let xx = Math.max(0, bx - 1); xx <= Math.min(bw - 1, bx + 1); xx++) v = Math.max(v, mx[yy * bw + xx]);
+    paper[by * bw + bx] = v;
+  }
+  const depth = (p: number) => { const x = p % w, y = (p - x) / w; return Math.max(0, paper[((y / B) | 0) * bw + ((x / B) | 0)] - gray[p]); };
+  const hist = new Float64Array(256);
+  const step = Math.max(1, Math.floor((w * h) / 600000));
+  for (let p = 0; p < w * h; p += step) { const d = depth(p); if (d >= 12) hist[d]++; }
+  // two kinds of darker pixels: Otsu between them
+  let n = 0, sum = 0;
+  for (let i = 12; i < 256; i++) { n += hist[i]; sum += i * hist[i]; }
+  if (n < 200) return null;
+  let wB = 0, sB = 0, best = 0, t = 0;
+  for (let i = 12; i < 256; i++) {
+    wB += hist[i]; sB += i * hist[i];
+    const wF = n - wB;
+    if (!wB || !wF) continue;
+    const v = wB * wF * (sB / wB - (sum - sB) / wF) ** 2;
+    if (v > best) { best = v; t = i + 1; }
+  }
+  let lo = 0, loS = 0, hi = 0, hiS = 0;
+  for (let i = 12; i < 256; i++) if (i < t) { lo += hist[i]; loS += i * hist[i]; } else { hi += hist[i]; hiS += i * hist[i]; }
+  const mLo = loS / Math.max(1, lo), mHi = hiS / Math.max(1, hi);
+  // a light layer (not grey letters, not the soft edges of letters), clearly apart from the letters
+  if (!(lo > hi * 1.5 && mLo < 70 && mHi > Math.max(90, mLo * 2.5))) return null;
+  // ... spread over much of the page, also where there are no letters
+  let spread = 0;
+  const cnt = new Uint32Array(bw * bh);
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) { const p = y * w + x, d = depth(p); if (d >= 12 && d < t) cnt[((y / B) | 0) * bw + ((x / B) | 0)]++; }
+  for (let b = 0; b < bw * bh; b++) if (cnt[b] > (B * B) / 4 * 0.03) spread++;
+  if (spread < bw * bh * 0.35) return null;
+  const out = new Uint8Array(gray.length);
+  for (let p = 0; p < w * h; p++) out[p] = depth(p) < t ? 255 : gray[p];
+  return out;
+}
+
+/**
+ * Words read with (almost) no confidence: the reader sometimes garbles a word in a long line ("22026"
+ * for "2026"). Each is read once more on its own (the word with a little room around it), and taken
+ * when that reading is sure. `yOff`: where the recognised picture starts in `gray` (a band of it).
+ */
+export async function secondLook(worker: OcrWorker, gray: Uint8Array, w: number, h: number, yOff: number, data: any) {
+  const weak: any[] = [];
+  for (const b of data.blocks ?? []) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) for (const x of l.words ?? [])
+    if (x.confidence <= 25 && /[\p{L}\p{N}]{2}/u.test(x.text ?? '')) weak.push(x);
+  for (const x of weak.slice(0, 12)) {
+    const wh = x.bbox.y1 - x.bbox.y0;
+    // (with room around it: the reader is surest with some of the line and paper in view; outside the
+    // picture is paper)
+    const X0 = Math.floor(x.bbox.x0 - wh * 1.5), X1 = Math.ceil(x.bbox.x1 + wh * 1.5);
+    const Y0 = Math.floor(yOff + x.bbox.y0 - wh), Y1 = Math.ceil(yOff + x.bbox.y1 + wh);
+    const cw = X1 - X0, ch = Y1 - Y0;
+    if (cw < 8 || ch < 8 || wh < 4) continue;
+    const g = new Uint8Array(cw * ch).fill(255);
+    for (let y = Math.max(0, Y0); y < Math.min(h, Y1); y++) {
+      const a0 = Math.max(0, X0), a1 = Math.min(w, X1);
+      if (a1 > a0) g.set(gray.subarray(y * w + a0, y * w + a1), (y - Y0) * cw + (a0 - X0));
+    }
+    try {
+      const { data: d2 } = await worker.recognize(toPgm(g, cw, ch), {}, { blocks: true, text: false, hocr: false, tsv: false });
+      // the words of this reading that lie on the first one (not the neighbours partly in the picture)
+      const a = x.bbox.x0 - X0 - wh * 0.2, b = x.bbox.x1 - X0 + wh * 0.2;
+      const got: any[] = [];
+      for (const bl of d2.blocks ?? []) for (const p of bl.paragraphs ?? []) for (const l of p.lines ?? []) for (const v of l.words ?? []) {
+        const c = (v.bbox.x0 + v.bbox.x1) / 2;
+        if (c > a && c < b && v.text?.trim()) got.push(v);
+      }
+      if (!got.length) continue;
+      const conf = got.reduce((s2, v) => s2 + v.confidence, 0) / got.length;
+      if (conf < 60) continue;
+      x.text = got.sort((p2, q) => p2.bbox.x0 - q.bbox.x0).map((v) => v.text.trim()).join(' ');
+      x.confidence = conf;
+    } catch { /* keep the first reading */ }
+  }
+}
+
 export interface OcrLine extends LayerLine {
   /** image box (px) of the line */
   box: { x0: number; y0: number; x1: number; y1: number };
@@ -279,9 +368,11 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
  */
 export async function recognizeCanvas(worker: OcrWorker, canvas: HTMLCanvasElement, toPdf: (x: number, y: number) => [number, number], ptPerPx: number): Promise<LayerLine[]> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
-  const gray = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+  const raw = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
+  const gray = flattenBackground(raw, canvas.width, canvas.height) ?? raw;
   const rules = findRules(gray, canvas.width, canvas.height, grayThreshold(gray), 1 / ptPerPx);
   const { data } = await worker.recognize(toPgm(rules.clean, canvas.width, canvas.height), {}, { blocks: true, text: false, hocr: false, tsv: false });
+  await secondLook(worker, rules.clean, canvas.width, canvas.height, 0, data);
   return linesOf(data, toPdf, ptPerPx, rules.cut, inkOf(rules.clean, canvas.width, canvas.height, grayThreshold(gray)));
 }
 

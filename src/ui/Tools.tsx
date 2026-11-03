@@ -11,14 +11,14 @@ import { Compare } from './Compare';
 import { ProfileModal } from './ProfileModal';
 import { LegalLinks, LegalSheet, type LegalPage } from './Legal';
 import { ACCEPT, DropBox, DropOverlay, isImage, isPdf, useFileDrop } from './drop';
-import { Compress, Password, PageNumbers, Watermark, Split, ToImages, ExtractText, Deadlines, SafeCopy } from './MoreTools';
+import { Compress, Password, PageNumbers, Watermark, Split, ToImages, ExtractText, Deadlines, SafeCopy, Bookmarks, PayCode } from './MoreTools';
 import { SortableArea, useSortableItem } from './sortable';
 import type { Bp } from './hooks';
 import type { PageState } from '../engine/types';
 import { PDFDocument } from 'pdf-lib';
 import { t, tn, tj } from './i18n';
 
-export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert' | 'compress' | 'password' | 'numbers' | 'watermark' | 'split' | 'images' | 'text' | 'deadlines' | 'safecopy' | 'compare';
+export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert' | 'compress' | 'password' | 'numbers' | 'watermark' | 'split' | 'images' | 'text' | 'deadlines' | 'safecopy' | 'compare' | 'bookmarks' | 'paycode';
 
 export interface Current { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; changed: boolean }
 export interface Src { name: string; bytes: Uint8Array; pdf: any; pages: PageState[]; fromEditor: boolean }
@@ -61,6 +61,8 @@ export function Tools(p: Props) {
     deadlines: ['Deadline finder', 'Dates from a letter into your calendar'],
     safecopy: ['Safe ID copy', 'A copy that can only be used for one purpose'],
     compare: ['Compare PDFs', 'Every word added, removed or changed'],
+    bookmarks: ['Bookmarks', 'A table of contents from the headings'],
+    paycode: ['Payment code', 'A QR code banking apps pay from'],
   };
   const conv = (k: string) => () => { setConvertKind(k); setTool('convert'); };
   // one entry per screen: kinds of the same job (file types, scan modes, extract/remove) are chosen inside the tool
@@ -72,6 +74,8 @@ export function Tools(p: Props) {
     ] },
     { name: 'Smart tools', items: [
       { name: 'Compare PDFs', desc: t('What changed between two versions'), icon: 'git-diff:duotone', tile: TILE.smart, go: () => setTool('compare') },
+      { name: 'Payment code', desc: t('QR code on your invoice, paid in seconds'), icon: 'qr-code:duotone', tile: TILE.smart, go: () => setTool('paycode') },
+      { name: 'Bookmarks', desc: t('Table of contents from the headings'), icon: 'bookmarks-simple:duotone', tile: TILE.smart, go: () => setTool('bookmarks') },
       { name: 'My details', desc: t('Fill in any form in one tap'), icon: 'address-book:duotone', tile: TILE.smart, go: () => setProfile(true) },
       { name: 'Privacy check', desc: t('Find personal data, black it out'), icon: 'shield-check:duotone', tile: TILE.smart, go: () => p.onEdit('privacy') },
       { name: 'Safe ID copy', desc: t('“COPY – only for …” on ID scans'), icon: 'identification-badge:duotone', tile: TILE.smart, go: () => setTool('safecopy') },
@@ -145,6 +149,8 @@ export function Tools(p: Props) {
       {tool === 'text' && <ExtractText {...p} desk={desk} mobile={mobile} />}
       {tool === 'deadlines' && <Deadlines {...p} desk={desk} mobile={mobile} />}
       {tool === 'safecopy' && <SafeCopy {...p} desk={desk} mobile={mobile} />}
+      {tool === 'bookmarks' && <Bookmarks {...p} desk={desk} mobile={mobile} />}
+      {tool === 'paycode' && <PayCode {...p} desk={desk} mobile={mobile} />}
       {tool === 'convert' && <Convert host={p.host} toast={p.toast} desk={desk} mobile={mobile} kind={convertKind} onOpenInEditor={p.onOpenInEditor} />}
     </div>
   );

@@ -3,6 +3,10 @@ import { t } from '../i18n';
 // sheet, like a photocopy), optional invisible text so the scan can be searched and edited.
 import { FORMATS } from './geom';
 import { renderPage, type Quality, type ScanPage } from './engine';
+// (loaded with this chunk: a separate chunk would pull shared code into the start screen)
+import * as L_pdf_lib from 'pdf-lib';
+import * as L_ocr from '../ocr';
+import * as L_textLayer from '../../engine/textLayer';
 
 export type PaperOpt = 'auto' | 'a4' | 'letter' | 'fit';
 export interface PdfOpts {
@@ -52,14 +56,14 @@ export function sheetsOf(pages: ScanPage[], opts: Pick<PdfOpts, 'cardLayout'>): 
 }
 
 export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Uint8Array> {
-  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const { PDFDocument, StandardFonts } = L_pdf_lib;
   const doc = await PDFDocument.create();
   doc.setProducer('Paginka (scanned on this device)');
   doc.setCreator('Paginka');
   doc.setTitle('Scan');
   const sheets = sheetsOf(pages, opts);
-  const ocr = opts.ocr ? await import('../ocr') : null;
-  const layer = opts.ocr ? await import('../../engine/textLayer') : null;
+  const ocr = opts.ocr ? L_ocr : null;
+  const layer = opts.ocr ? L_textLayer : null;
   const ocrWorker = ocr ? await ocr.loadOcr((f) => opts.progress?.(f * 0.05, t('Starting text recognition…'))) : null;
   const helv = opts.ocr ? await doc.embedFont(StandardFonts.Helvetica) : null;
   let done = 0;

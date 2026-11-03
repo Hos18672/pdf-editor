@@ -13,6 +13,7 @@ import { FindBar, PrivacyCheck, type ReplaceOpts } from './FindBar';
 import { StampModal } from './StampModal';
 import { haptic } from './motion';
 import { ProfileModal } from './ProfileModal';
+import { ReadyCheck, type Issue } from './ReadyCheck';
 import { loadProfile, hasProfile, wantOf, valueFor, labelLine, type Profile } from './profile';
 import { BASELINE } from '../engine/matchFonts';
 import type { Hit, DocRef } from './search';
@@ -38,7 +39,7 @@ import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop } from './hooks';
 import { ThemeButton, LangButton } from './Start';
-import { t, tn } from './i18n';
+import { t, tn, getLang } from './i18n';
 
 /** a copied line: its text and how it looks (pasted as a text box) */
 interface Clip { text: string; size: number; color: string; font: DocFont | null; family: FontFamily; bold: boolean; italic: boolean }
@@ -83,6 +84,8 @@ export interface BusyMsg { title: string; detail?: string; progress?: number }
 
 export { toB64, saveFile, shareFile, canShareFiles, printPdf } from './share';
 import { saveFile, shareFile, printPdf } from './share';
+// (loaded with this chunk: a separate chunk would pull shared code into the start screen)
+import * as L_ocrReader from './ocrReader';
 
 const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const MIN_Z = 0.25, MAX_Z = 4;
@@ -193,7 +196,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [zoom, setZoom] = useState(1);
   const [pageData, setPageData] = useState<Record<number, PageData>>({});
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
-  const [showSig, setShowSig] = useState<null | { field?: FormField }>(null);
+  const [showSig, setShowSig] = useState<null | { field?: FormField; at?: { page: number; x: number; y: number } }>(null);
+  const [ready, setReady] = useState<Issue[] | null>(null);
   const [showStamp, setShowStamp] = useState(false);
   const [showProfile, setShowProfile] = useState<null | { fill: boolean }>(null);
   /** Remove strokes being worked out (shown as paint until the page shows them taken out) */
@@ -1087,7 +1091,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const pictureSet = useMemo(() => new Set(pictureOnly), [pictureOnly]);
   const getReader = async () => {
     if (reader.current) return reader.current;
-    const { PageReader, OCR_FONT, OCR_FONT_INFO } = await import('./ocrReader');
+    const { PageReader, OCR_FONT, OCR_FONT_INFO } = L_ocrReader;
     if (reader.current) return reader.current;
     setFonts((m) => ({ ...m, [OCR_FONT]: OCR_FONT_INFO }));
     reader.current = new PageReader(pdf, (src) => infos[src].vm,
@@ -1500,6 +1504,79 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     commit((s) => ({ ...s, forms: { ...s.forms, ...forms }, objects: [...s.objects, ...add] }));
     toast({ msg: tn(n, '{n} field filled in with your details', '{n} fields filled in with your details'), action: { label: t('Undo'), run: hist.undo } });
   };
+  /** Ready to send? Empty fields, signature lines nobody signed, dates nobody wrote. */
+  const readyCheck = async () => {
+    const order = snap.pages.map((x) => x.src);
+    if (order.some((s) => !pageDataRef.current[s] && !pictureSet.has(s))) {
+      setBusy({ title: t('Reading the pages…') });
+      try { await ensureData(order, (d, a) => setBusy({ title: t('Reading the pages…'), progress: d / a })); } finally { setBusy(null); }
+    }
+    const out: Issue[] = [];
+    const inside = (o: EditorObject, x0: number, y0: number, x1: number, y1: number) => { const cx = o.x + o.w / 2, cy = o.y + o.h / 2; return cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1; };
+    const marks = snap.objects.filter((o) => o.type === 'signature' || o.type === 'image' || o.type === 'draw');
+    for (const f of fillable) {
+      if (f.readOnly || !snap.pages.some((q) => q.src === f.page)) continue;
+      const v = snap.forms[f.name] ?? f.initial;
+      if (f.type === 'text' && !(typeof v === 'string' && v.trim())) out.push({ kind: 'empty', page: f.page, label: printedLabel(f) ?? (f.label || f.name), field: f });
+      if (f.type === 'sig' && !marks.some((o) => o.page === f.page && inside(o, f.x - 20, f.y - 20, f.x + f.w + 20, f.y + f.h + 20))) out.push({ kind: 'sign', page: f.page, label: f.label || t('Signature'), field: f });
+    }
+    // printed forms: "Unterschrift", "Datum: ……"
+    const data = pageDataRef.current;
+    for (const src of order) {
+      if (!infos[src]) continue;
+      const runs = data[src]?.runs ?? [];
+      const hasFields = fields.some((f) => f.page === src);
+      let signs = 0;
+      for (const r of runs) {
+        const text = (snap.edits[r.key]?.text ?? r.str).trim();
+        if (!text || text.length > 70) continue;
+        const b = runBox(r, infos[src].vm);
+        if (Math.abs(b.angle) > 0.02 || b.h < 4) continue;
+        const sign = /\b(unterschrift|unterschriften|signature|sign here|unterzeichnet)\b/i.test(text) && text.split(/\s+/).length <= 8;
+        if (sign && !hasFields && signs < 4) {
+          const after = /[:：._…]\s*$/.test(text);
+          const signed = marks.some((o) => o.page === src && inside(o, b.x - 80, b.top - b.h * 6, b.x + b.w + 280, b.y + b.h * 1.5));
+          if (!signed) {
+            signs++;
+            out.push({ kind: 'sign', page: src, label: text.replace(/[:：._…\s]+$/, ''),
+              at: after ? { x: b.x + b.w + 95, y: b.y - b.h * 0.4, size: b.h } : { x: b.x + 85, y: b.top - b.h * 1.4, size: b.h } });
+          }
+          continue;
+        }
+        if (hasFields) continue;
+        const ll = labelLine(text);
+        if (!ll || (ll.want !== 'date' && ll.want !== 'placedate')) continue;
+        const x = b.x + b.w * (ll.at / Math.max(1, text.length)) + (ll.at >= text.length ? b.h * 0.6 : 2);
+        const taken = runs.some((q) => {
+          if (q === r || !(snap.edits[q.key]?.text ?? q.str).trim()) return false;
+          const qb = runBox(q, infos[src].vm);
+          return Math.abs(qb.y - b.y) < b.h * 0.6 && qb.x >= x - 2 && qb.x < x + 90;
+        }) || snap.objects.some((o) => o.page === src && o.type === 'text' && Math.abs(o.y + o.h / 2 - (b.y - b.h * 0.35)) < b.h && o.x >= x - 4 && o.x < x + 90);
+        if (!taken) out.push({ kind: 'date', page: src, label: text.replace(/[:：._…\s]+$/, ''), at: { x, y: b.y, size: b.h } });
+      }
+    }
+    out.sort((a, b) => order.indexOf(a.page) - order.indexOf(b.page));
+    setReady(out);
+    if (!out.length) haptic(18);
+  };
+  const showIssue = (it: Issue) => {
+    setReady(null);
+    if (it.field) { focusField(it.field); return; }
+    goToPage(it.page);
+  };
+  const fixIssue = (it: Issue) => {
+    if (it.kind === 'empty' && it.field) { setReady(null); focusField(it.field); return; }
+    if (it.kind === 'sign') { setReady(null); if (!it.field) goToPage(it.page); setShowSig(it.field ? { field: it.field } : { at: { page: it.page, x: it.at!.x, y: it.at!.y } }); return; }
+    if (it.kind === 'date' && it.at) {
+      const p = loadProfile();
+      const label = it.label;
+      const text = (/ort/i.test(label) ? valueFor(p, 'placedate') : null) ?? valueFor(p, 'date') ?? new Date().toLocaleDateString(getLang() === 'de' ? 'de-AT' : undefined);
+      const size = Math.max(7, Math.min(14, Math.round(it.at.size * 10) / 10));
+      addObject({ id: uid(), page: it.page, type: 'text', x: it.at.x, y: it.at.y - size * BASELINE.Helvetica, w: 20, h: size * 1.2, text, family: 'Helvetica', size, color: '#1E2559', bold: false, italic: false });
+      setReady((l) => (l ? l.filter((x) => x !== it) : l));
+      toast({ msg: t('Date added'), action: { label: t('Undo'), run: hist.undo } });
+    }
+  };
   const hitsByPage = useMemo(() => {
     const m: Record<number, { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[]> = {};
     found.list.forEach((h, i) => { for (const r of h.rects) (m[h.page] ??= []).push({ ...r, cur: i === found.cur, priv: found.priv }); });
@@ -1667,7 +1744,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   );
   const fillPanel = (
     <FillPanel fields={fillable} values={snap.forms} index={fieldIndex} filled={filledCount} mark={fillMark} flatten={flatten}
-      onAutofill={() => autofill()} onProfile={() => setShowProfile({ fill: false })}
+      onAutofill={() => autofill()} onProfile={() => setShowProfile({ fill: false })} onCheck={readyCheck}
       onPick={(f) => focusField(f)} onMark={(m) => setFillMark((cur) => (cur === m ? null : m))} onFlatten={setFlatten} onDownload={download}
       onPrev={() => focusField(fillable[Math.max(0, fieldIndex - 1)])} onNext={() => focusField(fillable[Math.min(fillable.length - 1, fieldIndex + 1)])} />
   );
@@ -1989,7 +2066,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       )}
       {mobile && tool === 'fill' && !activeField && !mobileEditing && (
         <MobileFillBar fields={fillable.length} filled={filledCount} mark={fillMark} onMark={(m) => setFillMark((cur) => (cur === m ? null : m))}
-          onStart={() => focusField(fillable[0])} onAutofill={() => autofill()} />
+          onStart={() => focusField(fillable[0])} onAutofill={() => autofill()} onCheck={readyCheck} />
       )}
 
       <input ref={imgInput} type="file" accept="image/*" hidden onChange={(e) => { onImage(e.target.files?.[0]); e.target.value = ''; }} />
@@ -2012,7 +2089,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       {showProfile && <ProfileModal sheet={mobile} fillLabel={showProfile.fill ? t('Save and fill in') : undefined}
         onClose={() => setShowProfile(null)} onSaved={(p) => { const fill = showProfile.fill; setShowProfile(null); if (fill) autofill(p); else toast({ msg: t('Your details are saved on this device') }); }} />}
       {showStamp && <StampModal sheet={mobile} onClose={() => setShowStamp(false)} onPick={(s) => { setShowStamp(false); placeStamp(s, 'image'); }} />}
-      {showSig && <SignatureModal sheet={mobile} onClose={() => setShowSig(null)} onPick={(s) => { const f = showSig.field; setShowSig(null); placeStamp(s, 'signature', f); }} />}
+      {showSig && <SignatureModal sheet={mobile} onClose={() => setShowSig(null)} onPick={(s) => { const f = showSig.field, at = showSig.at; setShowSig(null); placeStamp(s, 'signature', f, at); }} />}
+      {ready && <ReadyCheck issues={ready} sheet={mobile} pageLabel={(src) => snap.pages.findIndex((q) => q.src === src) + 1} onClose={() => setReady(null)} onFix={fixIssue} onShow={showIssue} />}
       {dragInfo && (() => {
         const obj = snap.objects.find((o) => o.id === dragInfo.id);
         const pg = snap.pages.find((q) => q.src === dragInfo.page);
@@ -2160,11 +2238,12 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, to
   );
 }
 
-function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void; onAutofill: () => void }) {
+function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill, onCheck }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void; onAutofill: () => void; onCheck: () => void }) {
   return (
     <div className="slimbar fillfloat">
       <div className="row" style={{ overflowX: 'auto' }}>
         <button className="ibtn af-mini" style={{ width: 44, height: 44 }} onClick={onAutofill} aria-label={t('Fill in with my details')} title={t('Fill in with my details')}><Icon name="magic-wand:duotone" size={21} /></button>
+        <button className="ibtn rc-mini" style={{ width: 44, height: 44 }} onClick={onCheck} aria-label={t('Ready to send?')} title={t('Ready to send?')}><Icon name="seal-check:duotone" size={21} /></button>
         {fields > 0 && <button className="btn primary" onClick={onStart}>{tn(fields, 'Fill {n} field', 'Fill {n} fields')}</button>}
         {fields > 0 && <span className="label num" style={{ whiteSpace: 'nowrap' }}>{filled}/{fields}</span>}
         <div className="sp" />
@@ -2180,9 +2259,9 @@ function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill }: { 
 
 const MARKS: [FillMark, string, string][] = [['check', 'check', 'Tick'], ['cross', 'x:bold', 'Cross'], ['dot', 'circle:fill', 'Dot'], ['text', 'text', 'Text'], ['date', 'calendar-blank', 'Date']];
 
-function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMark, onFlatten, onDownload, onPrev, onNext, onAutofill, onProfile }: {
+function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMark, onFlatten, onDownload, onPrev, onNext, onAutofill, onProfile, onCheck }: {
   fields: FormField[]; values: Record<string, string | boolean>; index: number; filled: number; mark: FillMark | null; flatten: boolean;
-  onAutofill: () => void; onProfile: () => void;
+  onAutofill: () => void; onProfile: () => void; onCheck: () => void;
   onPick: (f: FormField) => void; onMark: (m: FillMark) => void; onFlatten: (v: boolean) => void; onDownload: () => void; onPrev: () => void; onNext: () => void;
 }) {
   const kind: Record<FormField['type'], string> = { text: 'Text', check: 'Checkbox', radio: 'Choice', choice: 'List', sig: 'Signature' };
@@ -2192,6 +2271,8 @@ function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMar
         <button className="af-go" onClick={onAutofill}><span className="af-ic"><Icon name="magic-wand:duotone" size={22} /></span>
           <span className="af-t"><b>{t('Fill in with my details')}</b><small>{t('Name, address, date of birth … in one tap')}</small></span></button>
         <button className="linkbtn" onClick={onProfile}>{t('Edit my details')}</button>
+        <button className="af-go rc-go" onClick={onCheck}><span className="af-ic"><Icon name="seal-check:duotone" size={22} /></span>
+          <span className="af-t"><b>{t('Ready to send?')}</b><small>{t('Empty fields, missing signature or date')}</small></span></button>
       </div>
       {fields.length > 0 ? (
         <>

@@ -102,14 +102,25 @@ async function compressOnce(bytes: Uint8Array, level: Strength, progress: (f: nu
 /** Make a PDF smaller. With `target` (bytes): the lightest level that gets under it, else the strongest. */
 export async function compressPdf(bytes: Uint8Array, level: Strength, target: number | null, progress: (f: number) => void): Promise<{ bytes: Uint8Array; level: Strength }> {
   if (!target) return { bytes: await compressOnce(bytes, level, progress), level };
+  // the middle level first, then lighter or stronger as needed: two passes instead of up to four
   const order: Strength[] = ['light', 'balanced', 'strong', 'max'];
-  let best: { bytes: Uint8Array; level: Strength } | null = null;
-  for (let k = 0; k < order.length; k++) {
-    const out = await compressOnce(bytes, order[k], (f) => progress((k + f) / order.length));
-    if (!best || out.length < best.bytes.length) best = { bytes: out, level: order[k] };
-    if (out.length <= target) return { bytes: out, level: order[k] };
+  const tried = new Map<Strength, Uint8Array>();
+  let pass = 0;
+  const run = async (lv: Strength) => {
+    const k = pass++;
+    const out = await compressOnce(bytes, lv, (f) => progress(Math.min(1, (k + f) / 3)));
+    tried.set(lv, out);
+    return out;
+  };
+  let at = 1;
+  if ((await run('balanced')).length <= target) {
+    // lighter still small enough? (better pictures)
+    return (await run('light')).length <= target ? { bytes: tried.get('light')!, level: 'light' } : { bytes: tried.get('balanced')!, level: 'balanced' };
   }
-  return best!;
+  while (++at < order.length) if ((await run(order[at])).length <= target) return { bytes: tried.get(order[at])!, level: order[at] };
+  let best: Strength = 'balanced';
+  for (const [lv, b] of tried) if (b.length < tried.get(best)!.length) best = lv;
+  return { bytes: tried.get(best)!, level: best };
 }
 
 // ---------- passwords ----------

@@ -10,6 +10,16 @@ import { ACCEPT, DropBox, isImage, isPdf } from './drop';
 import { baseName, fmtSize, parseRange, formatRange } from './pdfops';
 import { openPdf } from './pdfjs';
 import { t, tn, locale, getLang } from './i18n';
+// (loaded with this chunk: a separate chunk would pull shared code into the start screen)
+import * as L_pdftools from './pdftools';
+import * as L_pdfops from './pdfops';
+import * as L_ocr from './ocr';
+import * as L_deadlines from './deadlines';
+import * as L_pdf_lib from 'pdf-lib';
+import { findHeadings, hasOutline, writeOutline, type Heading } from './outline';
+import { addPayCode, ibanOk, qrModules, qrPath, epcPayload, readInvoice, cleanIban, type PayInfo, type Corner } from './epc';
+import { loadProfile } from './profile';
+import { senderOf, fmtIban } from './smart';
 
 type TP = Props & { desk: boolean; mobile: boolean };
 type Out = { name: string; bytes: Uint8Array; mime: string };
@@ -106,11 +116,11 @@ function usePageSize(src: Src | null) {
 }
 
 /** the first pages with something drawn over them (page numbers, watermark) */
-function Preview({ src, count = 2, overlay }: { src: Src; count?: number; overlay: (i: number, k: number) => React.ReactNode }) {
+function Preview({ src, count = 2, start = 0, overlay }: { src: Src; count?: number; start?: number; overlay: (i: number, k: number) => React.ReactNode }) {
   const size = usePageSize(src);
   return (
     <div className="xt-prev" aria-hidden>
-      {src.pages.slice(0, count).map((pg, i) => (
+      {src.pages.slice(start, start + count).map((pg, i) => (
         <div className="xt-pg" key={i} style={size ? { aspectRatio: `${size.w} / ${size.h}` } : undefined}>
           <Thumb pdf={src.pdf} src={pg.src} rotation={pg.rotation} size={260} />
           {size && <div className="xt-ov" ref={(el) => { if (el) el.style.setProperty('--k', String(el.clientWidth / size.w)); }}>{overlay(i, 1)}</div>}
@@ -129,7 +139,7 @@ export function Compress(p: TP) {
   const { out, setOut, run } = useOutput(p);
   if (!src) return <PickPdf onFile={load} err={err} title={t('Choose a PDF to make smaller')} />;
   const go = () => run(t('Making it smaller'), t('Pictures and scans are re-saved; text stays sharp. Nothing is uploaded.'), async (prog) => {
-    const { compressPdf } = await import('./pdftools');
+    const { compressPdf } = L_pdftools;
     const r = await compressPdf(src.bytes, level, limit ? limit * 1024 * 1024 : null, prog);
     const before = src.bytes.length, after = r.bytes.length;
     if (after >= before * 0.98) {
@@ -175,7 +185,7 @@ export function Password(p: TP & { initialMode?: 'protect' | 'unlock' }) {
   const take = async (name: string, bytes: Uint8Array) => {
     setErr(null);
     try {
-      const { loadDoc } = await import('./pdfops');
+      const { loadDoc } = L_pdfops;
       const d = await loadDoc(bytes);
       const encrypted = d.isEncrypted;
       const pdf = encrypted ? null : await openPdf(bytes).catch(() => null);
@@ -189,7 +199,7 @@ export function Password(p: TP & { initialMode?: 'protect' | 'unlock' }) {
   const protect = mode === 'protect';
   const ok = protect ? pw.length >= 4 && pw === pw2 : pw.length > 0;
   const go = () => run(protect ? t('Adding a password') : t('Removing the password'), t('On this device. The password is not stored anywhere.'), async () => {
-    const { protectPdf, unlockPdf } = await import('./pdftools');
+    const { protectPdf, unlockPdf } = L_pdftools;
     if (protect) {
       const bytes = await protectPdf(file.bytes, pw, allow);
       return { files: [{ name: `${baseName(file.name)}-protected.pdf`, bytes, mime: 'application/pdf' }], summary: <><b>{t('Protected with a password')}</b><span>{t('It asks for the password when opened. Keep it safe: it can’t be recovered.')}</span></> };
@@ -271,7 +281,7 @@ export function PageNumbers(p: TP) {
     return i < from - 1 ? '' : format === 'n' ? `${k}` : format === 'page-n' ? `Page ${k}` : format === 'n-of' ? `${k} / ${total}` : format === 'seite' ? `Seite ${k} von ${total}` : `– ${k} –`;
   };
   const go = () => run(t('Adding page numbers'), tn(n, '{n} page', '{n} pages'), async () => {
-    const { addPageNumbers } = await import('./pdftools');
+    const { addPageNumbers } = L_pdftools;
     const bytes = await addPageNumbers(await pdfBytesOf(src), { pos, format, start, from, size, margin: 24 });
     return { files: [{ name: `${baseName(src.name)}-numbered.pdf`, bytes, mime: 'application/pdf' }], summary: <><b>{t('Page numbers added')}</b><span>{t('{k} pages numbered {a}–{b}', { k: n - from + 1, a: start, b: start + n - from })}</span></> };
   });
@@ -307,7 +317,7 @@ export function PageNumbers(p: TP) {
 async function pdfBytesOf(src: Src): Promise<Uint8Array> {
   const same = src.pages.every((pg, i) => pg.src === i && !pg.rotation) && src.pages.length === src.pdf?.numPages;
   if (same) return src.bytes;
-  const { pickPages, save } = await import('./pdfops');
+  const { pickPages, save } = L_pdfops;
   return save(await pickPages(src.bytes, src.pages));
 }
 
@@ -327,7 +337,7 @@ export function Watermark(p: TP) {
   const { out, setOut, run } = useOutput(p);
   if (!src) return <PickPdf onFile={load} err={err} title={t('Choose a PDF to watermark')} />;
   const go = () => run(t('Adding the watermark'), tn(src.pages.length, '{n} page', '{n} pages'), async () => {
-    const { addWatermark } = await import('./pdftools');
+    const { addWatermark } = L_pdftools;
     const bytes = await addWatermark(await pdfBytesOf(src), { text: text.trim() || (getLang() === 'de' ? 'VERTRAULICH' : 'CONFIDENTIAL'), size, opacity, color: COLORS[color][1], angle: +angle, tile, pages });
     return { files: [{ name: `${baseName(src.name)}-watermarked.pdf`, bytes, mime: 'application/pdf' }], summary: <><b>{t('Watermark added')}</b><span>{pages === 'all' ? t('“{w}” on all {n} pages', { w: text.trim(), n: src.pages.length }) : t('“{w}” on the first page', { w: text.trim() })}</span></> };
   });
@@ -375,7 +385,7 @@ export function Split(p: TP) {
   }, [src, mode, n, ranges]);
   if (!src) return <PickPdf onFile={load} err={err} title={t('Choose a PDF to split')} />;
   const go = () => run(t('Splitting'), tn(groups.length, '{n} file', '{n} files'), async (prog) => {
-    const { splitPdf } = await import('./pdftools');
+    const { splitPdf } = L_pdftools;
     const bytes = await pdfBytesOf(src);
     prog(0.3);
     const parts = await splitPdf(bytes, groups);
@@ -479,7 +489,7 @@ async function readPages(src: Src, ocr: boolean, prog: (f: number) => void): Pro
     let t = pageText((await page.getTextContent()).items);
     // only pages with (almost) no text of their own are read as pictures: short real text beats OCR
     if (t.replace(/\s/g, '').length < 4 && ocr) {
-      if (!worker) worker = await (await import('./ocr')).loadOcr();
+      if (!worker) worker = await (L_ocr).loadOcr();
       const vp = page.getViewport({ scale: 2.4 });
       const c = document.createElement('canvas');
       c.width = Math.round(vp.width); c.height = Math.round(vp.height);
@@ -539,7 +549,7 @@ export function Deadlines(p: TP) {
   if (!src) return <PickPdf onFile={load} err={err} title={t('Choose a letter to find its deadlines')} />;
   const doc = baseName(src.name);
   const go = () => run(t('Looking for deadlines'), t('Reading the letter on this device (scans too).'), async (prog) => {
-    const { findDates } = await import('./deadlines');
+    const { findDates } = L_deadlines;
     const { pages, scanned } = await readPages(src, true, prog);
     const list = findDates(pages);
     const today = new Date(); today.setHours(0, 0, 0, 0);
@@ -554,7 +564,7 @@ export function Deadlines(p: TP) {
   };
   const chosen = (found ?? []).filter((f) => f.on);
   const ics = async () => {
-    const { toIcs } = await import('./deadlines');
+    const { toIcs } = L_deadlines;
     const text = toIcs(chosen.map((f) => ({ title: f.title, date: f.date, time: f.time, note: `${f.snippet}\n\n${src.name}, page ${f.page + 1}${f.from ? `\n(${f.from})` : ''}`, remindDays: remind })));
     await saveFile(p.host, new TextEncoder().encode(text), `${doc}-dates.ics`, 'text/calendar', p.toast);
   };
@@ -664,7 +674,7 @@ export function SafeCopy(p: TP) {
           return { canvas: c, wPt: v1.width, hPt: v1.height };
         } });
       } else {
-        const { imageBytes } = await import('./pdfops');
+        const { imageBytes } = L_pdfops;
         const img = await imageBytes(f);
         list.push({ name: f.name, draw: async (max) => {
           const bmp = await createImageBitmap(new Blob([img.bytes as BlobPart], { type: img.png ? 'image/png' : 'image/jpeg' }));
@@ -703,7 +713,7 @@ export function SafeCopy(p: TP) {
     );
   }
   const go = () => run(t('Making the safe copy'), t('The note is burned into every page. On this device only.'), async (prog) => {
-    const { PDFDocument } = await import('pdf-lib');
+    const { PDFDocument } = L_pdf_lib;
     const doc = await PDFDocument.create();
     for (let k = 0; k < items.length; k++) {
       const { canvas, wPt, hPt } = await items[k].draw(2000);
@@ -746,4 +756,126 @@ export function SafeCopy(p: TP) {
       {!out && <Bar desk={p.desk} cta={cta} bar={{ title: purpose.trim() ? (lang === 'de' ? `Nur für ${purpose}` : `Only for ${purpose}`) : t('Choose the purpose'), sub: date }} />}
     </div>
   );
+}
+
+// ---------------- bookmarks from headings ----------------
+
+export function Bookmarks(p: TP) {
+  const { src, load, err } = useSource(p.current);
+  const [items, setItems] = useState<Heading[] | null>(null);
+  const [had, setHad] = useState(false);
+  const { out, setOut, run } = useOutput(p);
+  const find = (s: Src) => run(t('Finding the headings'), tn(s.pages.length, '{n} page', '{n} pages'), async (prog) => {
+    setHad(await hasOutline(s.pdf));
+    setItems(await findHeadings(s.pdf, s.pages.map((pg) => pg.src), prog));
+    return null;
+  });
+  // (the headings are looked for as soon as there is a document)
+  useEffect(() => { if (src && !items) find(src); }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!src) return <PickPdf onFile={load} err={err} title={t('Choose a PDF to make bookmarks for')} />;
+  const chosen = (items ?? []).filter((h) => h.on);
+  const upd = (i: number, ch: Partial<Heading>) => setItems((l) => l!.map((h, k) => (k === i ? { ...h, ...ch } : h)));
+  const go = () => run(t('Adding the bookmarks'), tn(chosen.length, '{n} bookmark', '{n} bookmarks'), async () => {
+    const bytes = await writeOutline(await pdfBytesOf(src), items!);
+    return { files: [{ name: `${baseName(src.name)}.pdf`, bytes, mime: 'application/pdf' }], summary: <><b>{tn(chosen.length, '{n} bookmark added', '{n} bookmarks added')}</b><span>{t('PDF readers show them as a table of contents')}</span></> };
+  });
+  const options = (
+    <>
+      <span className="hint">{t('Headings are found by their size and numbering (“2.1 …”). Untick what isn’t a heading, fix a title or move an entry in or out a level.')}</span>
+      {had && <div className="note"><Icon name="info" size={16} /><span>{t('This PDF already has bookmarks. They are replaced.')}</span></div>}
+    </>
+  );
+  const list = items && (
+    <div className="bm-list">
+      {!items.length && <div className="note"><Icon name="info" size={16} /><span>{t('No headings found. Bookmarks are made from headings set larger or bolder than the text, or numbered like “1.2”.')}</span></div>}
+      {items.map((h, i) => (
+        <div key={i} className={`bm-it lv${h.level}${h.on ? "" : " off"}`} style={{ ['--lv' as any]: h.level - 1, ['--i' as any]: Math.min(i, 12) }}>
+          <input type="checkbox" checked={h.on} onChange={(e) => upd(i, { on: e.target.checked })} aria-label={t('Use this heading')} />
+          <button className="ibtn sm" disabled={h.level <= 1} onClick={() => upd(i, { level: h.level - 1 })} aria-label={t('One level up')}><Icon name="caret-left" size={14} /></button>
+          <button className="ibtn sm" disabled={h.level >= 3} onClick={() => upd(i, { level: h.level + 1 })} aria-label={t('One level down')}><Icon name="caret-right" size={14} /></button>
+          <input className="bm-title" value={h.title} onChange={(e) => upd(i, { title: e.target.value })} aria-label={t('Bookmark title')} />
+          <span className="bm-pg">{t('p. {n}', { n: h.page + 1 })}</span>
+        </div>
+      ))}
+    </div>
+  );
+  const cta = items
+    ? <button className="btn primary lg block" disabled={!chosen.length} onClick={go}><Icon name="bookmarks-simple" size={18} />{t('Add {n} bookmarks', { n: chosen.length })}</button>
+    : <button className="btn primary lg block" onClick={() => find(src)}><Icon name="bookmarks-simple" size={18} />{t('Find headings')}</button>;
+  return <Screen p={p} src={src} title={t('Bookmarks')} options={options} cta={cta} preview={list} barTitle={items ? t('{n} selected', { n: chosen.length }) : t('Table of contents')} barSub={items ? t('{n} found', { n: items.length }) : t('From the headings')} out={out} zipName="bookmarks.zip" onAgain={() => setOut(null)} />;
+}
+
+// ---------------- payment code ----------------
+
+const CORNERS: [Corner, string][] = [['br', 'Bottom right'], ['bl', 'Bottom left'], ['tr', 'Top right'], ['tl', 'Top left']];
+
+export function PayCode(p: TP) {
+  const { src, load, err } = useSource(p.current);
+  const de = getLang() === 'de';
+  const [info, setInfo] = useState<PayInfo>(() => {
+    const pr = loadProfile();
+    return { name: [pr.first, pr.last].filter(Boolean).join(' '), iban: pr.iban ?? '', bic: pr.bic ?? '', amount: '', ref: '', text: '' };
+  });
+  const [read, setRead] = useState(false);
+  const [where, setWhere] = useState<'first' | 'last'>('first');
+  const [corner, setCorner] = useState<Corner>('br');
+  const [size, setSize] = useState(96);
+  const [caption, setCaption] = useState(de ? 'Zahlen mit Code' : 'Pay with code');
+  const { out, setOut, run } = useOutput(p);
+  // what the invoice says (amount, number, its bank account), filled in once
+  useEffect(() => {
+    if (!src || read) return;
+    let alive = true;
+    readPages(src, false, () => null).then(({ pages }) => {
+      if (!alive) return;
+      const all = pages.join('\n');
+      const inv = readInvoice(all);
+      setInfo((o) => {
+        const n = { ...o };
+        if (inv.amount && !o.amount) n.amount = inv.amount;
+        if (inv.ref && !o.ref) n.ref = (de ? 'Rechnung ' : 'Invoice ') + inv.ref;
+        // the account printed on the invoice is the one to pay to (and then the sender is the recipient)
+        if (inv.iban && cleanIban(o.iban) !== inv.iban) { n.iban = fmtIban(inv.iban); n.bic = ''; n.name = senderOf(all) ?? o.name; }
+        return n;
+      });
+      setRead(true);
+    }).catch(() => setRead(true));
+    return () => { alive = false; };
+  }, [src]); // eslint-disable-line react-hooks/exhaustive-deps
+  const path = useMemo(() => { try { const m = qrModules(epcPayload(info)); return { d: qrPath(m), n: m.length }; } catch { return null; } }, [info]);
+  if (!src) return <PickPdf onFile={load} err={err} title={t('Choose the invoice to add a payment code to')} />;
+  const ibanGood = ibanOk(info.iban);
+  const ready = ibanGood && !!info.name.trim();
+  const set = (k: keyof PayInfo) => (e: React.ChangeEvent<HTMLInputElement>) => setInfo((o) => ({ ...o, [k]: e.target.value }));
+  const go = () => run(t('Adding the payment code'), '', async () => {
+    const bytes = await addPayCode(await pdfBytesOf(src), info, { page: where === 'first' ? 0 : src.pages.length - 1, corner, size, caption });
+    return { files: [{ name: `${baseName(src.name)}.pdf`, bytes, mime: 'application/pdf' }], summary: <><b>{t('Payment code added')}</b><span>{t('Banking apps fill in the transfer from it')}</span></> };
+  });
+  const options = (
+    <>
+      <span className="hint">{t('A QR code banking apps read (“Zahlen mit Code”, GiroCode): recipient, IBAN, amount and reference are filled in, nothing is typed.')}</span>
+      <label className="xt-in"><span className="label">{t('Recipient')}</span><input value={info.name} onChange={set('name')} maxLength={70} placeholder="Muster GmbH" /></label>
+      <label className="xt-in"><span className="label">IBAN</span><input value={info.iban} onChange={set('iban')} placeholder="AT61 1904 3002 3457 3201" className={info.iban && !ibanGood ? 'bad' : ''} autoCapitalize="characters" spellCheck={false} /></label>
+      {info.iban && !ibanGood && <span className="xt-err">{t('This IBAN isn’t right. Check the digits.')}</span>}
+      <div className="pc-two">
+        <label className="xt-in"><span className="label">{t('Amount (EUR)')}</span><input value={info.amount} onChange={set('amount')} inputMode="decimal" placeholder="1.250,00" /></label>
+        <label className="xt-in"><span className="label">{t('BIC (optional)')}</span><input value={info.bic} onChange={set('bic')} autoCapitalize="characters" spellCheck={false} /></label>
+      </div>
+      <label className="xt-in"><span className="label">{t('Reference')}</span><input value={info.ref} onChange={set('ref')} maxLength={140} placeholder={de ? 'Rechnung 2026-001' : 'Invoice 2026-001'} /></label>
+      <label className="xt-in"><span className="label">{t('Caption under the code')}</span><input value={caption} onChange={(e) => setCaption(e.target.value)} maxLength={40} /></label>
+      {src.pages.length > 1 && <div className="field"><span className="label">{t('Page')}</span><Seg value={where} onChange={setWhere} options={[['first', 'First page'], ['last', 'Last page']]} /></div>}
+      <div className="field"><span className="label">{t('Place')}</span><div className="chips">{CORNERS.map(([c, l]) => <button key={c} className={`chip${corner === c ? ' on' : ''}`} onClick={() => setCorner(c)}>{t(l)}</button>)}</div></div>
+      <div className="xt-row"><span>{t('Size')}</span><div style={{ width: 132 }}><Stepper value={size} min={64} max={160} step={8} onChange={setSize} label="size" unit="pt" /></div></div>
+    </>
+  );
+  const cta = <button className="btn primary lg block" disabled={!ready} onClick={go}><Icon name="qr-code" size={18} />{t('Add payment code')}</button>;
+  const preview = path && (
+    <Preview src={src} count={1} start={where === 'first' ? 0 : src.pages.length - 1} overlay={() => (
+      <div className={`pc-code ${corner}`} style={{ width: `calc(var(--k) * ${size}px)` }}>
+        <svg viewBox={`-2 -2 ${path.n + 4} ${path.n + 4}`} aria-hidden><rect x={-2} y={-2} width={path.n + 4} height={path.n + 4} fill="#fff" /><path d={path.d} fill="#000" /></svg>
+        {caption.trim() && <span style={{ fontSize: `calc(var(--k) * ${Math.max(6, Math.min(9, size / 12))}px)` }}>{caption}</span>}
+      </div>
+    )} />
+  );
+  return <Screen p={p} src={src} title={t('Payment code')} options={options} cta={cta} preview={preview} barTitle={info.amount ? `${info.amount} €` : t('Payment code')} barSub={ready ? info.name : t('Recipient and IBAN needed')} out={out} zipName="payment-code.zip" onAgain={() => setOut(null)} />;
 }

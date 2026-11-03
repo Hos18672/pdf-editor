@@ -38,6 +38,11 @@ jobs:
 
       - run: node scripts/build-worker.mjs
 
+      # The Android WebView always has WebAssembly SIMD: the text reader built without it is only
+      # needed by old desktop browsers, so the app leaves it out (smaller download)
+      - name: Leave out web-only files
+        run: rm -f public/tesseract/tesseract-core-lstm.wasm.js
+
       - name: Generate the native Android project
         env:
           CI: '1'

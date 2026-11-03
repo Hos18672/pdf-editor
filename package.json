@@ -32,6 +32,7 @@
     "marked": "^18.1.1",
     "onnxruntime-web": "^1.30.0",
     "pdf-lib": "^1.17.1",
+    "qrcode-generator": "^1.4.4",
     "react": "19.3.0",
     "react-colorful": "^5.6.1",
     "react-dom": "19.3.0",
@@ -61,5 +62,14 @@
     "typecheck": "tsc --noEmit",
     "build:worker": "node scripts/build-worker.mjs"
   },
-  "private": true
+  "private": true,
+  "expo": {
+    "autolinking": {
+      "exclude": [
+        "react-native-reanimated",
+        "react-native-worklets",
+        "react-native-gesture-handler"
+      ]
+    }
+  }
 }

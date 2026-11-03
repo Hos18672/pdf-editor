@@ -19,7 +19,13 @@ const hexLum = (h: string) => { const v = parseInt(h.replace('#', ''), 16); retu
  * pixels on every side (used to see whether ink continues past the cover, and as known background
  * to fill from); the result is the inner region. `fg`: the letters' colour.
  */
-export function coverPixels(px: Uint8ClampedArray, W: number, H: number, m: number, bg: string, lineH: number, fg = '#000000'): ImageData {
+/** the page around a cover (more than its margin): where a patterned background is copied from */
+export interface CoverCtx { px: Uint8ClampedArray; W: number; H: number; /** the region (with its margin) starts here */ x: number; y: number }
+
+/** how far around a cover the page is looked at for its background (pixels, from the line height) */
+export const ctxReach = (lineH: number) => ({ x: Math.round(lineH * 3), y: Math.round(lineH * 2.6) });
+
+export function coverPixels(px: Uint8ClampedArray, W: number, H: number, m: number, bg: string, lineH: number, fg = '#000000', ctx?: CoverCtx): ImageData {
   const iw = W - 2 * m, ih = H - 2 * m;
   const out = new ImageData(Math.max(1, iw), Math.max(1, ih));
   const v = parseInt(bg.replace('#', ''), 16);
@@ -33,28 +39,20 @@ export function coverPixels(px: Uint8ClampedArray, W: number, H: number, m: numb
   for (let p = 0, i = 0; p < W * H; p++, i += 4) L[p] = inv ? 255 - lumOf(px, i) : lumOf(px, i);
   const fgL = inv ? 255 - fL : fL;
   const rb = Math.max(2, Math.round(lineH * 0.3));
-  const runMaxLine = (src: Float32Array, horiz: boolean) => {
-    const o = new Float32Array(W * H);
-    if (horiz) for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let mx = 0; for (let t = Math.max(0, x - rb); t <= Math.min(W - 1, x + rb); t++) mx = Math.max(mx, src[y * W + t]); o[y * W + x] = mx; }
-    else for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { let mx = 0; for (let t = Math.max(0, y - rb); t <= Math.min(H - 1, y + rb); t++) mx = Math.max(mx, src[t * W + x]); o[y * W + x] = mx; }
-    return o;
-  };
-  const Lb = runMaxLine(runMaxLine(L, true), false);
+  const Lb = runMax(runMax(L, W, H, rb, true), W, H, rb, false);
   // ink: darker than the background nearby (so a tint or a second background colour isn't ink); for
   // rules, darker than both sides (where two background tones meet, only one side is lighter)
   const ink = new Uint8Array(W * H), vInk = new Uint8Array(W * H), hInk = new Uint8Array(W * H);
   for (let p = 0; p < W * H; p++) ink[p] = Lb[p] - L[p] > 22 ? 1 : 0;
-  const r2 = Math.max(3, Math.round(lineH * 0.25));
+  // the lightest value within r2 on each side (from centred running maxima: an odd r2 = 2·rh + 1)
+  const rh = Math.max(1, Math.round(lineH * 0.125)), r2 = 2 * rh + 1;
+  const MX = runMax(L, W, H, rh, true), MY = runMax(L, W, H, rh, false);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     const p = y * W + x;
     if (!ink[p]) continue;
-    let a = 0, b2 = 0, c = 0, d = 0;
-    for (let t = 1; t <= r2; t++) {
-      if (x - t >= 0) a = Math.max(a, L[p - t]); if (x + t < W) b2 = Math.max(b2, L[p + t]);
-      if (y - t >= 0) c = Math.max(c, L[p - t * W]); if (y + t < H) d = Math.max(d, L[p + t * W]);
-    }
     // (at the region's edge the side outside counts as lighter)
-    if (x - r2 < 0) a = 255; if (x + r2 >= W) b2 = 255; if (y - r2 < 0) c = 255; if (y + r2 >= H) d = 255;
+    const a = x - r2 < 0 ? 255 : MX[p - 1 - rh], b2 = x + r2 >= W ? 255 : MX[p + 1 + rh];
+    const c = y - r2 < 0 ? 255 : MY[p - (1 + rh) * W], d = y + r2 >= H ? 255 : MY[p + (1 + rh) * W];
     if (Math.min(a, b2) - L[p] > 22) vInk[p] = 1;
     if (Math.min(c, d) - L[p] > 22) hInk[p] = 1;
   }
@@ -99,36 +97,222 @@ export function coverPixels(px: Uint8ClampedArray, W: number, H: number, m: numb
     if (!letter[y * W + x]) continue;
     for (let yy = Math.max(0, y - rd); yy <= Math.min(H - 1, y + rd); yy++) for (let xx = Math.max(0, x - rd); xx <= Math.min(W - 1, x + rd); xx++) if (!keep2[yy * W + xx]) hole[yy * W + xx] = 1;
   }
-  // filled in from the outside in: each round, the pixels next to known ones take their average
-  const R = new Float32Array(W * H), G = new Float32Array(W * H), B = new Float32Array(W * H), known = new Uint8Array(W * H);
   let holes = 0;
-  for (let p = 0, i = 0; p < W * H; p++, i += 4) { R[p] = px[i]; G[p] = px[i + 1]; B[p] = px[i + 2]; known[p] = hole[p] ? 0 : 1; if (hole[p]) holes++; }
+  for (let p = 0; p < W * H; p++) holes += hole[p];
   // (nearly all of the cover is letters: nothing to fill from, keep the paper colour)
   if (holes > iw * ih * 0.85) return flat();
-  const next: number[] = [];
-  for (let round = 0; holes > 0 && round < 400; round++) {
-    next.length = 0;
-    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
-      const p = y * W + x;
-      if (known[p]) continue;
-      let r = 0, g = 0, b2 = 0, n = 0;
-      for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++) for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) {
-        const q = yy * W + xx;
-        if (known[q] === 1) { r += R[q]; g += G[q]; b2 += B[q]; n++; }
-      }
-      if (n) { R[p] = r / n; G[p] = g / n; B[p] = b2 / n; next.push(p); }
+  const put = (R: Float32Array | Uint8ClampedArray, G: Float32Array | Uint8ClampedArray, B: Float32Array | Uint8ClampedArray, at: (x: number, y: number) => number, known: (p: number) => boolean) => {
+    for (let y = 0; y < ih; y++) for (let x = 0; x < iw; x++) {
+      const p = at(x + m, y + m), q = (y * iw + x) * 4;
+      if (known(p)) { out.data[q] = R[p]; out.data[q + 1] = G[p]; out.data[q + 2] = B[p]; }
+      else { out.data[q] = br; out.data[q + 1] = bgg; out.data[q + 2] = bb; }
+      out.data[q + 3] = 255;
     }
-    if (!next.length) break;
-    for (const p of next) known[p] = 1;
-    holes -= next.length;
+    return out;
+  };
+  // A background with a pattern, a grain or a picture: the holes are filled with pieces of the same
+  // background from around the line (the look stays; a smooth fill would show as a blurred band)
+  if (ctx && holes && textured(px, W, H, hole)) {
+    const { W: CW, H: CH } = ctx;
+    const C = new Uint8ClampedArray(ctx.px);
+    const cHole = new Uint8Array(CW * CH);
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (hole[y * W + x]) {
+      const cx = x + ctx.x, cy = y + ctx.y;
+      if (cx >= 0 && cy >= 0 && cx < CW && cy < CH) cHole[cy * CW + cx] = 1;
+    }
+    // where pieces may not come from: letters and rules anywhere around, and the holes themselves
+    const blocked = inkMask(C, CW, CH, lineH, fg, bL);
+    for (let p = 0; p < CW * CH; p++) if (cHole[p]) blocked[p] = 1;
+    const filled = patchFill(C, CW, CH, cHole, blocked, lineH);
+    const R = new Float32Array(CW * CH), G = new Float32Array(CW * CH), B = new Float32Array(CW * CH), known = new Uint8Array(CW * CH);
+    for (let p = 0, i = 0; p < CW * CH; p++, i += 4) { R[p] = C[i]; G[p] = C[i + 1]; B[p] = C[i + 2]; known[p] = cHole[p] && !filled[p] ? 0 : 1; }
+    // anything no piece fitted: from the surroundings, as below
+    smoothFill(R, G, B, known, CW, CH);
+    return put(R, G, B, (x, y) => (y + ctx.y) * CW + x + ctx.x, (p) => known[p] === 1);
   }
-  for (let y = 0; y < ih; y++) for (let x = 0; x < iw; x++) {
-    const p = (y + m) * W + x + m, q = (y * iw + x) * 4;
-    if (known[p]) { out.data[q] = R[p]; out.data[q + 1] = G[p]; out.data[q + 2] = B[p]; }
-    else { out.data[q] = br; out.data[q + 1] = bgg; out.data[q + 2] = bb; }
-    out.data[q + 3] = 255;
+  // filled in from the outside in: each pixel next to known ones takes their average
+  const R = new Float32Array(W * H), G = new Float32Array(W * H), B = new Float32Array(W * H), known = new Uint8Array(W * H);
+  for (let p = 0, i = 0; p < W * H; p++, i += 4) { R[p] = px[i]; G[p] = px[i + 1]; B[p] = px[i + 2]; known[p] = hole[p] ? 0 : 1; }
+  smoothFill(R, G, B, known, W, H);
+  return put(R, G, B, (x, y) => y * W + x, (p) => known[p] === 1);
+}
+
+/** whether the background around the holes has a pattern or grain (else a smooth fill is right) */
+function textured(px: Uint8ClampedArray, W: number, H: number, hole: Uint8Array): boolean {
+  // neighbouring differences of the pixels that stay (paper between and around the letters)
+  let s = 0, n = 0;
+  for (let y = 0; y < H; y++) for (let x = 0; x + 1 < W; x++) {
+    const p = y * W + x;
+    if (hole[p] || hole[p + 1]) continue;
+    const i = p * 4;
+    s += Math.abs(px[i] - px[i + 4]) + Math.abs(px[i + 1] - px[i + 5]) + Math.abs(px[i + 2] - px[i + 6]);
+    n++;
+  }
+  return n > 20 && s / n > 4.5;
+}
+
+/** letters and rules (ink clearly darker than the background nearby, as in coverPixels), a little widened */
+function inkMask(px: Uint8ClampedArray, W: number, H: number, lineH: number, fg: string, bL: number): Uint8Array {
+  const fL = hexLum(fg), inv = fL > bL;
+  const L = new Float32Array(W * H);
+  for (let p = 0, i = 0; p < W * H; p++, i += 4) L[p] = inv ? 255 - lumOf(px, i) : lumOf(px, i);
+  const fgL = inv ? 255 - fL : fL;
+  const Lb = runMax(runMax(L, W, H, Math.max(2, Math.round(lineH * 0.3)), true), W, H, Math.max(2, Math.round(lineH * 0.3)), false);
+  const ink = new Uint8Array(W * H);
+  for (let p = 0; p < W * H; p++) if (L[p] < Lb[p] - Math.max(25, 0.45 * (Lb[p] - fgL))) ink[p] = 1;
+  const rd = Math.max(1, Math.round(lineH * 0.08));
+  return dilate(ink, W, H, rd);
+}
+
+/** the largest value within r along rows (or columns), in O(n) (van Herk / Gil-Werman) */
+function runMax(src: Float32Array, W: number, H: number, r: number, horiz: boolean): Float32Array {
+  const out = new Float32Array(W * H);
+  const n = horiz ? W : H, lines = horiz ? H : W, step = horiz ? 1 : W;
+  const k = 2 * r + 1;
+  const g = new Float32Array(n + k), h = new Float32Array(n + k), a = new Float32Array(n + 2 * r);
+  for (let l = 0; l < lines; l++) {
+    const base = horiz ? l * W : l;
+    for (let i = 0; i < n + 2 * r; i++) { const j = Math.min(n - 1, Math.max(0, i - r)); a[i] = i - r < 0 || i - r >= n ? -Infinity : src[base + j * step]; }
+    const len = n + 2 * r;
+    for (let i = 0; i < len; i++) g[i] = i % k === 0 ? a[i] : Math.max(g[i - 1], a[i]);
+    for (let i = len - 1; i >= 0; i--) h[i] = i === len - 1 || (i + 1) % k === 0 ? a[i] : Math.max(h[i + 1], a[i]);
+    for (let i = 0; i < n; i++) out[base + i * step] = Math.max(h[i], g[Math.min(len - 1, i + 2 * r)]);
   }
   return out;
+}
+
+function dilate(m: Uint8Array, W: number, H: number, r: number): Uint8Array {
+  const a = new Uint8Array(W * H), b = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) { let last = -1e9; for (let x = 0; x < W; x++) { if (m[y * W + x]) last = x; if (x - last <= r) a[y * W + x] = 1; } last = 1e9; for (let x = W - 1; x >= 0; x--) { if (m[y * W + x]) last = x; if (last - x <= r) a[y * W + x] = 1; } }
+  for (let x = 0; x < W; x++) { let last = -1e9; for (let y = 0; y < H; y++) { if (a[y * W + x]) last = y; if (y - last <= r) b[y * W + x] = 1; } last = 1e9; for (let y = H - 1; y >= 0; y--) { if (a[y * W + x]) last = y; if (last - y <= r) b[y * W + x] = 1; } }
+  return b;
+}
+
+/**
+ * Fills the holes with pieces of the background around them (texture synthesis): tile by tile, the
+ * tile with the most known surroundings first, the piece whose surroundings match best is copied in
+ * (only into the hole: the pixels that stay are never changed). Returns the filled pixels.
+ */
+function patchFill(C: Uint8ClampedArray, W: number, H: number, hole: Uint8Array, blocked: Uint8Array, lineH: number): Uint8Array {
+  const n = W * H;
+  const filled = new Uint8Array(n);
+  let bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) if (hole[y * W + x]) { if (x < bx0) bx0 = x; if (x > bx1) bx1 = x; if (y < by0) by0 = y; if (y > by1) by1 = y; }
+  if (bx1 < 0) return filled;
+  const T = Math.max(6, Math.min(24, Math.round(lineH * 0.4))), r = Math.max(3, Math.round(T / 2));
+  const { x: RX, y: RY } = ctxReach(lineH);
+  // summed blocked counts: a piece must come from where nothing is blocked
+  const S = new Int32Array((W + 1) * (H + 1));
+  for (let y = 0; y < H; y++) { let row = 0; for (let x = 0; x < W; x++) { row += blocked[y * W + x]; S[(y + 1) * (W + 1) + x + 1] = S[y * (W + 1) + x + 1] + row; } }
+  const blk = (x0: number, y0: number, x1: number, y1: number) => S[(y1 + 1) * (W + 1) + x1 + 1] - S[y0 * (W + 1) + x1 + 1] - S[(y1 + 1) * (W + 1) + x0] + S[y0 * (W + 1) + x0];
+  const known = new Uint8Array(n);
+  for (let p = 0; p < n; p++) known[p] = hole[p] ? 0 : 1;
+  type Tile = { x0: number; y0: number; x1: number; y1: number; done: boolean };
+  const tiles: Tile[] = [];
+  for (let ty = by0; ty <= by1; ty += T) for (let tx = bx0; tx <= bx1; tx += T) {
+    const x1 = Math.min(W - 1, tx + T - 1), y1 = Math.min(H - 1, ty + T - 1);
+    let any = false;
+    for (let y = ty; y <= y1 && !any; y++) for (let x = tx; x <= x1; x++) if (hole[y * W + x]) { any = true; break; }
+    if (any) tiles.push({ x0: tx, y0: ty, x1, y1, done: false });
+  }
+  const f = 3;
+  const tp: number[] = [];
+  const Y = new Float32Array(n);
+  for (let p = 0, i = 0; p < n; p++, i += 4) Y[p] = 0.299 * C[i] + 0.587 * C[i + 1] + 0.114 * C[i + 2];
+  for (let left = tiles.length; left > 0; left--) {
+    let best: Tile | null = null, bk = -1;
+    for (const t of tiles) if (!t.done) {
+      let k = 0, c = 0;
+      const wx0 = Math.max(0, t.x0 - r), wy0 = Math.max(0, t.y0 - r), wx1 = Math.min(W - 1, t.x1 + r), wy1 = Math.min(H - 1, t.y1 + r);
+      for (let y = wy0; y <= wy1; y += 3) for (let x = wx0; x <= wx1; x += 3) { c++; k += known[y * W + x]; }
+      if (k / c > bk) { bk = k / c; best = t; }
+    }
+    const t = best!; t.done = true;
+    const wx0 = Math.max(0, t.x0 - r), wy0 = Math.max(0, t.y0 - r), wx1 = Math.min(W - 1, t.x1 + r), wy1 = Math.min(H - 1, t.y1 + r);
+    tp.length = 0;
+    for (let y = wy0; y <= wy1; y += 2) for (let x = wx0; x <= wx1; x += 2) if (known[y * W + x]) tp.push(y * W + x);
+    if (tp.length < 8) continue;
+    const cost = (d: number, step: number, lim: number) => {
+      let e = 0;
+      for (let i = 0; i < tp.length; i += step) {
+        const p = tp[i] * 4, q = (tp[i] + d) * 4;
+        const a = C[p] - C[q], b = C[p + 1] - C[q + 1], c = C[p + 2] - C[q + 2];
+        e += a * a + b * b + c * c;
+        if (e > lim) return e;
+      }
+      return e;
+    };
+    const coarse = (d: number, lim: number) => {
+      let e = 0;
+      for (let i = 0; i < tp.length; i += 5) { const a = Y[tp[i]] - Y[tp[i] + d]; e += a * a; if (e > lim) return e; }
+      return e;
+    };
+    const okAt = (ox: number, oy: number) => wx0 + ox >= 0 && wy0 + oy >= 0 && wx1 + ox < W && wy1 + oy < H && blk(t.x0 + ox, t.y0 + oy, t.x1 + ox, t.y1 + oy) === 0;
+    let bo: [number, number] | null = null, be = Infinity;
+    // coarse: on the lightness, every fifth template point, every f-th place
+    for (let oy = -RY; oy <= RY; oy += f) for (let ox = -RX; ox <= RX; ox += f) {
+      if ((ox | oy) === 0 || !okAt(ox, oy)) continue;
+      const e = coarse(oy * W + ox, be);
+      if (e < be) { be = e; bo = [ox, oy]; }
+    }
+    if (!bo) continue;
+    let [rx, ry] = bo;
+    be = cost(ry * W + rx, 1, Infinity);
+    for (let oy = bo[1] - f + 1; oy <= bo[1] + f - 1; oy++) for (let ox = bo[0] - f + 1; ox <= bo[0] + f - 1; ox++) {
+      if ((ox === bo[0] && oy === bo[1]) || !okAt(ox, oy)) continue;
+      const e = cost(oy * W + ox, 1, be);
+      if (e < be) { be = e; rx = ox; ry = oy; }
+    }
+    const d = ry * W + rx;
+    for (let y = t.y0; y <= t.y1; y++) for (let x = t.x0; x <= t.x1; x++) {
+      const p = y * W + x;
+      if (known[p]) continue;
+      const i = p * 4, j = (p + d) * 4;
+      C[i] = C[j]; C[i + 1] = C[j + 1]; C[i + 2] = C[j + 2]; Y[p] = Y[p + d];
+      known[p] = 1; filled[p] = 1;
+    }
+  }
+  return filled;
+}
+
+/**
+ * Fills the unknown pixels (known[p] === 0) from the outside in, each from the average of its known
+ * neighbours (known[q] === 1; pixels marked 2 are neither used nor filled). Layer by layer, each pixel
+ * once.
+ */
+function smoothFill(R: Float32Array, G: Float32Array, B: Float32Array, known: Uint8Array, W: number, H: number) {
+  const use = (q: number) => known[q] === 1;
+  let front: number[] = [];
+  const queued = new Uint8Array(W * H);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const p = y * W + x;
+    if (known[p] !== 0) continue;
+    let near = false;
+    for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1) && !near; yy++) for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) if (use(yy * W + xx)) { near = true; break; }
+    if (near) { front.push(p); queued[p] = 1; }
+  }
+  while (front.length) {
+    const done: number[] = [];
+    for (const p of front) {
+      const x = p % W, y = (p - x) / W;
+      let r = 0, g = 0, b = 0, c = 0;
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++) for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) {
+        const q = yy * W + xx;
+        if (use(q)) { r += R[q]; g += G[q]; b += B[q]; c++; }
+      }
+      if (c) { R[p] = r / c; G[p] = g / c; B[p] = b / c; done.push(p); }
+    }
+    for (const p of done) known[p] = 1;
+    const next: number[] = [];
+    for (const p of done) {
+      const x = p % W, y = (p - x) / W;
+      for (let yy = Math.max(0, y - 1); yy <= Math.min(H - 1, y + 1); yy++) for (let xx = Math.max(0, x - 1); xx <= Math.min(W - 1, x + 1); xx++) {
+        const q = yy * W + xx;
+        if (known[q] === 0 && !queued[q]) { queued[q] = 1; next.push(q); }
+      }
+    }
+    front = next;
+  }
 }
 
 /**
@@ -269,7 +453,17 @@ export async function pageCover(pdf: any, src: number, info: { w: number; h: num
     if (sx >= 0 && sy >= 0 && sx < PW && sy < PH) reg.set(px.subarray((sy * PW + sx) * 4, (sy * PW + sx) * 4 + 4), o);
     else { reg[o] = (v >> 16) & 255; reg[o + 1] = (v >> 8) & 255; reg[o + 2] = v & 255; reg[o + 3] = 255; }
   }
-  const img = coverPixels(reg, W, H, m, bg, lineH * k, fg);
+  // the page around it, for a patterned background
+  const reach = ctxReach(lineH * k);
+  const cx0 = Math.max(0, x0 - m - reach.x), cy0 = Math.max(0, y0 - m - reach.y);
+  const cx1 = Math.min(PW, x1 + m + reach.x), cy1 = Math.min(PH, y1 + m + reach.y);
+  let ctx: CoverCtx | undefined;
+  if (cx1 - cx0 >= W && cy1 - cy0 >= H && (cx1 - cx0) * (cy1 - cy0) < 1.2e7) {
+    const CW = cx1 - cx0, CH = cy1 - cy0, cp = new Uint8ClampedArray(CW * CH * 4);
+    for (let y = 0; y < CH; y++) cp.set(px.subarray(((y + cy0) * PW + cx0) * 4, ((y + cy0) * PW + cx1) * 4), y * CW * 4);
+    ctx = { px: cp, W: CW, H: CH, x: x0 - m - cx0, y: y0 - m - cy0 };
+  }
+  const img = coverPixels(reg, W, H, m, bg, lineH * k, fg, ctx);
   const c = document.createElement('canvas');
   c.width = img.width; c.height = img.height;
   c.getContext('2d')!.putImageData(img, 0, 0);
