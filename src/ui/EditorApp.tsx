@@ -21,7 +21,7 @@ const Editor = lazy(() => loadScreens().then((m) => ({ default: m.Editor })));
 const Tools = lazy(() => loadScreens().then((m) => ({ default: m.Tools })));
 const Scanner = lazy(() => loadScreens().then((m) => ({ default: m.Scanner })));
 import { useBackButton } from './back';
-import { useBp, useEdgeColors, useNativeInsets, useTheme, useVisualViewportHeight } from './hooks';
+import { useBp, useNarrow, useEdgeColors, useNativeInsets, useTheme, useVisualViewportHeight } from './hooks';
 import type { M } from '../engine/types';
 
 export type { HostProps };
@@ -92,6 +92,8 @@ function registerServiceWorker() {
   navigator.serviceWorker.register(`${base}sw.js`, { scope: base }).catch(() => null);
 }
 
+type Route = { name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' } | { name: 'scan'; back: 'home' | 'tools'; initial?: string[] };
+
 export default function EditorApp(host: HostProps) {
   // the interface language: changing it re-renders everything below
   useLang();
@@ -103,7 +105,8 @@ export default function EditorApp(host: HostProps) {
   const [openState, setOpenState] = useState<OpenState>({ kind: 'idle' });
   const [busy, setBusy] = useState<BusyMsg | null>(null);
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
-  const [route, setRoute] = useState<{ name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' } | { name: 'scan'; back: 'home' | 'tools'; initial?: string[] }>({ name: 'home' });
+  const narrow = useNarrow();
+  const [route, setRoute] = useState<Route>({ name: 'home' });
   // a tools card asked for a file first: where to land once it is open
   const startAfterOpen = useRef<EditorStart | undefined>(undefined);
   const pending = useRef<{ name: string; bytes: Uint8Array } | null>(null);
@@ -344,7 +347,7 @@ export default function EditorApp(host: HostProps) {
           onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }}
           onScan={() => setRoute({ name: 'scan', back: 'tools' })} />
       ) : (
-        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'}
+        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'} v3={narrow}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
           onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme}
           onRecent={async (d) => {

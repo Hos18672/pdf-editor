@@ -50,11 +50,13 @@ const QUICK: [QuickAction, string, string, string][] = [
   ['tools', 'More tools', 'squares-four:duotone', '#ECEEF3'],
 ];
 
-export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative }: {
+export function Start({ state, onFile, onImport, onPick, onPassword, onTools, onQuick, onRecent, onShareRecent, theme, onTheme, mobile, isNative, v3 }: {
   state: OpenState; onFile: (f: File) => void;
   /** files that aren't PDFs (pictures, Office files, text): turned into one PDF and opened */
   onImport?: (files: File[]) => void; onPick: () => void; onPassword: (pw: string) => void; onTools: () => void;
   onQuick: (q: QuickAction) => void; onRecent: (d: RecentDoc) => void; onShareRecent?: (d: RecentDoc) => void; theme: Theme; onTheme: () => void; mobile: boolean; isNative?: boolean;
+  /** phones and tablets: the v3 home (navy open card, recent row, tool tiles) */
+  v3?: boolean;
 }) {
   const [recent, setRecent] = useState<RecentDoc[]>([]);
   useEffect(() => {
@@ -65,6 +67,7 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
     return () => { alive = false; off(); };
   }, []);
   const [pw, setPw] = useState('');
+  const [showPw, setShowPw] = useState(false);
   const [legal, setLegal] = useState<LegalPage | null>(null);
   // a PDF opens; other files (pictures, Office files) are turned into one first
   const { over, bind: drop } = useFileDrop((f) => { const pdf = f.find(isPdf); if (pdf || !onImport) onFile(pdf ?? f[0]); else onImport(f); });
@@ -130,6 +133,127 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
           <div className="s2-ct"><b>{mobile ? t('Open a PDF') : t('Drop a PDF anywhere')}</b><span>{mobile ? t('From Files, Drive or Downloads') : t('Or paste one with Ctrl+V')}</span></div>
         </div>
         <button className="btn primary xl s2-cta" onClick={(e) => { e.stopPropagation(); onPick(); }}>{t('Choose PDF')}<Icon name="arrow-right:bold" size={18} /></button>
+      </div>
+    );
+  }
+
+  if (v3) {
+    const tiles = mobile ? QUICK.filter(([q]) => q === 'sign' || q === 'fill' || q === 'combine' || q === 'tools') : QUICK;
+    const cls = `start h3${mobile ? ' p' : ' t'}${over ? ' dragging' : ''}`;
+    // opening: the page skeleton with real progress, instead of the home
+    if (state.kind === 'loading') {
+      const pct = Math.round(state.progress * 100);
+      return (
+        <div className={`${cls} h3-opening`} role="status" aria-live="polite">
+          <header className="h3-isl">
+            <span className="h3-ipill"><b>{state.name}</b><small>{t('Opening…')}</small></span>
+          </header>
+          <div className="h3-skel" aria-hidden="true">
+            <i className="t" /><i className="s" /><i /><i className="w" /><i /><i className="s" /><i className="w" /><i /><span className="scan" />
+          </div>
+          <div className="h3-prog">
+            <span className="ring" style={{ ['--p' as any]: Math.max(4, pct) }}><b className="num">{pct}%</b></span>
+            <span className="tx"><b>{t('Opening {name}', { name: state.name })}</b>
+              <small>{state.total ? t('Page {p} of {n}', { p: state.done ?? 0, n: state.total }) + ' · ' + t('matching fonts') : state.detail}</small></span>
+            <span className="bar" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label={t('Opening')}><i style={{ width: `${Math.max(4, pct)}%` }} /></span>
+          </div>
+        </div>
+      );
+    }
+    const sheet = state.kind === 'password' || state.kind === 'error';
+    return (
+      <div className={cls} {...drop}>
+        <div className="h3-main" inert={sheet || undefined}>
+          <header className="h3-nav">
+            <LogoMark size={40} />
+            <span className="h3-brand">{t('Paginka')}</span>
+            <span className="sp" />
+            {!mobile && <button className="h3-round" onClick={onTools} aria-label={t('All tools')} title={t('All tools')}><Icon name="tools" size={19} /></button>}
+            <LangButton round />
+            <ThemeButton theme={theme} onToggle={onTheme} round />
+          </header>
+          <div className="h3-top">
+            <div className="h3-copy">
+              <h1>{t('Edit any PDF.')}<br /><span className="mk">{t('Right here.')}</span></h1>
+              {!mobile && <p className="h3-lead">{isNative ? t('Retype existing text in its original font, sign, fill forms, scan, merge and convert. Offline, on this device.') : t('Retype existing text in its original font, sign, fill forms, scan, merge and convert. All in your browser, all offline.')}</p>}
+              {!mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>{t('Files stay on this device.')}</b> {t('Nothing is uploaded, ever.')}</span></div>}
+            </div>
+            {over ? card : (
+              <div className="h3-card" onClick={onPick}>
+                <div className="h3-sheets" aria-hidden="true"><i className="b" /><i className="f"><em className="t" /><em /><em className="w" /><em className="y" /><em className="s" /></i></div>
+                <div className="h3-ct"><b>{t('Open a PDF')}</b><span>{isNative ? t('From your files, Drive, or share one to this app') : mobile ? t('From Files, Drive or Downloads') : t('From your files, or drop one anywhere')}</span></div>
+                <div className="h3-acts">
+                  <button className="h3-choose" onClick={(e) => { e.stopPropagation(); onPick(); }}>{t('Choose PDF')}<Icon name="arrow-right:bold" size={18} /></button>
+                  <button className="h3-cam" onClick={(e) => { e.stopPropagation(); onQuick('scan'); }} aria-label={t('Scan with camera')} title={t('Scan with camera')}><Icon name="camera" size={22} /></button>
+                </div>
+              </div>
+            )}
+          </div>
+          {!over && recent.length > 0 && (
+            <section className="h3-sec" aria-label={t('Recent documents')}>
+              <div className="h3-sh"><h2>{t('Recent')}</h2><span>{t('Kept on this device only')}</span></div>
+              <div className="h3-rec">
+                {recent.map((d) => (
+                  <div key={d.id} className={`h3-rc${d.hasBytes ? '' : ' off'}`}>
+                    <button className="ro" onClick={() => d.hasBytes && onRecent(d)} disabled={!d.hasBytes} aria-label={t('Open {name}', { name: d.name })}>
+                      <span className="th">{d.thumb ? <img src={d.thumb} alt="" draggable={false} /> : <Icon name="file-pdf:duotone" size={30} />}
+                        {d.kind !== 'opened' && <i className="bd">{d.kind === 'edited' ? t('Edited') : t('Scanned')}</i>}</span>
+                      <b title={d.name}>{d.name.replace(/\.pdf$/i, '')}</b>
+                      <small>{tn(d.pages, '{n} page', '{n} pages')} · {ago(d.at)}</small>
+                    </button>
+                    <span className="ra">
+                      {d.hasBytes && onShareRecent && <button onClick={() => onShareRecent(d)} aria-label={t('Share {name}', { name: d.name })} title={t('Share')}><Icon name="share-network" size={15} /></button>}
+                      <button onClick={() => removeRecent(d.id)} aria-label={t('Remove {name} from the list', { name: d.name })} title={t('Remove from the list')}><Icon name="x" size={14} /></button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          {!over && (
+            <section className="h3-sec" aria-label={t('Quick tools')}>
+              <div className="h3-sh"><h2>{t('Tools')}</h2></div>
+              <div className="h3-tools">
+                {tiles.map(([q, label, icon, bg]) => (
+                  <button key={q} className="h3-tile" onClick={() => onQuick(q)}>
+                    <span style={{ background: bg }}><Icon name={icon} size={22} /></span>{q === 'tools' ? t('All tools') : t(label)}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+          {mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>{t('Files stay on this phone.')}</b> {t('Nothing is uploaded, ever.')}</span></div>}
+          <footer className="h3-foot"><LegalLinks onOpen={setLegal} /></footer>
+        </div>
+        {sheet && (
+          <div className={`scrim${mobile ? ' sheet' : ''} h3-scrim`}>
+            {state.kind === 'password' ? (
+              <form className="modal h3-sheet" role="dialog" aria-modal="true" aria-label={t('This PDF is password-protected')} onSubmit={(e) => { e.preventDefault(); if (pw) onPassword(pw); }}>
+                <div className="grab" />
+                <span className="h3-sic warn"><Icon name="lock-key:fill" size={26} /></span>
+                <h2>{t('This PDF is password-protected')}</h2>
+                <p>{state.wrong ? t('That password didn’t work. Try again.') : t('Enter the password for {name}. It’s checked on this device only.', { name: state.name })}</p>
+                <label className="h3-pw"><span>{t('Password')}</span>
+                  <span className="f"><input className="input" type={showPw ? 'text' : 'password'} value={pw} onChange={(e) => setPw(e.target.value)} autoFocus aria-invalid={state.wrong || undefined} />
+                    <button type="button" className="ibtn" onClick={() => setShowPw((v) => !v)} aria-label={showPw ? t('Hide password') : t('Show password')} aria-pressed={showPw}><Icon name={showPw ? 'eye-slash' : 'eye'} size={20} /></button></span>
+                </label>
+                <div className="h3-sacts">
+                  <button type="button" className="btn outline lg" onClick={onPick}>{t('Choose another file')}</button>
+                  <button className="btn primary lg" type="submit" disabled={!pw}><Icon name="lock-key-open" size={18} />{t('Unlock')}</button>
+                </div>
+              </form>
+            ) : state.kind === 'error' ? (
+              <div className="modal h3-sheet" role="alertdialog" aria-modal="true" aria-label={t('This file couldn’t be opened')}>
+                <div className="grab" />
+                <span className="h3-sic err"><Icon name="warning-circle" size={28} /></span>
+                <h2>{t('This file couldn’t be opened')}</h2>
+                <p>{state.message}</p>
+                <div className="h3-sacts"><button className="btn primary lg" onClick={onPick} autoFocus><Icon name="open" size={18} />{t('Choose another file')}</button></div>
+              </div>
+            ) : null}
+          </div>
+        )}
+        {legal && <LegalSheet page={legal} onClose={() => setLegal(null)} />}
       </div>
     );
   }

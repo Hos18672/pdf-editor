@@ -191,3 +191,14 @@ export function useNativeInsets(get: (() => Promise<{ top: number; bottom: numbe
     return () => { alive = false; clearTimeout(t); window.removeEventListener('resize', again); };
   }, [get]);
 }
+
+/** below 1200px: phones and tablets in either orientation get the touch layout of the home */
+export function useNarrow(): boolean {
+  const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1200);
+  useEffect(() => {
+    const fn = () => setN(window.innerWidth < 1200);
+    window.addEventListener('resize', fn);
+    return () => window.removeEventListener('resize', fn);
+  }, []);
+  return n;
+}
