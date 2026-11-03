@@ -1,4 +1,4 @@
-import { SavedBurst } from './motion';
+import { SavedBurst, useSheetPull } from './motion';
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
 import { css } from './styles';
 import { Icon } from './icons';
@@ -105,6 +105,7 @@ export default function EditorApp(host: HostProps) {
   const [openState, setOpenState] = useState<OpenState>({ kind: 'idle' });
   const [busy, setBusy] = useState<BusyMsg | null>(null);
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
+  useSheetPull();
   const narrow = useNarrow();
   const [route, setRoute] = useState<Route>({ name: 'home' });
   // a tools card asked for a file first: where to land once it is open

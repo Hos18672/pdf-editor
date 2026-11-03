@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import type { PageState } from '../engine/types';
 import { Icon } from './icons';
 import { Thumb } from './Thumb';
@@ -25,13 +25,13 @@ export function Organizer({ pdf, pages, onChange, onDone, onAdd, mobile }: {
   return (
     <div className="org">
       <div className="ohead">
-        <div className="t"><h2>{t('Organize pages')}</h2><p>{mobile ? t('Press and hold a page, then drag it') : t('Drag pages to reorder · changes apply on download')}</p></div>
+        <div className="t"><h2>{t('Organize pages')}</h2><p>{mobile ? <><span className="pm num">{tn(pages.length, '{n} page', '{n} pages')}{sel.size > 0 ? ' · ' + tn(sel.size, '{n} selected', '{n} selected') : ''}</span><span className="ph">{t('Press and hold a page, then drag it')}</span></> : t('Drag pages to reorder · changes apply on download')}</p></div>
         {sel.size > 0 && (
           <div className="selbar" role="toolbar" aria-label={t('Selected pages')}>
-            <span className="num">{sel.size} selected</span>
-            <button className="ibtn" onClick={() => rotate([...sel])} aria-label={t('Rotate selected')}><Icon name="rotate" size={19} /></button>
-            <button className="ibtn danger" onClick={() => remove([...sel])} disabled={sel.size >= pages.length} aria-label={t('Delete selected')}><Icon name="trash" size={19} /></button>
-            <button className="ibtn muted" onClick={() => setSel(new Set())} aria-label={t('Clear selection')}><Icon name="close" size={17} /></button>
+            <span className="num">{tn(sel.size, '{n} selected', '{n} selected')}</span>
+            <button className="ibtn" onClick={() => rotate([...sel])} aria-label={t('Rotate selected')}><Icon name="rotate" size={19} /><span className="lb">{t('Rotate')}</span></button>
+            <button className="ibtn danger" onClick={() => remove([...sel])} disabled={sel.size >= pages.length} aria-label={t('Delete selected')}><Icon name="trash" size={19} /><span className="lb">{t('Delete')}</span></button>
+            <button className="ibtn muted" onClick={() => setSel(new Set())} aria-label={t('Clear selection')}><Icon name="close" size={17} /><span className="lb">{t('Deselect')}</span></button>
           </div>
         )}
         <button className="btn outline lg" onClick={() => {
@@ -81,19 +81,38 @@ function CardBody({ pdf, p, i, mobile, on, grip, only, onToggle, onRotate, onRem
   onToggle?: () => void; onRotate?: () => void; onRemove?: () => void;
 }) {
   const tab = grip ? 0 : -1;
+  const [menu, setMenu] = useState(false);
+  useEffect(() => {
+    if (!menu) return;
+    const off = (e: PointerEvent) => { if (!(e.target as HTMLElement).closest?.('.omenu')) setMenu(false); };
+    window.addEventListener('pointerdown', off);
+    return () => window.removeEventListener('pointerdown', off);
+  }, [menu]);
   return (
     <>
-      <button className="ck" onClick={onToggle} aria-label={`Select page ${i + 1}`} aria-pressed={on} tabIndex={tab}><Icon name="check" size={14} /></button>
+      <button className="ck" onClick={onToggle} aria-label={t('Select page {n}', { n: i + 1 })} aria-pressed={on} tabIndex={tab}><Icon name="check" size={14} /></button>
       <div className="sq" onClick={onToggle}>
         <Thumb pdf={pdf} src={p.src} rotation={p.rotation} size={240} />
+        {mobile && p.rotation ? <span className="rotb num"><Icon name="rotate" size={12} />{p.rotation}°</span> : null}
       </div>
+      {mobile && onRotate && (
+        <span className="omenu">
+          <button className="odots" aria-label={t('Page {n} actions', { n: i + 1 })} aria-haspopup="menu" aria-expanded={menu} onClick={(e) => { e.stopPropagation(); setMenu((v) => !v); }}><Icon name="dots-three:bold" size={18} /></button>
+          {menu && (
+            <span className="opop" role="menu" onPointerDown={(e) => e.stopPropagation()}>
+              <button role="menuitem" onClick={() => { setMenu(false); onRotate(); }}><Icon name="rotate" size={18} />{t('Rotate')}</button>
+              <button role="menuitem" className="danger" disabled={only} onClick={() => { setMenu(false); onRemove?.(); }}><Icon name="trash" size={18} />{t('Delete')}</button>
+            </span>
+          )}
+        </span>
+      )}
       <div className="row">
-        <button className="handle" aria-label={`Move page ${i + 1}`} title={t('Drag to reorder (or press Space, then the arrow keys)')} tabIndex={tab} {...grip}>
+        <button className="handle" aria-label={t('Move page {n}', { n: i + 1 })} title={t('Drag to reorder (or press Space, then the arrow keys)')} tabIndex={tab} {...grip}>
           <Icon name="grip" size={18} />
         </button>
-        <span className="n">{i + 1}{p.src !== i && !mobile ? <span style={{ color: 'var(--muted)', fontWeight: 500 }}> · was {p.src + 1}</span> : null}</span>
-        <button className="ibtn" title={t('Rotate')} aria-label={`Rotate page ${i + 1}`} tabIndex={tab} onClick={onRotate}><Icon name="rotate" size={19} /></button>
-        <button className="ibtn danger" title={t('Delete')} aria-label={`Delete page ${i + 1}`} tabIndex={tab} disabled={only} onClick={onRemove}><Icon name="trash" size={19} /></button>
+        <span className="n">{i + 1}{p.src !== i && !mobile ? <span style={{ color: 'var(--muted)', fontWeight: 500 }}> · {t('was {n}', { n: p.src + 1 })}</span> : null}</span>
+        <button className="ibtn" title={t('Rotate')} aria-label={t('Rotate page {n}', { n: i + 1 })} tabIndex={tab} onClick={onRotate}><Icon name="rotate" size={19} /></button>
+        <button className="ibtn danger" title={t('Delete')} aria-label={t('Delete page {n}', { n: i + 1 })} tabIndex={tab} disabled={only} onClick={onRemove}><Icon name="trash" size={19} /></button>
       </div>
     </>
   );

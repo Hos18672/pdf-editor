@@ -116,22 +116,20 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
     { t: 'pages', label: 'Pages', icon: 'squares-four', key: 'P' }] },
 ];
 const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
-/** phone: every tool in the bottom bar, most used first (it scrolls sideways) */
-const DOCK: RailT[] = ['edit', 'text', 'sign', 'markup', 'draw', 'shapes', 'stamp', 'note', 'whiteout', 'remove', 'redact', 'image', 'link', 'fill', 'pages'];
 const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line', 'arrow'];
 /** highlight, underline, strike-through: one rail button, picked in its flyout */
 const MARK_TOOLS: Tool[] = ['highlight', 'underline', 'strike'];
 const MARK_TILES: [Tool, string, string][] = [['highlight', 'Highlight', 'highlighter'], ['underline', 'Underline', 'text-underline'], ['strike', 'Strike', 'text-strikethrough']];
 
-// phone dock: the 4 most recently used tools (slots stay put; a new tool replaces the least recent)
+// phone tray: the 5 most used tools (slots stay put; a tool picked from More replaces the least recent)
 const RECENT_KEY = 'pe-recent-tools';
 type Recent = { slots: RailT[]; used: Partial<Record<RailT, number>> };
 const readRecent = (): Recent => {
   try {
     const v = JSON.parse(localStorage.getItem(RECENT_KEY) ?? 'null');
-    if (v && Array.isArray(v.slots) && v.slots.length === 4 && v.slots.every((t: string) => RAIL.some((r) => r.t === t))) return v;
+    if (v && Array.isArray(v.slots) && v.slots.length === 5 && v.slots.every((t: string) => RAIL.some((r) => r.t === t))) return v;
   } catch { /* storage unavailable */ }
-  return { slots: ['edit', 'text', 'markup', 'sign'], used: {} };
+  return { slots: ['edit', 'text', 'sign', 'markup', 'draw'], used: {} };
 };
 const useRecent = (r: Recent, t: RailT): Recent => {
   const used = { ...r.used, [t]: Date.now() };
@@ -183,12 +181,13 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const [privOpen, setPrivOpen] = useState(start === 'privacy');
   const [found, setFound] = useState<{ list: Hit[]; cur: number; priv: boolean }>({ list: [], cur: -1, priv: false });
   const [strip, setStripRaw] = useState<boolean>(() => {
-    if (bp !== 'desktop' && bp !== 'large') return false;
+    // tablets and up: the page rail stays open (remembered); phones open it on demand
+    if (bp === 'mobile') return false;
     try { return localStorage.getItem('pe-strip') !== '0'; } catch { return true; }
   });
   const setStrip = (v: boolean | ((x: boolean) => boolean)) => setStripRaw((cur) => {
     const n = typeof v === 'function' ? v(cur) : v;
-    if (bp === 'desktop' || bp === 'large') { try { localStorage.setItem('pe-strip', n ? '1' : '0'); } catch { /* fine */ } }
+    if (bp !== 'mobile') { try { localStorage.setItem('pe-strip', n ? '1' : '0'); } catch { /* fine */ } }
     return n;
   });
   // phone: the bottom bar keeps the chosen tool in view
@@ -206,6 +205,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   // tool flyout beside the rail (tablet / desktop) or above the dock (phone, shapes only)
   const [flyout, setFlyout] = useState<{ t: RailT; top: number } | null>(null);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [moreQ, setMoreQ] = useState('');
+  useEffect(() => { if (!moreOpen) setMoreQ(''); }, [moreOpen]);
   const [askClose, setAskClose] = useState(false);
   const savedSnap = useRef<unknown>(null); // what the last download contained: closing then needs no question
   const [recent, setRecent] = useState<Recent>(readRecent);
@@ -1787,7 +1788,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             <button className="fname fbtn" title={t('Rename, share, print')} onClick={() => setFileMenu(true)} aria-haspopup="dialog">
               <span>{docName ? docName + '.pdf' : file.name}</span><Icon name="caret-down:bold" size={13} />
             </button>
-            <div className="fmeta"><span>{tn(snap.pages.length, '{n} page', '{n} pages')}</span>
+            <div className="fmeta"><span className={mobile ? 'num' : undefined}>{mobile && snap.pages.length > 1 ? t('Page {p} of {n}', { p: Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1), n: snap.pages.length }) : tn(snap.pages.length, '{n} page', '{n} pages')}</span>
               {editCount > 0 && <span className="chg">{tn(editCount, '{n} change', '{n} changes')}</span>}</div>
           </div>
         </div>
@@ -1928,7 +1929,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           )}
         </div>
         {strip && view === 'doc' && (
-          <PageStrip pages={snap.pages} cur={curPage} overlay={!desk}
+          <PageStrip pages={snap.pages} cur={curPage} overlay={mobile}
             pdfFor={(src) => (preview && preview.keys[src] !== undefined ? preview.pdf : pdf)}
             onGo={(src) => { goToPage(src); if (mobile) setStrip(false); }} onClose={() => setStrip(false)}
             onOrganize={() => { setStrip(false); railClick(RAIL.find((r) => r.t === 'pages')!); }}
@@ -1938,6 +1939,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           <button className="pgtab" onClick={() => setStrip(true)} aria-label={t('Show all pages')}>
             <Icon name="sidebar-simple" size={17} /><b>{Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1)}</b>/{snap.pages.length}
           </button>
+        )}
+        {mobile && !strip && view === 'doc' && !mobileEditing && !fieldNav && snap.pages.length > 1 && (
+          <span className="scrub" aria-hidden><i style={{ height: `${100 / snap.pages.length}%`, top: `${(Math.max(0, snap.pages.findIndex((p) => p.src === curPage)) / snap.pages.length) * 100}%` }} /></span>
         )}
         {desk && view === 'doc' && (
           <aside className="side" aria-label={t('Properties')}>
@@ -1985,7 +1989,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           <button onClick={() => { setMoving(null); setSelected(null); }}>{t('Done')}</button>
         </div>
       )}
-      {mobile && mobileEditing && (
+      {mobileEditing && (
         <SlimBar open={slimOpen} onOpen={setSlimOpen} onDone={() => (document.activeElement as HTMLElement | null)?.blur?.()}
           run={selRun && editing === selRun.key ? { label: fontLabel(fonts[selRun.fontName]), css: fonts[selRun.fontName]?.cssFallback,
             size: selRun.region.height * (snap.edits[selRun.key]?.sizeScale ?? 1), key: selRun.key,
@@ -2002,9 +2006,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       {mobile && !mobileEditing && !(fieldNav) && (
         <nav className="dock3" aria-label={t('Tools')}>
           <div className="dk-scroll" ref={dockRef}>
-            {DOCK.map((dt) => {
+            {recent.slots.map((dt) => {
               const r = RAIL.find((x) => x.t === dt)!;
-              const on = railActive(r);
+              // a selected signature lifts Sign; the tool underneath stays down so one tool is in hand
+              const on = railActive(r) && !(r.t === tool && r.t !== 'sign' && selObj?.type === 'signature');
               return (
                 <button key={r.t} className={`dk3${on ? ' on' : ''}`} aria-pressed={on} onClick={() => railClick(r)} data-t={r.t}>
                   <span className="ic"><Icon name={r.icon} size={22} weight={on ? 'fill' : 'regular'} /></span>{t(r.label)}
@@ -2027,7 +2032,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
               <LangButton />
               <ThemeButton theme={theme} onToggle={onTheme} />
               <button className="ibtn round" onClick={() => setMoreOpen(false)} aria-label={t('Close')}><Icon name="x:bold" size={18} /></button></div>
-            {GROUPS.map((g) => (
+            <label className="tsearch"><Icon name="magnifying-glass" size={18} />
+              <input value={moreQ} onChange={(e) => setMoreQ(e.target.value)} placeholder={t('Search tools')} aria-label={t('Search tools')} autoComplete="off" spellCheck={false} />
+              {moreQ && <button className="ibtn" onClick={() => setMoreQ('')} aria-label={t('Clear search')}><Icon name="x:bold" size={14} /></button>}</label>
+            {GROUPS.map((g) => ({ ...g, items: g.items.filter((r) => toolMatch(t(r.label) + ' ' + r.label + ' ' + r.t, moreQ)) })).filter((g) => g.items.length).map((g) => (
               <div key={g.name} className="tsg">
                 <span className="kicker">{t(g.name)}</span>
                 <div className="tiles">
@@ -2043,13 +2051,15 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
                 </div>
               </div>
             ))}
-            <div className="tsg">
-              <span className="kicker">{t('Check')}</span>
-              <div className="tiles">
-                <button className="tile" onClick={() => { setMoreOpen(false); setFindOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="magnifying-glass" size={21} weight="duotone" /></span>{t('Find')}</button>
-                <button className="tile" onClick={() => { setMoreOpen(false); setPrivOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="shield-check" size={21} weight="duotone" /></span>{t('Privacy')}</button>
+            {(toolMatch(t('Find') + ' find search', moreQ) || toolMatch(t('Privacy') + ' privacy check personal data', moreQ)) && (
+              <div className="tsg">
+                <span className="kicker">{t('Check')}</span>
+                <div className="tiles">
+                  {toolMatch(t('Find') + ' find search', moreQ) && <button className="tile" onClick={() => { setMoreOpen(false); setFindOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="magnifying-glass" size={21} weight="duotone" /></span>{t('Find')}</button>}
+                  {toolMatch(t('Privacy') + ' privacy check personal data', moreQ) && <button className="tile" onClick={() => { setMoreOpen(false); setPrivOpen(true); }}><span className="chip" style={{ background: 'var(--tint-change)' }}><Icon name="shield-check" size={21} weight="duotone" /></span>{t('Privacy')}</button>}
+                </div>
               </div>
-            </div>
+            )}
             <button className="more-tools" onClick={() => { setMoreOpen(false); onTools(); }}>{t('More tools: compress, password, split…')}<Icon name="right" size={16} /></button>
           </div>
         </>
@@ -2230,7 +2240,7 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, to
         {obj && <Stepper soft value={selSize ?? obj.size} min={selSize !== null ? 2 : 4} max={200} label={selSize !== null ? t('size of the selected letters') : t('size')}
           onChange={(size) => { if (selSize !== null && lineEditor()?.setSelSize(size)) return; onObj({ size }); }} />}
         <button className="cdot" onClick={onToggle} aria-label={t('Colour')}><i style={{ background: run?.color ?? obj?.color }} /></button>
-        <button className="ibtn muted" onClick={onToggle} aria-label={open ? t('Fewer options') : t('More options')} aria-expanded={open}><Icon name={open ? 'down' : 'up'} size={20} /></button>
+        <button className="ibtn muted" onClick={onToggle} aria-label={open ? t('Fewer options') : t('More options')} aria-expanded={open}><Icon name={open ? 'x:bold' : 'dots-three:bold'} size={20} /></button>
         <div className="sp" />
         <button className="btn primary" onClick={onDone}>{t('Done')}</button>
       </div>
@@ -2317,4 +2327,10 @@ function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMar
       <button className="btn primary lg block" onClick={onDownload}><Icon name="download" size={18} />{t('Download filled PDF')}</button>
     </div>
   );
+}
+
+/** the All tools search: every word typed appears in the tool's name or keywords */
+function toolMatch(hay: string, q: string) {
+  const h = hay.toLowerCase();
+  return q.trim().toLowerCase().split(/\s+/).filter(Boolean).every((w) => h.includes(w));
 }
