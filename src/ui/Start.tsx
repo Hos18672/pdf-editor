@@ -3,7 +3,7 @@ import { Icon } from './icons';
 import { LegalLinks, LegalSheet, LEGAL_PAGES, legalUrl, type LegalPage } from './Legal';
 import { isPdf, useFileDrop } from './drop';
 import { appBase } from './assets';
-import type { Theme } from './hooks';
+import { useFitLabels, type Theme } from './hooks';
 import { ago, listRecent, onRecentChange, removeRecent, type RecentDoc } from './recent';
 import { t, tn, useLang } from './i18n';
 import { useBack } from './back';
@@ -503,6 +503,7 @@ function HomeMenu({ lang, setLang, theme, onTheme, onLegal, onClose }: {
 export function BottomNav({ active, onHome, onFiles, onOpen, onScan, onTools }: {
   active: 'home' | 'files' | 'tools'; onHome: () => void; onFiles: () => void; onOpen: () => void; onScan: () => void; onTools: () => void;
 }) {
+  const fit = useFitLabels<HTMLElement>();
   const item = (k: string, label: string, icon: string, go: () => void) => {
     const on = active === k;
     return (
@@ -513,7 +514,7 @@ export function BottomNav({ active, onHome, onFiles, onOpen, onScan, onTools }: 
   };
   return (<>
     <div className="bnav-fade" aria-hidden="true" />
-    <nav className="bnav" aria-label={t('Main')}>
+    <nav className="bnav" aria-label={t('Main')} ref={fit}>
       {item('home', t('Home|nav'), 'house', onHome)}
       {item('files', t('Files'), 'files', onFiles)}
       <button className="bn-open" onClick={onOpen} aria-label={t('Open a PDF')} title={t('Open a PDF')}><Icon name="plus:bold" size={26} /></button>

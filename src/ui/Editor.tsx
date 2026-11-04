@@ -37,7 +37,7 @@ import { docFontOf, plainFontName, matchFontBytes } from './textFonts';
 import { useLineSelSize, lineEditor } from './lineEdit';
 import type { FontInfo, TextRun } from '../engine/pdfText';
 import type { Bp, Theme } from './hooks';
-import { setSoftKeyboard, safeTop } from './hooks';
+import { setSoftKeyboard, safeTop, useFitLabels } from './hooks';
 import { ThemeButton, LangButton } from './Start';
 import { t, tn, getLang } from './i18n';
 
@@ -195,6 +195,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   });
   // phone: the bottom bar keeps the chosen tool in view
   const dockRef = useRef<HTMLDivElement>(null);
+  const fitDock = useFitLabels<HTMLElement>();
   const [zoom, setZoom] = useState(1);
   const [pageData, setPageData] = useState<Record<number, PageData>>({});
   const [fonts, setFonts] = useState<Record<string, FontInfo>>({});
@@ -2007,7 +2008,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         </SlimBar>
       )}
       {mobile && !mobileEditing && !(fieldNav) && (
-        <nav className="dock3" aria-label={t('Tools')}>
+        <nav className="dock3" aria-label={t('Tools')} ref={fitDock}>
           <div className="dk-scroll" ref={dockRef}>
             {recent.slots.map((dt) => {
               const r = RAIL.find((x) => x.t === dt)!;

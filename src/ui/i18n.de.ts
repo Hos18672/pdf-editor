@@ -1137,7 +1137,7 @@ export const DE: Record<string, string> = {
   "Home|nav": "Start",
   "Edit|tray": "Ändern",
   "Sign|tray": "Signieren",
-  "Highlight|tray": "Markieren",
+  "Highlight|tray": "Marker",
   "Menu": "Menü",
   "Language": "Sprache",
   "Appearance": "Darstellung",
