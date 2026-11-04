@@ -1143,4 +1143,5 @@ export const DE: Record<string, string> = {
   "Appearance": "Darstellung",
   "Light|theme": "Hell",
   "Dark|theme": "Dunkel",
+  "Tools|nav": "Tools",
 };

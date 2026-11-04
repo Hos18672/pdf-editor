@@ -2273,4 +2273,13 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 .dnd-lift > .ocard.m { padding: 0; background: transparent; box-shadow: none; transform: rotate(-4deg) scale(1.04); }
 .dnd-lift > .ocard.m .sq canvas { box-shadow: 0 0 0 2px var(--sel), 0 28px 56px rgba(20,23,46,.3); }
 :root[data-theme="dark"] .dnd-lift > .ocard.m { box-shadow: none; }
+/* home polish: content fades out under the bottom bar, a smaller headline once there is a file, aligned hero card */
+.bnav-fade { position: fixed; left: 0; right: 0; bottom: 0; z-index: 29; height: calc(118px + var(--safe-b)); pointer-events: none; background: linear-gradient(rgba(0,0,0,0), var(--desk) 58%); animation: pe-fade .3s ease-out both; }
+body:has(.scrim, .legal-sheet, .sheet-scrim) .bnav-fade { display: none; }
+.hx-main { padding-bottom: calc(126px + var(--safe-b)); }
+.hx-h1.sm { font-size: 28px; letter-spacing: -.04em; }
+:root[lang="de"] .hx-h1.sm { font-size: min(27px, 7vw); }
+.hx-hero.cont::after { display: none; }
+.hx-hero.cont .hx-doc b { font-size: 18px; line-height: 1.2; }
+.hx-hero.cont .hx-acts > button { flex: 1 1 auto; min-width: 0; justify-content: center; white-space: nowrap; }
 `;

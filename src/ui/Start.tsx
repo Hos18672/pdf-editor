@@ -360,6 +360,7 @@ function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent,
   const [menu, setMenu] = useState(false);
   const [lang, setLang] = useLang();
   const last = recent.find((d) => d.hasBytes);
+  const rest = recent.filter((d) => d !== last);
   const row = (d: RecentDoc) => (
     <div key={d.id} className={`hx-row${d.hasBytes ? '' : ' off'}`}>
       <button className="ro" onClick={() => d.hasBytes && onRecent(d)} disabled={!d.hasBytes} aria-label={t('Open {name}', { name: d.name })}>
@@ -406,14 +407,14 @@ function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent,
           </>
         ) : (
           <>
-            <h1 className="hx-h1">{t('Edit any PDF.')}<br /><span className="mk">{t('Right here.')}</span></h1>
+            <h1 className={`hx-h1${last ? ' sm' : ''}`}>{t('Edit any PDF.')}<br /><span className="mk">{t('Right here.')}</span></h1>
             {over ? card : last ? (
               <div className="hx-hero cont">
                 <button className="hx-doc" onClick={() => onRecent(last)} aria-label={t('Open {name}', { name: last.name })}>
                   <span className="th">{last.thumb ? <img src={last.thumb} alt="" draggable={false} /> : <Icon name="file-pdf:duotone" size={30} />}</span>
                   <span className="tx">
                     <small>{t('Continue editing')}</small>
-                    <b>{last.name.replace(/\.pdf$/i, '')}</b>
+                    <b>{last.name.replace(/\.pdf$/i, '').replace(/([-_.])/g, '$1\u200b')}</b>
                     <span className="num">{tn(last.pages, '{n} page', '{n} pages')} · {ago(last.at)}</span>
                   </span>
                 </button>
@@ -444,10 +445,10 @@ function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent,
                 </div>
               </section>
             )}
-            {!over && recent.length > 0 && (
+            {!over && rest.length > 0 && (
               <section className="hx-sec" aria-label={t('Recent documents')}>
-                <h2>{t('Recent')}{onTab && recent.length > 2 && <button className="hx-all" onClick={() => onTab('files')}>{t('See all')}<Icon name="right" size={14} /></button>}</h2>
-                <div className="hx-list">{recent.slice(0, 2).map(row)}</div>
+                <h2>{t('Recent')}{onTab && rest.length > 2 && <button className="hx-all" onClick={() => onTab('files')}>{t('See all')}<Icon name="right" size={14} /></button>}</h2>
+                <div className="hx-list">{rest.slice(0, 2).map(row)}</div>
               </section>
             )}
             {!over && <p className="hx-priv"><Icon name="lock-simple:fill" size={14} /><span><b>{t('Files stay on this phone.')}</b> {t('Nothing is uploaded, ever.')}</span></p>}
@@ -510,13 +511,15 @@ export function BottomNav({ active, onHome, onFiles, onOpen, onScan, onTools }: 
       </button>
     );
   };
-  return (
+  return (<>
+    <div className="bnav-fade" aria-hidden="true" />
     <nav className="bnav" aria-label={t('Main')}>
       {item('home', t('Home|nav'), 'house', onHome)}
       {item('files', t('Files'), 'files', onFiles)}
       <button className="bn-open" onClick={onOpen} aria-label={t('Open a PDF')} title={t('Open a PDF')}><Icon name="plus:bold" size={26} /></button>
       {item('scan', t('Scan'), 'scan', onScan)}
-      {item('tools', t('Tools'), 'squares-four', onTools)}
+      {item('tools', t('Tools|nav'), 'squares-four', onTools)}
     </nav>
+  </>
   );
 }
