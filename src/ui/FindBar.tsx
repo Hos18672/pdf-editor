@@ -68,6 +68,15 @@ export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile, onReplac
     const n = (cur + d + hits.length) % hits.length;
     setCur(n); onHits(hits, n); onGo(hits[n]);
   };
+  // phones: matches, arrows and black-out get their own row once there is a query, so the field keeps its width
+  const nav = (
+    <>
+      <span className="fcount" aria-live="polite">{busy ? '…' : q.trim() ? (hits.length ? `${cur + 1}/${hits.length}` : '0') : ''}</span>
+      <button className="ibtn" onClick={() => step(-1)} disabled={!hits.length} aria-label={t('Previous match')}><Icon name="caret-up:bold" size={16} /></button>
+      <button className="ibtn" onClick={() => step(1)} disabled={!hits.length} aria-label={t('Next match')}><Icon name="caret-down:bold" size={16} /></button>
+      <button className="ibtn rd" onClick={() => onRedact(hits)} disabled={!hits.length} aria-label={t('Black out all matches')} title={t('Black out all matches (redact)')}><Icon name="eye-slash" size={18} /></button>
+    </>
+  );
   return (
     <div ref={bar} className={`findbar${mobile ? ' m' : ''}${repl ? ' repl' : ''}`} role="search" style={place}>
       <div className="frow">
@@ -75,12 +84,10 @@ export function FindBar({ doc, onHits, onGo, onRedact, onClose, mobile, onReplac
       <Icon name="magnifying-glass" size={18} />
       <input ref={input} value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('Find in document')} aria-label={t('Find in document')}
         onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') step(e.shiftKey ? -1 : 1); if (e.key === 'Escape') onClose(); }} />
-      <span className="fcount" aria-live="polite">{busy ? '…' : q.trim() ? (hits.length ? `${cur + 1}/${hits.length}` : '0') : ''}</span>
-      <button className="ibtn" onClick={() => step(-1)} disabled={!hits.length} aria-label={t('Previous match')}><Icon name="caret-up:bold" size={16} /></button>
-      <button className="ibtn" onClick={() => step(1)} disabled={!hits.length} aria-label={t('Next match')}><Icon name="caret-down:bold" size={16} /></button>
-      <button className="ibtn rd" onClick={() => onRedact(hits)} disabled={!hits.length} aria-label={t('Black out all matches')} title={t('Black out all matches (redact)')}><Icon name="eye-slash" size={18} /></button>
+      {!mobile && nav}
       <button className="ibtn" onClick={onClose} aria-label={t('Close search')}><Icon name="close" size={17} /></button>
       </div>
+      {mobile && q.trim() && <div className="frow nrow">{nav}</div>}
       {repl && onReplace && (
         <div className="frow rrow">
           <Icon name="swap" size={18} />

@@ -2308,4 +2308,46 @@ body:has(.scrim, .legal-sheet, .sheet-scrim) .bnav-fade { display: none; }
 .bp-mobile .pgtab { height: 28px; min-width: 46px; padding: 0 10px; gap: 0; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.7); }
 .bp-mobile .pgtab b { margin-right: 1px; font-weight: 700; }
 :root[data-theme="dark"] .bp-mobile .pgtab { color: color-mix(in srgb, var(--on-ink) 70%, transparent); }
+/* phones: search bar is one clean island (the .frow name is shared with the Combine list) */
+.findbar.m { padding: 0 4px 0 6px; }
+.findbar.m .frow { gap: 2px; padding: 0; background: none; box-shadow: none; border-radius: 0; user-select: auto; -webkit-user-select: auto; }
+.findbar.m .frow:first-child > svg { display: block; flex: none; color: var(--muted); margin-left: 2px; }
+.findbar.m input { padding: 0 8px; }
+.findbar.m input:focus-visible { outline: none; }
+.findbar.m .ibtn { width: 40px; height: 40px; }
+.findbar.m .nrow { height: 46px; border-top: 1px solid var(--line); padding-left: 12px; animation: pe-in .18s var(--ease); }
+.findbar.m .nrow .fcount { flex: 1; min-width: 0; text-align: left; font-size: 13px; color: var(--muted); }
+/* phones: picture-page card, compact and edge-aligned with the other islands */
+.bp-mobile .ocrbar { width: calc(100% - 24px); gap: 10px; padding: 10px 10px 10px 12px; border-radius: 20px; }
+.bp-mobile .ocrbar .oi { width: 36px; height: 36px; border-radius: 12px; align-self: flex-start; }
+.bp-mobile .ocrbar .ot { padding-right: 30px; gap: 1px; }
+.bp-mobile .ocrbar .ot b { font-size: 14px; line-height: 1.3; }
+.bp-mobile .ocrbar .ot span { font-size: 12.5px; line-height: 1.38; }
+.bp-mobile .ocrbar .x { top: 4px; right: 4px; }
+/* phones: fill strip is a whole island; marks live in their own row (no sideways scrolling) */
+.bp-mobile .slimbar.fillfloat { border-radius: 22px; overflow: hidden; padding-bottom: 0; }
+.bp-mobile .fillfloat .row { padding: 6px; gap: 6px; }
+.bp-mobile .fillfloat .row > .ibtn { width: 44px; height: 44px; border-radius: 16px; background: var(--surface-2); }
+.bp-mobile .fillfloat .fgo { flex: 1 1 auto; min-width: 0; height: 44px; justify-content: center; gap: 8px; padding: 0 8px 0 14px; border-radius: 16px; }
+.bp-mobile .fillfloat .fgo .fl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-mobile .fillfloat .fgo .num { flex: none; height: 24px; padding: 0 8px; border-radius: 12px; display: inline-flex; align-items: center; background: rgba(255,255,255,.16); color: inherit; font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bp-mobile .fillfloat .mtog { gap: 1px; }
+.bp-mobile .fillfloat .mrow > .mk { flex: 1 1 0; width: auto; min-width: 0; }
+.bp-mobile .fillfloat .mrow > .back { background: transparent; color: var(--muted); }
+.bp-mobile .fillfloat .row > .ibtn.on { background: #FFE14D; color: #1E2559; box-shadow: 0 4px 12px rgba(224,180,0,.3); }
+:root[data-theme="dark"] .bp-mobile .fillfloat .fgo .num { background: rgba(0,0,0,.14); }
+:root[data-theme="dark"] .bp-mobile .fillfloat .row > .ibtn.on { box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+/* phones: a toast never covers the fill strip */
+body:has(.bp-mobile .fillfloat) .toast { bottom: calc(166px + var(--safe-b)); }
+/* tools on phones/tablets: a long file name ellipsizes instead of widening the cards past the screen */
+@media (max-width: 1199px) { .cmp-pick { grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); } }
+@media (max-width: 719px) { .cmp-pick { grid-template-columns: minmax(0, 1fr); } }
+/* phones: top islands are solid, so page text never shows through them */
+.bp-mobile .topbar.float > .ibtn:not(.primary), .bp-mobile .topbar.float .group .ibtn, .bp-mobile .topbar.float .doc { background: var(--surface); }
+:root[data-theme="dark"] .bp-mobile .topbar.float > .ibtn:not(.primary), :root[data-theme="dark"] .bp-mobile .topbar.float .group .ibtn, :root[data-theme="dark"] .bp-mobile .topbar.float .doc { background: #1C1F2C; }
+.bp-mobile .fillfloat .mrow > .back { width: 36px; }
+/* phones: the + after the last page in a row stays on screen */
+@media (max-width: 599px) { .pgrid .cells { padding-right: 14px; } }
+.bp-mobile .fillfloat .row > .mtog.wide { flex: 1 1 auto; width: auto; min-width: 0; gap: 8px; padding: 0 14px; font-weight: 650; font-size: 14px; }
+.bp-mobile .fillfloat .mtog.wide span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 `;

@@ -1756,6 +1756,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const panel = selRun ? runProps(false) : selObj ? objProps(false) : tool === 'fill' ? fillPanel
     : null; // tool options live in the rail flyout
 
+  // phones: the search bar takes the picture card's place, and the page pill steps aside for either (the title card already says the page)
+  const ocrCard = pictureOnly.length > 0 && !ocrHidden && view === 'doc' && !(mobile && findOpen);
   const mobileEditing = typer && editing && (editing.includes(':') || snap.objects.find((o) => o.id === editing)?.type === 'text');
   const fieldNav = !desk && tool === 'fill' && activeField && fillable.length > 0;
   useEffect(() => {
@@ -1900,7 +1902,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             <Organizer pdf={pdf} pages={snap.pages} mobile={mobile} onDone={() => setView('doc')} onAdd={(n) => setAddAfter(n)}
               onChange={(pages) => commit((s) => ({ ...s, pages }))} />
           )}
-          {pictureOnly.length > 0 && !ocrHidden && view === 'doc' && (
+          {ocrCard && (
             <div className="ocrbar" role="region" aria-label={t('Text recognition')}>
               <span className="oi"><Icon name="text-t:duotone" size={22} /></span>
               <div className="ot">
@@ -1939,7 +1941,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             onOrganize={() => { setStrip(false); railClick(RAIL.find((r) => r.t === 'pages')!); }}
             onAdd={onAddPages ? () => setAddAfter(Math.max(0, snap.pages.findIndex((p) => p.src === curPage)) + 1) : undefined} />
         )}
-        {!desk && !strip && view === 'doc' && !mobileEditing && !fieldNav && (
+        {!desk && !strip && view === 'doc' && !mobileEditing && !fieldNav && !(mobile && (ocrCard || findOpen)) && (
           <button className="pgtab" onClick={() => setStrip(true)} aria-label={t('Show all pages')}>
             <Icon name="sidebar-simple" size={17} /><b>{Math.max(1, snap.pages.findIndex((p) => p.src === curPage) + 1)}</b>/{snap.pages.length}
           </button>
@@ -2253,20 +2255,33 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, to
 }
 
 function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill, onCheck }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void; onAutofill: () => void; onCheck: () => void }) {
+  // two calm rows instead of one that scrolls sideways: fields first, the five marks one tap away
+  const [marks, setMarks] = useState(false);
+  const armed = MARKS.find(([m]) => m === mark);
   return (
     <div className="slimbar fillfloat">
-      <div className="row" style={{ overflowX: 'auto' }}>
-        <button className="ibtn af-mini" style={{ width: 44, height: 44 }} onClick={onAutofill} aria-label={t('Fill in with my details')} title={t('Fill in with my details')}><Icon name="magic-wand:duotone" size={21} /></button>
-        <button className="ibtn rc-mini" style={{ width: 44, height: 44 }} onClick={onCheck} aria-label={t('Ready to send?')} title={t('Ready to send?')}><Icon name="seal-check:duotone" size={21} /></button>
-        {fields > 0 && <button className="btn primary" onClick={onStart}>{tn(fields, 'Fill {n} field', 'Fill {n} fields')}</button>}
-        {fields > 0 && <span className="label num" style={{ whiteSpace: 'nowrap' }}>{filled}/{fields}</span>}
-        <div className="sp" />
-        {MARKS.map(([m, ic, label]) => (
-          <button key={m} className={`ibtn${mark === m ? ' primary' : ''}`} style={mark === m ? { width: 44, height: 44 } : { width: 44, height: 44 }} onClick={() => onMark(m)} aria-label={t('Place {m}', { m: t(label) })} aria-pressed={mark === m}>
-            <Icon name={ic} size={19} />
+      {marks ? (
+        <div className="row mrow">
+          <button className="ibtn back" onClick={() => { if (mark) onMark(mark); setMarks(false); }} aria-label={t('Back')}><Icon name="caret-left" size={18} /></button>
+          {MARKS.map(([m, ic, label]) => (
+            <button key={m} className={`ibtn mk${mark === m ? ' on' : ''}`} onClick={() => onMark(m)} aria-label={t('Place {m}', { m: t(label) })} aria-pressed={mark === m}>
+              <Icon name={ic} size={19} />
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="row">
+          <button className="ibtn af-mini" onClick={onAutofill} aria-label={t('Fill in with my details')} title={t('Fill in with my details')}><Icon name="magic-wand:duotone" size={21} /></button>
+          <button className="ibtn rc-mini" onClick={onCheck} aria-label={t('Ready to send?')} title={t('Ready to send?')}><Icon name="seal-check:duotone" size={21} /></button>
+          {fields > 0 ? (
+            <button className="btn primary fgo" onClick={onStart} aria-label={`${tn(fields, 'Fill {n} field', 'Fill {n} fields')} · ${filled}/${fields}`}><span className="fl">{t('Fill')}</span><span className="label num">{filled}/{fields}</span></button>
+          ) : null}
+          <button className={`ibtn mtog${armed ? ' on' : ''}${fields > 0 ? '' : ' wide'}`} onClick={() => setMarks(true)} aria-label={armed ? t('Place {m}', { m: t(armed[2]) }) : t('Marks')} title={t('Marks')}>
+            {armed ? <Icon name={armed[1]} size={19} /> : <><Icon name="check:bold" size={15} /><Icon name="x:bold" size={13} /></>}
+            {fields === 0 && <span>{armed ? t('Place {m}', { m: t(armed[2]) }) : t('Marks')}</span>}
           </button>
-        ))}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
