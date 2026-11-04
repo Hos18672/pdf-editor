@@ -2292,4 +2292,20 @@ body:has(.scrim, .legal-sheet, .sheet-scrim) .bnav-fade { display: none; }
 :root[data-theme="dark"] .hx-nav .logo3, :root[data-theme="dark"] .h3-nav .logo3 { box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.35); }
 .hx-brand { margin-left: 6px; }
 @media (max-width: 389px) { :root[lang="de"] .bp-mobile .dk3 { font-size: 11px; letter-spacing: -.025em; } :root[lang="de"] .bp-mobile .dk3 .lb { padding: 0; } }
+/* phone bar: the + gets its own column, so the selected tile never runs under it */
+.bnav { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 66px minmax(0, 1fr) minmax(0, 1fr); column-gap: 3px; }
+.bn-open { width: 54px; height: 54px; box-shadow: 0 0 0 4px var(--desk), 0 8px 20px rgba(30,37,89,.32); transform: translateY(-12px); }
+.bn-open:active { transform: translateY(-12px) scale(.93); }
+:root[data-theme="dark"] .bn-open { box-shadow: 0 0 0 4px var(--desk), 0 8px 20px rgba(0,0,0,.45); }
+.bn-it.on { box-shadow: 0 4px 12px rgba(224,180,0,.28); }
+:root[data-theme="dark"] .bn-it.on { box-shadow: 0 4px 12px rgba(0,0,0,.3); }
+/* editor title card: calmer type that fits the 44px card at any text size */
+.bp-mobile .topbar.float .doc { padding: 0 10px 0 14px; }
+.bp-mobile .topbar .names { justify-content: center; gap: 1px; }
+.bp-mobile .topbar .fname { font-size: 13px; font-weight: 650; line-height: 1.2; letter-spacing: -.01em; padding: 0; margin: 0; gap: 3px; }
+.bp-mobile .topbar .fname svg { flex: none; color: var(--muted); }
+.bp-mobile .topbar .fmeta { font-size: 11px; font-weight: 500; line-height: 1.2; }
+.bp-mobile .pgtab { height: 28px; min-width: 46px; padding: 0 10px; gap: 0; font-size: 12px; font-weight: 600; color: rgba(255,255,255,.7); }
+.bp-mobile .pgtab b { margin-right: 1px; font-weight: 700; }
+:root[data-theme="dark"] .bp-mobile .pgtab { color: color-mix(in srgb, var(--on-ink) 70%, transparent); }
 `;
