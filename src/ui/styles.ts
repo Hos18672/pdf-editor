@@ -2282,4 +2282,14 @@ body:has(.scrim, .legal-sheet, .sheet-scrim) .bnav-fade { display: none; }
 .hx-hero.cont::after { display: none; }
 .hx-hero.cont .hx-doc b { font-size: 18px; line-height: 1.2; }
 .hx-hero.cont .hx-acts > button { flex: 1 1 auto; min-width: 0; justify-content: center; white-space: nowrap; }
+/* selected tile nests in its bar: tile radius = bar radius - gap, same gap on every side */
+.bnav { padding: 0 6px; }
+.bn-it { margin: 0; border-radius: 28px; }
+.bp-mobile .dk3, .bp-mobile .dk3.more { border-radius: 22px; }
+/* logo on phones/tablets: the whole mark on a white app-icon tile, same height as the round header buttons (no clipped glow) */
+.hx-nav .logo3, .h3-nav .logo3 { width: 44px !important; height: 44px !important; border-radius: 14px; overflow: hidden; background: #fff; box-shadow: 0 0 0 1px rgba(20,23,46,.06), 0 4px 12px rgba(20,23,46,.10); }
+.hx-nav .logo3 img, .h3-nav .logo3 img { width: 84%; height: 84%; filter: none; }
+:root[data-theme="dark"] .hx-nav .logo3, :root[data-theme="dark"] .h3-nav .logo3 { box-shadow: 0 0 0 1px rgba(255,255,255,.08), 0 4px 12px rgba(0,0,0,.35); }
+.hx-brand { margin-left: 6px; }
+@media (max-width: 389px) { :root[lang="de"] .bp-mobile .dk3 { font-size: 11px; letter-spacing: -.025em; } :root[lang="de"] .bp-mobile .dk3 .lb { padding: 0; } }
 `;
