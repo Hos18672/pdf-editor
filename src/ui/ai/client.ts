@@ -1,14 +1,35 @@
-// The AI assistant's connection: Paginka's own proxy (supabase/functions/ai), which holds the Claude key.
-// Nothing is sent before the user has switched AI on and agreed (see AiConsent); each call sends only
+// The AI assistant's connection. Two ways:
+// - "Paginka AI": the app's own proxy (supabase/functions/ai), which holds a Claude key (only in builds with EXPO_PUBLIC_AI_URL);
+// - the user's own key for Claude, OpenAI or Gemini: the app calls that provider directly; the key stays on this device.
+// Nothing is sent before the user has switched AI on and agreed (see Consent.tsx); each call sends only
 // what that action needs (a line, the form's fields, the document's text or page pictures).
 import { useSyncExternalStore } from 'react';
 import { getLang } from '../i18n';
+import type { Provider } from '../../../supabase/functions/_shared/providers';
+// prompts and provider calls load only when an own-key request is made (keeps the start screen small)
+const loadDirect = () => Promise.all([import('../../../supabase/functions/_shared/prompts'), import('../../../supabase/functions/_shared/providers')]);
 
 export type AiTask = 'rewrite' | 'fill' | 'detect' | 'overview' | 'ask' | 'reply' | 'pii' | 'name';
 export type AiLang = 'en' | 'de' | 'fa';
+export type AiProvider = 'paginka' | Provider;
+
+/** the providers a user can bring a key for */
+export const PROVIDERS: { id: Provider; name: string; company: string; keyUrl: string; prefix: string; fast: string; smart: string }[] = [
+  { id: 'anthropic', name: 'Claude', company: 'Anthropic', keyUrl: 'https://console.anthropic.com/settings/keys', prefix: 'sk-ant-', fast: 'claude-haiku-5-5', smart: 'claude-sonnet-5-5' },
+  { id: 'openai', name: 'ChatGPT', company: 'OpenAI', keyUrl: 'https://platform.openai.com/api-keys', prefix: 'sk-', fast: 'gpt-5.4-mini', smart: 'gpt-5.4-mini' },
+  { id: 'gemini', name: 'Gemini', company: 'Google', keyUrl: 'https://aistudio.google.com/apikey', prefix: 'AI', fast: 'gemini-flash-latest', smart: 'gemini-flash-latest' },
+];
+export const providerInfo = (p: Provider) => PROVIDERS.find((x) => x.id === p)!;
 
 const SET = 'pe.ai', URL_KEY = 'pe.ai.url', DEV = 'pe.ai.device';
-interface Settings { on: boolean; agreed: number }
+interface Settings {
+  on: boolean; agreed: number;
+  provider?: AiProvider;
+  /** the user's own keys, only on this device */
+  keys?: Partial<Record<Provider, string>>;
+  /** a model the user picked instead of the default (one per provider) */
+  models?: Partial<Record<Provider, string>>;
+}
 
 const read = (): Settings => { try { return { on: false, agreed: 0, ...JSON.parse(localStorage.getItem(SET) || '{}') }; } catch { return { on: false, agreed: 0 }; } };
 const write = (s: Settings) => { try { localStorage.setItem(SET, JSON.stringify(s)); } catch { /* storage unavailable */ } emit(); };
@@ -19,11 +40,42 @@ export function aiUrl(): string {
   return (process.env.EXPO_PUBLIC_AI_URL ?? '').trim();
 }
 const appKey = () => (process.env.EXPO_PUBLIC_AI_APP_KEY ?? '').trim();
-/** this build can reach the assistant at all */
-export const aiAvailable = () => !!aiUrl();
-/** the user switched AI on and agreed to send content for AI actions */
-export const aiAllowed = () => { const s = read(); return aiAvailable() && s.on && s.agreed > 0; };
+/** Paginka's own AI is part of this build */
+export const hostedAi = () => !!aiUrl();
+/** AI can be used in this build (always: with Paginka AI or the user's own key) */
+export const aiAvailable = () => true;
+/** the provider in use (or to suggest) */
+export const aiProvider = (s = read()): AiProvider => s.provider === 'paginka' ? (hostedAi() ? 'paginka' : 'anthropic') : s.provider ?? (hostedAi() ? 'paginka' : 'anthropic');
+const ready = (s: Settings) => { const p = aiProvider(s); return p === 'paginka' ? hostedAi() : !!s.keys?.[p]?.trim(); };
+/** the user switched AI on, agreed, and the provider can be reached (Paginka AI, or a key is saved) */
+export const aiAllowed = () => { const s = read(); return s.on && s.agreed > 0 && ready(s); };
 export const setAiOn = (on: boolean) => write({ ...read(), on, agreed: on ? Date.now() : read().agreed });
+/** the saved settings for the setup sheet */
+export const aiSettings = () => { const s = read(); return { provider: aiProvider(s), keys: { ...(s.keys ?? {}) }, models: { ...(s.models ?? {}) }, on: aiAllowed() }; };
+/** save the provider (and its key / model) and switch AI on */
+export function saveAi(provider: AiProvider, key?: string, model?: string) {
+  const s = read();
+  const keys = { ...(s.keys ?? {}) }, models = { ...(s.models ?? {}) };
+  if (provider !== 'paginka') {
+    if (key !== undefined) { if (key.trim()) keys[provider] = key.trim(); else delete keys[provider]; }
+    if (model !== undefined) { if (model.trim()) models[provider] = model.trim(); else delete models[provider]; }
+  }
+  write({ ...s, provider, keys, models, on: true, agreed: Date.now() });
+}
+/** remove a saved key from this device */
+export function forgetKey(p: Provider) {
+  const s = read();
+  const keys = { ...(s.keys ?? {}) };
+  delete keys[p];
+  write({ ...s, keys, on: s.on && (aiProvider(s) !== p) });
+}
+/** the name shown to the user for where AI requests go */
+export function aiTarget(): string {
+  const p = aiProvider();
+  if (p === 'paginka') return 'Claude (Anthropic)';
+  const i = providerInfo(p);
+  return `${i.name} (${i.company})`;
+}
 
 // ----- listeners (settings change, consent asked) -----
 const subs = new Set<() => void>();
@@ -33,9 +85,8 @@ export const onAiChange = (f: () => void) => { subs.add(f); return () => { subs.
 let asker: ((why: string) => Promise<boolean>) | null = null;
 /** the editor's consent sheet registers here */
 export const setConsentAsker = (f: typeof asker) => { asker = f; };
-/** ask once (switch AI on), then run; false when the user said no or AI isn't available */
+/** ask once (switch AI on), then run; false when the user said no */
 export async function ensureAi(why = ''): Promise<boolean> {
-  if (!aiAvailable()) return false;
   if (aiAllowed()) return true;
   return asker ? asker(why) : false;
 }
@@ -49,7 +100,7 @@ function deviceId(): string {
 }
 
 export class AiError extends Error {
-  constructor(public code: 'off' | 'offline' | 'limit' | 'busy' | 'too_big' | 'not_configured' | 'failed' | 'aborted') { super(code); }
+  constructor(public code: 'off' | 'offline' | 'limit' | 'busy' | 'too_big' | 'not_configured' | 'failed' | 'aborted' | 'bad_key' | 'quota' | 'bad_model') { super(code); }
 }
 
 /** the answer language: the app's language unless the user picked another */
@@ -58,6 +109,8 @@ export const answerLang = (): AiLang => (getLang() === 'de' ? 'de' : 'en');
 export async function ai<T = any>(task: AiTask, input: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   if (!aiAllowed()) throw new AiError('off');
   if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new AiError('offline');
+  const p = aiProvider();
+  if (p !== 'paginka') { const s = read(); return direct<T>(p, s.keys![p]!, s.models?.[p], task, input, signal); }
   let res: Response;
   try {
     res = await fetch(aiUrl(), {
@@ -81,8 +134,47 @@ export async function ai<T = any>(task: AiTask, input: Record<string, unknown>, 
   return b.result as T;
 }
 
+/** test address for a provider (end-to-end tests only) */
+const baseFor = (p: Provider) => { try { return localStorage.getItem(`pe.ai.base.${p}`) || undefined; } catch { return undefined; } };
+
+/** the user's own key: the app calls the provider itself (same prompts and answer formats as the proxy) */
+async function direct<T>(p: Provider, key: string, model: string | undefined, task: AiTask, input: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+  let mods;
+  try { mods = await loadDirect(); } catch { throw new AiError('offline'); }
+  const [{ buildSpec }, { callModel, ProviderError }] = mods;
+  let spec;
+  try { spec = buildSpec(task, { today: new Date().toISOString().slice(0, 10), ...input }); } catch { throw new AiError('failed'); }
+  const info = providerInfo(p);
+  try {
+    return await callModel({ provider: p, key, model: model || (spec.model === 'fast' ? info.fast : info.smart), browser: true, signal, base: baseFor(p) }, spec) as T;
+  } catch (e: any) {
+    if (e?.name === 'AbortError') throw new AiError('aborted');
+    if (e instanceof ProviderError) {
+      const d = e.detail.toLowerCase();
+      if (e.status === 401 || e.status === 403 || /api key|api_key|invalid.*key|permission/.test(d) && e.status === 400) throw new AiError('bad_key');
+      if (e.status === 404 || /model.*(not found|does not exist|not supported)|unknown model/.test(d)) throw new AiError('bad_model');
+      if (e.status === 429 || e.status === 402 || /quota|credit|billing|insufficient/.test(d)) throw new AiError('quota');
+      if (e.status === 413 || /too long|too large|maximum context|context length|token/.test(d) && e.status === 400) throw new AiError('too_big');
+      if (e.status >= 500) throw new AiError('busy');
+      throw new AiError('failed');
+    }
+    throw new AiError('offline');
+  }
+}
+
+/** check a key with a tiny request; null when it works, else the error code */
+export async function testKey(p: Provider, key: string, model?: string): Promise<AiError['code'] | null> {
+  try { await direct(p, key.trim(), model?.trim() || undefined, 'name', { text: 'Wien, 15.10.2026\nRechnung Nr. 1\nMuster GmbH' }); return null; }
+  catch (e) { return e instanceof AiError ? e.code : 'failed'; }
+}
+
 /** report an answer as offensive or wrong (sent to the developer; only this answer) */
 export async function aiReport(task: string, text: string, reason = 'offensive'): Promise<boolean> {
+  if (!hostedAi()) {
+    // no Paginka server: the report goes to the developer by e-mail
+    const body = encodeURIComponent(`Feature: ${task}\nReason: ${reason}\nProvider: ${aiTarget()}\n\n${text.slice(0, 1500)}`);
+    try { window.open(`mailto:rezahosseiniafg@gmail.com?subject=${encodeURIComponent('Paginka AI report')}&body=${body}`, '_blank'); return true; } catch { return false; }
+  }
   try {
     const r = await fetch(aiUrl(), { method: 'POST', headers: { 'content-type': 'application/json', 'x-device': deviceId(), ...(appKey() ? { 'x-app-key': appKey() } : {}) },
       body: JSON.stringify({ task: 'report', input: { task, text: text.slice(0, 4000), reason } }) });
@@ -100,6 +192,9 @@ export function aiErrorText(e: unknown): string {
     case 'too_big': return 'The document is too long for one AI request. Try fewer pages.';
     case 'not_configured': return 'AI is not set up on the server yet.';
     case 'off': return 'AI is switched off.';
+    case 'bad_key': return 'The API key was not accepted. Check it in AI settings.';
+    case 'quota': return 'Your AI account has no credit left or reached its limit. Check it with your AI provider.';
+    case 'bad_model': return 'That model is not available for your key. Clear the model field to use the default.';
     case 'aborted': return 'Stopped';
     default: return 'The AI could not answer. Try again.';
   }

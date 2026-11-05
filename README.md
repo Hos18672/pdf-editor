@@ -38,6 +38,12 @@ Anthropic key, the prompts and the daily limits. The app never talks to Anthropi
 | Make a printed form fillable: blanks, dotted lines, "Label:" rows, ☐ found on the device; with AI also boxes and table cells from page pictures; written as real AcroForm fields | Fill panel "Make this form fillable" (phones: Smart fill does it first) | smart (vision) |
 | File name from the letter ("2026-10-15 Rechnung Wien Energie") | File menu, ✨ next to the name | fast |
 
+**Own API key (no server needed):** in the AI settings (consent sheet, AI sheet › AI settings, phone home menu) the user can pick
+Claude (Anthropic), ChatGPT (OpenAI) or Gemini (Google) and paste their own key ("Test key" checks it). The app then calls that
+provider directly with the same prompts (`supabase/functions/_shared/prompts.ts`, `providers.ts`); the key stays in localStorage.
+Default models: `claude-haiku-5-5`/`claude-sonnet-5-5`, `gpt-5.4-mini`, `gemini-flash-latest`; the user can enter another model.
+This works in every build, also without `EXPO_PUBLIC_AI_URL` ("Paginka AI" is then simply not offered).
+
 Privacy: nothing is sent before the consent sheet (`ai/Consent.tsx`); each action sends only what it needs;
 pages without text go as JPEG pictures. "Switch off AI" in the sheet or the home menu. Every answer can be reported (Google Play AI policy).
 
@@ -52,9 +58,9 @@ pages without text go as JPEG pictures. "Switch off AI" in the sheet or the home
    (optional `EXPO_PUBLIC_AI_APP_KEY` = the same value as `AI_APP_KEY`; it is visible in the app, so it only slows down casual misuse).
    The web and Android workflows build it in. Without the variable the app has no AI features at all.
 
-Tests: `npx tsx test/ai/handler.test.ts` (proxy, fake Anthropic); end to end: `npx tsx test/ai/make-forms.ts /tmp/ai-forms`,
+Tests: `npx tsx test/ai/handler.test.ts` (proxy, fake Anthropic), `npx tsx test/ai/providers.test.ts` (Claude/OpenAI/Gemini request shapes); end to end: `npx tsx test/ai/make-forms.ts /tmp/ai-forms`,
 `npx tsx test/ai/mock-server.ts`, build with `EXPO_PUBLIC_AI_URL=http://127.0.0.1:8787/ai npx expo export -p web`, serve `dist` on :8081,
-`python3 test/ai/e2e.py desktop|mobile en|de`.
+`python3 test/ai/e2e.py desktop|mobile en|de [paginka|anthropic|openai|gemini]` (own-key runs: a build without `EXPO_PUBLIC_AI_URL` on :8082).
 
 ## Run it
 

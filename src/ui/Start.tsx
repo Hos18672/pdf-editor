@@ -7,7 +7,7 @@ import { useFitLabels, type Theme } from './hooks';
 import { ago, listRecent, onRecentChange, removeRecent, type RecentDoc } from './recent';
 import { t, tn, useLang } from './i18n';
 import { useBack } from './back';
-import { aiAllowed, aiAvailable, setAiOn, useAiOn } from './ai/client';
+import { aiAllowed, useAiOn } from './ai/client';
 import { AiConsent } from './ai/Consent';
 
 export type OpenState =
@@ -484,11 +484,8 @@ function HomeMenu({ lang, setLang, theme, onTheme, onLegal, onClose }: {
               <button role="radio" aria-checked={lang === 'de'} className={lang === 'de' ? 'on' : ''} onClick={() => setLang('de')}>Deutsch</button>
               <button role="radio" aria-checked={lang !== 'de'} className={lang !== 'de' ? 'on' : ''} onClick={() => setLang('en')}>English</button>
             </span></div>
-          {aiAvailable() && <div className="hx-mrow"><span className="ic"><Icon name="sparkle" size={19} /></span><b>{t('AI assistant')}</b>
-            <span className="hx-seg" role="radiogroup" aria-label={t('AI assistant')}>
-              <button role="radio" aria-checked={!aiOn} className={!aiOn ? 'on' : ''} onClick={() => setAiOn(false)}>{t('Off|ai')}</button>
-              <button role="radio" aria-checked={aiOn} className={aiOn ? 'on' : ''} onClick={() => !aiOn && setAsk(true)}>{t('On|ai')}</button>
-            </span></div>}
+          <button className="hx-mrow link" onClick={() => setAsk(true)}><span className="ic"><Icon name="sparkle" size={19} /></span><b>{t('AI assistant')}</b>
+            <span className="hx-ai-st">{aiOn ? t('On|ai') : t('Off|ai')}</span><Icon name="right" size={16} /></button>
           <div className="hx-mrow"><span className="ic"><Icon name={theme === 'dark' ? 'moon' : 'sun'} size={19} /></span><b>{t('Appearance')}</b>
             <span className="hx-seg" role="radiogroup" aria-label={t('Appearance')}>
               <button role="radio" aria-checked={theme !== 'dark'} className={theme !== 'dark' ? 'on' : ''} onClick={() => theme === 'dark' && onTheme()}>{t('Light|theme')}</button>
@@ -503,7 +500,7 @@ function HomeMenu({ lang, setLang, theme, onTheme, onLegal, onClose }: {
             </a>
           ))}
         </nav>
-        {ask && <AiConsent sheet why="" onAnswer={() => setAsk(false)} />}
+        {ask && <AiConsent sheet why="" settings onAnswer={() => setAsk(false)} />}
         <p className="hx-mnote"><Icon name="lock-simple:fill" size={14} />{t('Files stay on this phone.')} {t(aiAllowed() ? 'Nothing is uploaded unless you use AI.' : 'Nothing is uploaded, ever.')}</p>
       </div>
     </div>

@@ -1607,7 +1607,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   // Only on request: each action asks once to switch AI on (consent), then sends only what it needs.
   const [aiOn, setAiOnState] = useState(aiAllowed);
   useEffect(() => onAiChange(() => setAiOnState(aiAllowed())), []);
-  const [consent, setConsent] = useState<{ why: string; done: (yes: boolean) => void } | null>(null);
+  const [consent, setConsent] = useState<{ why: string; done: (yes: boolean) => void; settings?: boolean } | null>(null);
   useEffect(() => {
     setConsentAsker((why) => new Promise<boolean>((done) => setConsent({ why, done })));
     return () => setConsentAsker(null);
@@ -2470,7 +2470,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       {aiOpen && <AiSheet sheet={mobile} initial={aiOpen.tab} getDoc={getAiDoc} cache={aiCache.current} onClose={() => setAiOpen(null)}
         onGoPage={(n) => { const src = snap.pages[n - 1]?.src; if (src !== undefined) goToPage(src); }}
         onCalendar={addCalendar} onRedact={redactTexts} onReplyPdf={replyPdf} onCopy={copyText}
-        onSwitchOff={() => { setAiOn(false); setAiOpen(null); toast({ msg: t('AI is switched off. Nothing is sent anymore.') }); }} />}
+        onSettings={() => setConsent({ why: '', settings: true, done: () => { if (!aiAllowed()) { setAiOpen(null); toast({ msg: t('AI is switched off. Nothing is sent anymore.') }); } } })} />}
       {rewrite && <AiRewrite sheet={mobile} text={rewrite.text} oneLine={rewrite.kind === 'run'} maxChars={rewrite.kind === 'run' ? Math.round([...rewrite.text].length * 1.15) + 2 : undefined}
         context={rewrite.context} onApply={applyRewrite} onClose={() => setRewrite(null)} />}
       {fillReview && <AiFillReview sheet={mobile} items={fillReview.items} questions={fillReview.questions} busy={fillReview.busy} err={fillReview.err}
@@ -2479,7 +2479,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
         onShow={(f) => { const keep = foundFields; setFoundFields(null); goToPage(f.src); setTimeout(() => setFoundFields(keep), 1600); }}
         onMake={(l) => makeFillable(l, foundFields.thenFill)} onClose={() => setFoundFields(null)}
         onAiBetter={aiAvailable() ? () => { const tf = foundFields.thenFill; setFoundFields(null); findFields({ ai: true, thenFill: tf }); } : undefined} />}
-      {consent && <AiConsent sheet={mobile} why={consent.why} onAnswer={(yes) => { const c = consent; setConsent(null); c.done(yes); }} />}
+      {consent && <AiConsent sheet={mobile} why={consent.why} settings={consent.settings} onAnswer={(yes) => { const c = consent; setConsent(null); c.done(yes); }} />}
       {showProfile && <ProfileModal sheet={mobile} fillLabel={showProfile.fill ? t('Save and fill in') : undefined}
         onClose={() => setShowProfile(null)} onSaved={(p) => { const fill = showProfile.fill; setShowProfile(null); if (fill) autofill(p); else toast({ msg: t('Your details are saved on this device') }); }} />}
       {showStamp && <StampModal sheet={mobile} onClose={() => setShowStamp(false)} onPick={(s) => { setShowStamp(false); placeStamp(s, 'image'); }} />}

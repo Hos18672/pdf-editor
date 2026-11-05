@@ -2465,4 +2465,21 @@ body:has(.bp-mobile .fillfloat) .toast { bottom: calc(166px + var(--safe-b)); }
 .ai-reported { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; color: var(--muted); font-weight: 600; }
 .ai-foot-acts { display: flex; align-items: center; gap: 6px; }
 .ai-now .ai-flag, .ai-now .ai-reported { margin-top: 2px; }
+button.hx-mrow { width: 100%; border: 0; background: none; text-align: start; font: inherit; }
+.hx-ai-st { font-size: 13px; font-weight: 600; color: var(--muted); }
+.ai-provs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.ai-prov { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border-radius: 16px; border: 1.5px solid var(--line-2); background: var(--surface); text-align: start; color: var(--text); min-width: 0; }
+.ai-prov b { font-size: 14px; } .ai-prov b span { font-weight: 500; color: var(--muted); }
+.ai-prov small { font-size: 12px; color: var(--muted); line-height: 1.35; }
+.ai-prov.on { border-color: #7B4BD6; background: rgba(123,75,214,.07); box-shadow: 0 0 0 3px rgba(123,75,214,.12); }
+@media (max-width: 359px) { .ai-provs { grid-template-columns: 1fr; } }
+.ai-keybox { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 18px; background: var(--surface-2); }
+.ai-keybox .field { display: flex; flex-direction: column; gap: 6px; }
+.ai-keyrow { display: flex; gap: 6px; align-items: center; }
+.ai-keyrow .input { flex: 1; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 14px; }
+.ai-keyacts { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.ai-keyacts .linkbtn, .ai-adv { font-size: 13px; font-weight: 600; color: var(--sel); text-decoration: none; display: inline-flex; align-items: center; gap: 4px; align-self: flex-start; background: none; border: 0; padding: 0; }
+.ai-keyacts .btn.sm { gap: 6px; }
+.note.ok { background: #E3F6EA; color: #135C33; }
+:root[data-theme="dark"] .note.ok { background: #183526; color: #A8E6BF; }
 `;

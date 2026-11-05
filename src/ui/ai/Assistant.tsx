@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useBack } from '../back';
 import { Icon } from '../icons';
 import { t, tn } from '../i18n';
-import { ai, aiErrorText, aiReport, answerLang, AiError, type AiLang } from './client';
+import { ai, aiErrorText, aiReport, aiTarget, answerLang, AiError, type AiLang } from './client';
 export { AiConsent } from './Consent';
 
 const LANGS: [AiLang, string][] = [['en', 'English'], ['de', 'Deutsch'], ['fa', 'فارسی']];
@@ -135,8 +135,8 @@ type Tab = 'overview' | 'ask' | 'reply' | 'privacy';
 const KIND_ICON: Record<string, string> = { letter: 'envelope-simple', invoice: 'receipt', receipt: 'receipt', contract: 'article', form: 'textbox', notice: 'warning-circle', report: 'file-text' };
 const PII_LABEL: Record<string, string> = { name: 'Name', address: 'Address', birth: 'Date of birth', phone: 'Phone', email: 'E-mail', id: 'ID number', bank: 'Bank details', health: 'Health', other: 'Personal' };
 
-export function AiSheet({ sheet, initial = 'overview', getDoc, cache, onGoPage, onCalendar, onRedact, onReplyPdf, onCopy, onClose, onSwitchOff }: {
-  onSwitchOff: () => void;
+export function AiSheet({ sheet, initial = 'overview', getDoc, cache, onGoPage, onCalendar, onRedact, onReplyPdf, onCopy, onClose, onSettings }: {
+  /** provider, key, switch off */ onSettings: () => void;
   sheet: boolean; initial?: Tab;
   /** the document as the AI reads it (pictures only for pages without text) */
   getDoc: (o: { images: boolean }) => Promise<AiDoc>;
@@ -371,8 +371,8 @@ export function AiSheet({ sheet, initial = 'overview', getDoc, cache, onGoPage, 
           ) : <div className="rc-ok"><span className="rc-badge"><Icon name="seal-check:fill" size={42} /></span><p>{t('No personal data found.')}</p></div>}
         </div>
       )}
-      <div className="ai-legal"><Icon name="lock" size={13} /><span>{t('Sent to Claude (Anthropic) only for this answer; not stored by Paginka.')}</span>
-        <button className="linkbtn" onClick={onSwitchOff}>{t('Switch off AI')}</button></div>
+      <div className="ai-legal"><Icon name="lock" size={13} /><span>{t('Sent to {target} only for this answer; not stored by Paginka.', { target: aiTarget() })}</span>
+        <button className="linkbtn" onClick={onSettings}>{t('AI settings')}</button></div>
     </Sheet>
   );
 }

@@ -1,12 +1,18 @@
 # End-to-end test of the AI features against the mock server (test/ai/mock-server.ts) and a web build
 # made with EXPO_PUBLIC_AI_URL=http://127.0.0.1:8787/ai, served on :8081.
-# Run: python3 test/ai/e2e.py [desktop|mobile] [en|de]
+# Run: python3 test/ai/e2e.py [desktop|mobile] [en|de] [paginka|anthropic|openai|gemini]
+# Own-key runs (anthropic/openai/gemini) use a build WITHOUT EXPO_PUBLIC_AI_URL served on :8082.
 import json, sys, time, os
 from playwright.sync_api import sync_playwright
 
 MODE = sys.argv[1] if len(sys.argv) > 1 else 'desktop'
 LANG = sys.argv[2] if len(sys.argv) > 2 else 'en'
-URL = 'http://127.0.0.1:8081/'
+PROV = sys.argv[3] if len(sys.argv) > 3 else 'paginka'
+OWN = PROV != 'paginka'
+URL = 'http://127.0.0.1:8082/' if OWN else 'http://127.0.0.1:8081/'
+MODELS = {'paginka': ('claude-haiku-5-5', 'claude-sonnet-5-5'), 'anthropic': ('claude-haiku-5-5', 'claude-sonnet-5-5'), 'openai': ('gpt-5.4-mini', 'gpt-5.4-mini'), 'gemini': ('gemini-flash-latest', 'gemini-flash-latest')}
+FAST, SMART = MODELS[PROV]
+PNAME = {'anthropic': 'Claude', 'openai': 'ChatGPT', 'gemini': 'Gemini'}.get(PROV)
 FORMS = '/tmp/ai-forms'
 SHOTS = '/tmp/shots'
 LOG = '/tmp/ai-log.jsonl'
@@ -25,13 +31,14 @@ with sync_playwright() as p:
     vp = {'width': 1440, 'height': 900} if MODE == 'desktop' else {'width': 390, 'height': 844}
     ctx = b.new_context(viewport=vp, device_scale_factor=2 if MODE == 'mobile' else 1, has_touch=MODE == 'mobile', is_mobile=MODE == 'mobile', locale='de-AT' if LANG == 'de' else 'en-GB',
                         permissions=['clipboard-read', 'clipboard-write'], accept_downloads=True)
+    if OWN: ctx.add_init_script(f"localStorage.setItem('pe.ai.base.{PROV}', 'http://127.0.0.1:8787/{PROV}');")
     ctx.add_init_script(f"localStorage.setItem('pe.profile', {json.dumps(json.dumps(PROFILE))}); localStorage.setItem('pe.lang', '{LANG}'); localStorage.setItem('pe-lang', '{LANG}');")
     page = ctx.new_page()
     errors = []
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('console', lambda m: m.type == 'error' and errors.append(m.text))
 
-    def shot(n): page.screenshot(path=f'{SHOTS}/{MODE}-{LANG}-{n}.png')
+    def shot(n): page.screenshot(path=f'{SHOTS}/{MODE}-{LANG}-{PROV}-{n}.png')
     def open_pdf(path):
         page.goto(URL); page.wait_for_timeout(800)
         page.locator('input[type=file][accept*="pdf"]').first.set_input_files(path)
@@ -59,14 +66,29 @@ with sync_playwright() as p:
     ok(len(log()) == 0, 'nothing sent on open')
     open_ai()
     ok(page.locator('.ai-consent').is_visible(), 'consent shown first')
-    ok(len(log()) == 0, 'nothing sent before consent')
+    ok(len([x for x in log() if x['tool'] != 'name']) == 0, 'nothing sent before consent (except the key test)')
+    if OWN:
+        ok(page.locator('.ai-prov', has_text=L('Paginka AI', 'Paginka-KI')).count() == 0, 'no Paginka AI without a server')
+        page.locator('.ai-prov', has_text=PNAME).click()
+        ok(page.locator('.ai-consent .foot .btn.primary').is_disabled(), 'switch on needs a key')
+        page.locator('.ai-keyrow input').fill('sk-bad-key')
+        page.locator('.ai-keyacts .btn').click()
+        page.wait_for_selector('.ai-keybox .note.warn', timeout=10000)
+        ok(L('not accepted', 'nicht akzeptiert') in page.locator('.ai-keybox .note').inner_text(), 'bad key reported')
+        shot('a0-badkey')
+        page.locator('.ai-keyrow input').fill('sk-test-1234')
+        page.locator('.ai-keyacts .btn').click()
+        page.wait_for_selector('.ai-keybox .note.ok', timeout=10000)
+        ok(PNAME in page.locator('.ai-points').inner_text(), 'consent names the provider')
     shot('a0-consent')
     page.locator('.ai-consent .btn.primary').click()
     page.wait_for_selector('.ai-ov-head', timeout=15000)
     shot('a1-overview')
     ok('Jahresabrechnung Strom' in page.locator('.ai-ov').inner_text(), 'overview title')
     l = log(); ok(l and l[-1]['tool'] == 'overview' and 'Rechnung Nr. 2026-004187' in l[-1]['text'] and l[-1]['images'] == 0, 'overview got the text, no pictures')
-    ok(l[-1]['model'] == 'claude-sonnet-5-5', 'overview uses smart model')
+    ok(l[-1]['model'] == SMART, 'overview uses smart model ' + str(l[-1]['model']))
+    ok((l[-1].get('via') == PROV) if OWN else ('via' not in l[-1]), 'request went to ' + PROV)
+    if OWN: ok(json.loads(page.evaluate("localStorage.getItem('pe.ai')"))['keys'][PROV] == 'sk-test-1234', 'key saved on the device')
     ok(page.locator('.ai-row.dl').count() == 1, 'deadline row')
     # ask
     page.locator('.ai-tabs button').nth(1).click()
@@ -94,7 +116,7 @@ with sync_playwright() as p:
     page.locator('.ai-pii .btn.primary').click()
     page.wait_for_selector('.ai-pii-list', timeout=15000)
     ok(page.locator('.ai-pii-list .ai-row').count() == 2, 'two personal items')
-    l = log(); ok(l[-1]['tool'] == 'items' and l[-1]['model'] == 'claude-haiku-5-5', 'pii on fast model')
+    l = log(); ok(l[-1]['tool'] == 'items' and l[-1]['model'] == FAST, 'pii on fast model')
     shot('a4-pii')
     page.locator('.ai-pii .btn.primary').click(); page.wait_for_timeout(800)
     ok(page.locator('.aimodal').count() == 0, 'sheet closes after black out')
@@ -189,12 +211,15 @@ with sync_playwright() as p:
     # ---------- E. switch off ----------
     open_ai(); page.wait_for_timeout(600)
     page.locator('.ai-legal .linkbtn').click(); page.wait_for_timeout(500)
+    ok(page.locator('.ai-consent').is_visible(), 'settings open')
+    shot('e1-settings')
+    page.locator('.ai-consent .foot .btn.outline').click(); page.wait_for_timeout(500)
     ok(page.evaluate("JSON.parse(localStorage.getItem('pe.ai')).on") is False, 'switched off')
     n = len(log()); open_ai(); ok(page.locator('.ai-consent').is_visible() and len(log()) == n, 'asks again after off')
-    page.locator('.ai-consent .btn.outline').click()
+    page.locator('.ai-consent .foot .btn.outline').click()
 
-    real = [e for e in errors if 'favicon' not in e and 'sw.js' not in e]
+    real = [e for e in errors if 'favicon' not in e and 'sw.js' not in e and not (OWN and 'status of 401' in e)]
     ok(not real, 'no page errors ' + str(real[:3]))
     b.close()
-print(f'{MODE} {LANG}: {passed} passed, {failed} failed')
+print(f'{MODE} {LANG} {PROV}: {passed} passed, {failed} failed')
 sys.exit(1 if failed else 0)

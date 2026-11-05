@@ -76,10 +76,43 @@ const fakeFetch = (async (_url: any, init: any) => {
   return new Response(JSON.stringify({ content: [{ type: 'tool_use', name: tool, input: answer(tool, body) }] }), { status: 200 });
 }) as typeof fetch;
 
+// ----- the providers themselves (own-key mode): same fake answers, in each provider's format -----
+const PCORS = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': 'POST, OPTIONS' };
+const asAnthropic = (path: string, b: any): any => {
+  if (path.startsWith('/anthropic/')) return b;
+  if (path.startsWith('/openai/')) {
+    const user = b.messages.find((m: any) => m.role === 'user');
+    return { system: b.messages[0].content, tools: [{ name: b.tool_choice.function.name }], messages: [{ content: user.content.map((c: any) => c.type === 'text' ? c : { type: 'image' }) }] };
+  }
+  return { system: b.systemInstruction.parts[0].text, tools: [{ name: b.toolConfig.functionCallingConfig.allowedFunctionNames[0] }],
+    messages: [{ content: b.contents[0].parts.map((p: any) => p.text !== undefined ? { type: 'text', text: p.text } : { type: 'image' }) }] };
+};
+async function provider(path: string, headers: any, raw: string): Promise<{ status: number; body: any }> {
+  const key = headers['x-api-key'] ?? (headers['authorization'] ?? '').replace(/^Bearer /, '') ?? headers['x-goog-api-key'];
+  const k = headers['x-goog-api-key'] ?? key;
+  if (!k || k.includes('bad')) return { status: 401, body: { error: { message: 'invalid api key' } } };
+  if (path.startsWith('/anthropic/') && headers['anthropic-dangerous-direct-browser-access'] !== 'true') return { status: 401, body: { error: { message: 'CORS requests must set anthropic-dangerous-direct-browser-access' } } };
+  const b = JSON.parse(raw);
+  const a = asAnthropic(path, b);
+  const tool = a.tools[0].name;
+  const images = a.messages[0].content.filter((c: any) => c.type === 'image').length;
+  appendFileSync(LOG, JSON.stringify({ tool, via: path.split('/')[1], model: b.model ?? path.split('/models/')[1]?.split(':')[0], images, chars: raw.length, text: txt(a.messages[0].content).slice(0, 4000) }) + '\n');
+  await new Promise((r) => setTimeout(r, 200));
+  const input = answer(tool, a);
+  if (path.startsWith('/anthropic/')) return { status: 200, body: { content: [{ type: 'tool_use', name: tool, input }] } };
+  if (path.startsWith('/openai/')) return { status: 200, body: { choices: [{ message: { tool_calls: [{ type: 'function', function: { name: tool, arguments: JSON.stringify(input) } }] } }] } };
+  return { status: 200, body: { candidates: [{ content: { parts: [{ functionCall: { name: tool, args: input } }] } }] } };
+}
+
 const env = { apiKey: 'test', fastModel: 'claude-haiku-5-5', smartModel: 'claude-sonnet-5-5', perDevice: 1000, perIp: 1000, fetch: fakeFetch };
 http.createServer(async (req, res) => {
   const chunks: Buffer[] = [];
   for await (const c of req) chunks.push(c as Buffer);
+  if (/^\/(anthropic|openai|gemini)\//.test(req.url ?? '')) {
+    if (req.method === 'OPTIONS') { res.writeHead(204, PCORS); res.end(); return; }
+    const out = await provider(req.url!, req.headers, Buffer.concat(chunks).toString());
+    res.writeHead(out.status, { ...PCORS, 'content-type': 'application/json' }); res.end(JSON.stringify(out.body)); return;
+  }
   const r = await handle(new Request(`http://127.0.0.1${req.url}`, { method: req.method, headers: req.headers as any, body: req.method === 'POST' ? Buffer.concat(chunks) : undefined }), env);
   res.writeHead(r.status, Object.fromEntries(r.headers));
   res.end(Buffer.from(await r.arrayBuffer()));
