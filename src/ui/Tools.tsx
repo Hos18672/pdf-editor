@@ -16,6 +16,7 @@ import { SortableArea, useSortableItem } from './sortable';
 import type { Bp } from './hooks';
 import type { PageState } from '../engine/types';
 import { PDFDocument } from 'pdf-lib';
+import { aiAvailable, aiAllowed } from './ai/client';
 import { t, tn, tj } from './i18n';
 
 export type ToolId = 'hub' | 'combine' | 'extract' | 'remove' | 'insert' | 'convert' | 'compress' | 'password' | 'numbers' | 'watermark' | 'split' | 'images' | 'text' | 'deadlines' | 'safecopy' | 'compare' | 'bookmarks' | 'paycode';
@@ -30,6 +31,8 @@ export interface Props {
   onOpenInEditor: (name: string, bytes: Uint8Array) => void;
   onApplyPages: (pages: PageState[]) => void;
   onScan: () => void;
+  /** which tool is open (the hub shows the app's bottom bar on phones) */
+  onAt?: (t: ToolId) => void;
 }
 
 const TILE = { edit: '#FFE14D', org: '#DDE2FF', conv: '#E3F1E9', smart: '#EBDDFF' };
@@ -37,6 +40,7 @@ type HubItem = { name: string; desc: string; icon: string; tile: string; go: () 
 
 export function Tools(p: Props) {
   const [tool, setTool] = useState<ToolId>(p.initial);
+  useEffect(() => { p.onAt?.(tool); }, [tool]); // eslint-disable-line react-hooks/exhaustive-deps
   const [convertKind, setConvertKind] = useState<string>('');
   const [legal, setLegal] = useState<LegalPage | null>(null);
   const [profile, setProfile] = useState(false);
@@ -72,6 +76,10 @@ export function Tools(p: Props) {
       { name: 'Fill a form', desc: t('Type in fields, tick boxes'), icon: 'textbox:duotone', tile: TILE.edit, go: () => p.onEdit('fill') },
       { name: 'Sign', desc: t('Draw, type or upload a signature'), icon: 'signature:duotone', tile: TILE.edit, go: () => p.onEdit('sign') },
     ] },
+    ...(aiAvailable() ? [{ name: 'AI', items: [
+      { name: 'AI assistant', desc: t('Summary, deadlines, questions, a reply letter'), icon: 'sparkle:duotone', tile: TILE.smart, go: () => p.onEdit('ai') },
+      { name: 'Smart fill', desc: t('AI fills in any form from your details'), icon: 'magic-wand:duotone', tile: TILE.smart, go: () => p.onEdit('aifill') },
+    ] }] : []),
     { name: 'Smart tools', items: [
       { name: 'Compare PDFs', desc: t('What changed between two versions'), icon: 'git-diff:duotone', tile: TILE.smart, go: () => setTool('compare') },
       { name: 'Payment code', desc: t('QR code on your invoice, paid in seconds'), icon: 'qr-code:duotone', tile: TILE.smart, go: () => setTool('paycode') },
@@ -114,7 +122,7 @@ export function Tools(p: Props) {
           <div className="hub">
             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
               <h1>{t('What do you want to do?')}</h1>
-              <div className="sub">{p.host.isNative ? t('Every tool runs on your phone.') : t('Every tool runs in your browser.')} {t('Files never leave this device.')}</div>
+              <div className="sub">{p.host.isNative ? t('Every tool runs on your phone.') : t('Every tool runs in your browser.')} {t(aiAllowed() ? 'Files leave this device only for AI actions you start.' : 'Files never leave this device.')}</div>
             </div>
             {groups.map((g, gi) => (
               <section key={g.name} className="grp">

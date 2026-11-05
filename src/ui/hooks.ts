@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 export type Bp = 'mobile' | 'tablet' | 'desktop' | 'large';
 
@@ -190,4 +190,42 @@ export function useNativeInsets(get: (() => Promise<{ top: number; bottom: numbe
     window.addEventListener('resize', again);
     return () => { alive = false; clearTimeout(t); window.removeEventListener('resize', again); };
   }, [get]);
+}
+
+/** below 1200px: phones and tablets in either orientation get the touch layout of the home */
+export function useNarrow(): boolean {
+  const [n, setN] = useState(() => typeof window !== 'undefined' && window.innerWidth < 1200);
+  useEffect(() => {
+    const fn = () => setN(window.innerWidth < 1200);
+    window.addEventListener('resize', fn);
+    return () => window.removeEventListener('resize', fn);
+  }, []);
+  return n;
+}
+
+/** Callback ref for a bar of labelled buttons: when a label (.lb) would be cut, all labels of the bar are scaled
+ *  down together (to 78% at most), so larger Android text or long translations still read in full. */
+export function useFitLabels<T extends HTMLElement>() {
+  const off = useRef<(() => void) | null>(null);
+  return useCallback((root: T | null) => {
+    off.current?.(); off.current = null;
+    if (!root || typeof ResizeObserver === 'undefined') return;
+    const fit = () => {
+      const els = Array.from(root.querySelectorAll<HTMLElement>('.lb'));
+      // measure every label in bold (as when selected) so the size does not change with the selection
+      for (const el of els) { el.style.transform = ''; el.style.maxWidth = 'none'; el.style.fontWeight = '700'; }
+      const m = els.map((el) => ({ el, avail: (el.parentElement?.clientWidth ?? 0) - 8, full: el.offsetWidth })); // 4px air each side; offsetWidth ignores the tile's pop animation
+      for (const el of els) { el.style.fontWeight = ''; el.style.maxWidth = ''; }
+      let k = 1;
+      for (const x of m) if (x.avail > 0 && x.full > x.avail) k = Math.min(k, x.avail / x.full);
+      if (k > 0.995) return;
+      k = Math.max(k, 0.78); // one size for the whole bar; anything still too long keeps its ellipsis
+      for (const x of m) { x.el.style.maxWidth = `${Math.ceil(x.avail / k) + 1}px`; x.el.style.transform = `scale(${k.toFixed(3)})`; }
+    };
+    const ro = new ResizeObserver(fit); ro.observe(root);
+    const mo = new MutationObserver(fit); mo.observe(root, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+    document.fonts?.ready.then(fit).catch(() => {});
+    fit();
+    off.current = () => { ro.disconnect(); mo.disconnect(); };
+  }, []);
 }

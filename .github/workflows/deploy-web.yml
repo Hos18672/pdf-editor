@@ -17,6 +17,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # the AI assistant's server (README › AI assistant); empty = a build without AI features
+    env:
+      EXPO_PUBLIC_AI_URL: ${{ vars.EXPO_PUBLIC_AI_URL }}
+      EXPO_PUBLIC_AI_APP_KEY: ${{ vars.EXPO_PUBLIC_AI_APP_KEY }}
     steps:
       - uses: actions/checkout@v4
 

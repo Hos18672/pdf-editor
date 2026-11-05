@@ -1,5 +1,6 @@
-import { SavedBurst } from './motion';
+import { SavedBurst, useSheetPull } from './motion';
 import React, { Suspense, lazy, useCallback, useEffect, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { css } from './styles';
 import { Icon } from './icons';
 import { useNoStrayDrops } from './drop';
@@ -8,7 +9,7 @@ import { useHistory } from './store';
 import type { PageInfo } from './PageView';
 import { appBase } from './assets';
 import type { HostProps, ToastMsg, BusyMsg, EditorStart, Incoming } from './Editor';
-import { Start, OpenState, type QuickAction } from './Start';
+import { Start, OpenState, BottomNav, type QuickAction, type HomeTab } from './Start';
 import type { ToolId } from './Tools';
 import { recentBytes, saveRecent, type RecentKind } from './recent';
 import type { AddWhat } from './AddPages';
@@ -21,7 +22,7 @@ const Editor = lazy(() => loadScreens().then((m) => ({ default: m.Editor })));
 const Tools = lazy(() => loadScreens().then((m) => ({ default: m.Tools })));
 const Scanner = lazy(() => loadScreens().then((m) => ({ default: m.Scanner })));
 import { useBackButton } from './back';
-import { useBp, useEdgeColors, useNativeInsets, useTheme, useVisualViewportHeight } from './hooks';
+import { useBp, useNarrow, useEdgeColors, useNativeInsets, useTheme, useVisualViewportHeight } from './hooks';
 import type { M } from '../engine/types';
 
 export type { HostProps };
@@ -92,6 +93,9 @@ function registerServiceWorker() {
   navigator.serviceWorker.register(`${base}sw.js`, { scope: base }).catch(() => null);
 }
 
+type Route = { name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' } | { name: 'scan'; back: 'home' | 'tools'; initial?: string[] };
+const DEPTH: Record<Route['name'], number> = { home: 0, tools: 1, scan: 2, editor: 2 };
+
 export default function EditorApp(host: HostProps) {
   // the interface language: changing it re-renders everything below
   useLang();
@@ -103,7 +107,21 @@ export default function EditorApp(host: HostProps) {
   const [openState, setOpenState] = useState<OpenState>({ kind: 'idle' });
   const [busy, setBusy] = useState<BusyMsg | null>(null);
   const [toastMsg, setToastMsg] = useState<ToastMsg | null>(null);
-  const [route, setRoute] = useState<{ name: 'home' } | { name: 'editor'; start?: EditorStart } | { name: 'tools'; tool: ToolId; back: 'home' | 'editor' } | { name: 'scan'; back: 'home' | 'tools'; initial?: string[] }>({ name: 'home' });
+  useSheetPull();
+  const narrow = useNarrow();
+  // phones: the bottom bar's tab on the home screen, and whether the tools screen shows its list
+  const [homeTab, setHomeTab] = useState<HomeTab>('home');
+  const [toolsAt, setToolsAt] = useState<ToolId>('hub');
+  const [route, setRouteNow] = useState<Route>({ name: 'home' });
+  // phones and tablets: screens change with a view transition (fade and a short slide; back runs it in reverse)
+  const routeRef = useRef(route);
+  routeRef.current = route;
+  const setRoute = useCallback((r: Route) => {
+    const doc = document as any;
+    if (!doc.startViewTransition || window.innerWidth >= 1200 || window.matchMedia?.('(prefers-reduced-motion: reduce)').matches || r.name === routeRef.current.name) { setRouteNow(r); return; }
+    document.documentElement.dataset.nav = DEPTH[r.name] < DEPTH[routeRef.current.name] ? 'back' : 'fwd';
+    try { doc.startViewTransition(() => flushSync(() => setRouteNow(r))); } catch { setRouteNow(r); }
+  }, []);
   // a tools card asked for a file first: where to land once it is open
   const startAfterOpen = useRef<EditorStart | undefined>(undefined);
   const pending = useRef<{ name: string; bytes: Uint8Array } | null>(null);
@@ -177,6 +195,27 @@ export default function EditorApp(host: HostProps) {
 
   // Pages added in the editor are appended to the file (so the pages already there, and the edits on
   // them, keep their numbers) and placed in the page order where they were asked for.
+  // Places found on a flat form become real form fields: written into the file, the document is read again
+  // (same pages, edits stay) and the editor lists them as fields.
+  const addFields = async (list: import('./ai/makeFields').NewField[]): Promise<number> => {
+    if (!file || !pdf || !list.length) return 0;
+    setBusy({ title: t('Making the form fillable'), detail: t('On this device. Your edits stay.') });
+    try {
+      const { addFormFields } = await loadScreens();
+      const r = await addFormFields(file.bytes, list);
+      if (!r.added) return 0;
+      const next = await openPdf(r.bytes);
+      const old = pdf;
+      setPdf(next);
+      setFile({ name: file.name, bytes: r.bytes });
+      setTimeout(() => old.destroy?.(), 15000);
+      return r.added;
+    } catch (e) {
+      console.warn('add fields failed', e);
+      setToastMsg({ msg: t('The fields could not be added to this file'), kind: 'err' });
+      return 0;
+    } finally { setBusy(null); }
+  };
   const addPages = async (after: number, what: AddWhat): Promise<number | null> => {
     if (!file || !pdf) return null;
     setBusy({ title: t('Adding pages'), detail: t('On this device. Your edits stay.') });
@@ -326,7 +365,7 @@ export default function EditorApp(host: HostProps) {
       <style>{fontFaces() + css}</style>
       <Suspense fallback={<div className="lazy-wait" role="status" aria-label={t('Loading')}><span className="spinner" /></div>}>
       {route.name === 'editor' && file && pdf ? (
-        <Editor key={docId} onAddPages={addPages} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
+        <Editor key={docId} onAddPages={addPages} onAddFields={addFields} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
           onSaved={(bytes, name) => { saveRecent({ id: recentId.current ?? undefined, name, kind: 'edited', bytes }).then((i) => { if (i) recentId.current = i; }); }}
           toast={setToastMsg} setBusy={setBusy} />
@@ -342,9 +381,9 @@ export default function EditorApp(host: HostProps) {
           onOpenInEditor={(name, bytes) => open(name, bytes)}
           onEdit={(start) => { if (file) setRoute({ name: 'editor', start }); else { startAfterOpen.current = start; pick(); } }}
           onApplyPages={(pages) => { hist.commit((s) => ({ ...s, pages })); setRoute({ name: 'editor' }); }}
-          onScan={() => setRoute({ name: 'scan', back: 'tools' })} />
+          onScan={() => setRoute({ name: 'scan', back: 'tools' })} onAt={setToolsAt} />
       ) : (
-        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'}
+        <Start state={openState} onFile={(f) => { startAfterOpen.current = undefined; readFile(f); }} onImport={importFiles} onPick={() => { startAfterOpen.current = undefined; pick(); }} mobile={bp === 'mobile'} v3={narrow} tab={homeTab} onTab={setHomeTab}
           onPassword={(pw) => pending.current && open(pending.current.name, pending.current.bytes, pw)}
           onTools={() => openTools('home')} onQuick={quick} isNative={host.isNative} theme={theme} onTheme={toggleTheme}
           onRecent={async (d) => {
@@ -361,6 +400,14 @@ export default function EditorApp(host: HostProps) {
           }} />
       )}
       </Suspense>
+      {bp === 'mobile' && ((route.name === 'home' && openState.kind !== 'loading') || (route.name === 'tools' && toolsAt === 'hub')) && (
+        <BottomNav active={route.name === 'tools' ? 'tools' : homeTab}
+          onHome={() => { setHomeTab('home'); if (route.name !== 'home') setRoute({ name: 'home' }); }}
+          onFiles={() => { setHomeTab('files'); if (route.name !== 'home') setRoute({ name: 'home' }); }}
+          onOpen={() => { startAfterOpen.current = undefined; pick(); }}
+          onScan={() => quick('scan')}
+          onTools={() => { if (route.name !== 'tools') openTools('home'); }} />
+      )}
       <input ref={inputRef} type="file" accept="application/pdf,.pdf" hidden onChange={(e) => { readFile(e.target.files?.[0]); e.target.value = ''; }} />
       {busy && (
         <div className="busy" role="status" aria-live="polite">

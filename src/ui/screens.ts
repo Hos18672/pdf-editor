@@ -11,3 +11,4 @@ export { sharedToPdf, savePdfFile } from './sharedPdf';
 export { shareFile } from './share';
 export { loadOcr } from './ocr';
 export const loadCantoo = () => import('@cantoo/pdf-lib');
+export { addFormFields } from './ai/makeFields';

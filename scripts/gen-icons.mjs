@@ -16,16 +16,17 @@ const icons = {
   'arrow-counter-clockwise': R, 'dots-six-vertical': [...R, 'bold'], check: B, 'lock-simple': F, 'lock-key': [...F, 'duotone'],
   'wifi-slash': F, 'folder-open': B, 'file-arrow-down': [...F, 'duotone'], keyboard: R, 'upload-simple': R, square: R, circle: [...RF],
   'line-segment': R, 'sliders-horizontal': R, info: R, eye: R, 'calendar-blank': R, sun: R, moon: R, export: [...R, 'bold', 'duotone'],
-  'dots-three': B, 'pencil-simple': R, 'pencil-simple-line': D, stack: [...D, 'bold'], 'file-minus': D, 'file-plus': D,
+  'dots-three': B, 'pencil-simple': R, 'pencil-simple-line': D, stack: [...D, 'bold'], 'file-minus': D, 'file-plus': [...R, 'duotone'],
   'file-doc': D, 'file-xls': D, 'file-ppt': D, 'file-html': D, file: D, 'file-pdf': D, camera: [...R, 'duotone'], 'file-arrow-up': [...R, 'bold'],
   'warning-circle': [...R, 'duotone'], 'check-circle': F, 'pencil-circle': F, 'text-b': [...R, 'bold'], 'text-italic': R, 'text-align-left': R, 'text-align-center': R, 'text-align-right': R,
   'squares-four-fill': [], 'grid-four': R, 'sidebar-simple': RF, 'clock-counter-clockwise': R, 'dots-three-vertical': B, 'magnifying-glass-plus': R, 'arrows-in-simple': R,
   'hand-pointing': R, 'cursor-click': R, 'list-checks': R, 'check-square': F, 'radio-button': F, 'list': R,
-  'cloud-slash': R, 'device-mobile': R, 'file-text': D, 'files': D, eyedropper: R, 'dots-nine': [...R, 'bold'], 'arrow-right': B, 'android-logo': R, 'hand-grabbing': B, 'clipboard-text': R,
+  'cloud-slash': R, 'device-mobile': R, 'file-text': [...R, 'duotone'], translate: R, code: R, 'files': [...RF, 'duotone'], house: RF, eyedropper: R, 'dots-nine': [...R, 'bold'], 'arrow-right': B, 'android-logo': R, 'hand-grabbing': B, 'clipboard-text': R,
   'identification-card': [...R, 'duotone'], 'book-open': [...R, 'duotone'], receipt: [...R, 'duotone'], 'camera-slash': R, lightning: F, flashlight: [...RF],
-  scan: [...R, 'bold', 'duotone'], crop: R, toolbox: [...R, 'duotone'], 'magic-wand': [...R, 'duotone'], bandaids: [...R, 'duotone'], hand: R, 'paint-brush': R, sparkle: [...RF], 'circle-half': [...R, 'fill'], palette: R, 'text-aa': R, 'frame-corners': R,
+  scan: [...RF, 'bold', 'duotone'], crop: R, toolbox: [...R, 'duotone'], 'magic-wand': [...R, 'duotone'], bandaids: [...R, 'duotone'], hand: R, 'paint-brush': R, 'circle-half': [...R, 'fill'], palette: R, 'text-aa': R, 'frame-corners': R,
   'selection-all': R, 'arrows-clockwise': R, 'drop-half': R, 'camera-plus': R, 'image-square': R, 'split-horizontal': R, 'arrows-in-line-vertical': [...R, 'duotone'], 'file-zip': D, 'lock-key-open': [...R, 'duotone'], 'list-numbers': [...R, 'duotone'], stamp: [...R, 'duotone'], scissors: [...R, 'duotone'], images: [...R, 'duotone'], article: [...R, 'duotone'], 'magnifying-glass': [...R, 'bold', 'duotone'], prohibit: [...R, 'duotone'], 'shield-check': [...R, 'duotone'], 'calendar-plus': [...R, 'duotone'], 'identification-badge': [...R, 'duotone'], 'eye-slash': [...R, 'duotone'], 'copy-simple': R, 'book-open-text': [...R, 'duotone'], aperture: R, 'share-network': [...R, 'bold', 'duotone'], printer: [...R, 'duotone'], 'text-underline': R, 'text-strikethrough': R, 'arrow-up-right': R, link: [...R, 'duotone'], 'note-pencil': R, 'pencil-line': R, 'calendar-check': R, 'chat-centered-text': [...R, 'duotone'],
-  note: [...RF, 'duotone'], 'arrows-left-right': R, 'bookmarks-simple': [...R, 'duotone'], 'qr-code': [...R, 'duotone'], 'text-indent': R, swap: R, 'address-book': [...R, 'duotone'], 'git-diff': [...R, 'duotone'], timer: R, 'user-circle': [...R, 'duotone'], 'seal-check': [...R, 'duotone', 'fill'], 'hand-tap': R
+  note: [...RF, 'duotone'], 'arrows-left-right': R, 'bookmarks-simple': [...R, 'duotone'], 'qr-code': [...R, 'duotone'], 'text-indent': R, swap: R, 'address-book': [...R, 'duotone'], 'git-diff': [...R, 'duotone'], timer: R, 'user-circle': [...R, 'duotone'], 'seal-check': [...R, 'duotone', 'fill'], 'hand-tap': R,
+  'sparkle': [...RF, 'duotone'], 'paper-plane-right': [...RF], 'chats-circle': [...R, 'duotone'], 'envelope-simple': [...R, 'duotone'], 'currency-eur': R, 'arrow-bend-up-left': R, 'text-columns': R, 'stop': F, 'list-bullets': R, 'flag': R
 };
 const out = {};
 for (const [name, weights] of Object.entries(icons)) {

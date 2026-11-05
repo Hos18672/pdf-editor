@@ -20,7 +20,47 @@ responsive web app and as an Android app.
   glyphs at the exact size, colour and baseline.
 - Added objects have a move grip (works while typing) and a toolbar with Edit / Duplicate / Delete.
 - Undo / redo, zoom (buttons, Ctrl+wheel, two-finger pinch + pan on touch, anchored under the fingers).
-- Everything runs on the device; the file is never uploaded.
+- Everything runs on the device; the file is never uploaded — except the optional AI assistant below, which is off until the user switches it on.
+
+## AI assistant (optional, Claude)
+
+Built in `src/ui/ai/`, served by a Supabase Edge Function in `supabase/functions/ai/` that holds the
+Anthropic key, the prompts and the daily limits. The app never talks to Anthropic directly.
+
+| Feature | Where | Model |
+|---|---|---|
+| Overview: summary, to-dos, dates (→ calendar), amounts, details | AI button (top bar on desktop, rail on tablets, More on phones), Tools › AI | smart |
+| Ask questions about the document, with page links | AI sheet › Ask | smart |
+| Reply letter (sender from My details) → PDF | AI sheet › Reply | smart |
+| Find personal data the regex check misses → black out | AI sheet › Personal data | fast |
+| Rewrite / shorten / fix / formal / translate (EN, DE, FA) a line or text box, kept in the same font | "Rewrite with AI" while editing text | fast |
+| Smart fill: fills every field from My details, the document and the user's notes; asks when unsure; review before filling | Fill panel / phone fill bar, Tools › AI › Smart fill | smart |
+| Make a printed form fillable: blanks, dotted lines, "Label:" rows, ☐ found on the device; with AI also boxes and table cells from page pictures; written as real AcroForm fields | Fill panel "Make this form fillable" (phones: Smart fill does it first) | smart (vision) |
+| File name from the letter ("2026-10-15 Rechnung Wien Energie") | File menu, ✨ next to the name | fast |
+
+**Own API key (no server needed):** in the AI settings (consent sheet, AI sheet › AI settings, phone home menu) the user can pick
+Claude (Anthropic), ChatGPT (OpenAI) or Gemini (Google) and paste their own key ("Test key" checks it). The app then calls that
+provider directly with the same prompts (`supabase/functions/_shared/prompts.ts`, `providers.ts`); the key stays in localStorage.
+Default models: `claude-haiku-5-5`/`claude-sonnet-5-5`, `gpt-5.4-mini`, `gemini-flash-latest`; the user can enter another model.
+This works in every build, also without `EXPO_PUBLIC_AI_URL` ("Paginka AI" is then simply not offered).
+
+Privacy: nothing is sent before the consent sheet (`ai/Consent.tsx`); each action sends only what it needs;
+pages without text go as JPEG pictures. "Switch off AI" in the sheet or the home menu. Every answer can be reported (Google Play AI policy).
+
+### Set it up
+
+1. Create a Supabase project (region **EU**, e.g. Frankfurt) and install the Supabase CLI.
+2. `supabase link --project-ref <ref>` then `supabase db push` (creates `ai_usage` + `ai_take()` and `ai_reports`).
+3. `supabase secrets set ANTHROPIC_API_KEY=sk-ant-...` (optional: `AI_PER_DEVICE` (default 60 calls/day), `AI_PER_IP` (150),
+   `AI_MODEL_FAST` (`claude-haiku-5-5`), `AI_MODEL_SMART` (`claude-sonnet-5-5`), `AI_APP_KEY`).
+4. `supabase functions deploy ai --no-verify-jwt` → URL `https://<ref>.supabase.co/functions/v1/ai`.
+5. GitHub → Settings → Secrets and variables → Actions → **Variables**: `EXPO_PUBLIC_AI_URL` = that URL
+   (optional `EXPO_PUBLIC_AI_APP_KEY` = the same value as `AI_APP_KEY`; it is visible in the app, so it only slows down casual misuse).
+   The web and Android workflows build it in. Without the variable the app has no AI features at all.
+
+Tests: `npx tsx test/ai/handler.test.ts` (proxy, fake Anthropic), `npx tsx test/ai/providers.test.ts` (Claude/OpenAI/Gemini request shapes); end to end: `npx tsx test/ai/make-forms.ts /tmp/ai-forms`,
+`npx tsx test/ai/mock-server.ts`, build with `EXPO_PUBLIC_AI_URL=http://127.0.0.1:8787/ai npx expo export -p web`, serve `dist` on :8081,
+`python3 test/ai/e2e.py desktop|mobile en|de [paginka|anthropic|openai|gemini]` (own-key runs: a build without `EXPO_PUBLIC_AI_URL` on :8082).
 
 ## Run it
 
