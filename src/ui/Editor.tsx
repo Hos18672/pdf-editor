@@ -40,6 +40,13 @@ import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop, useFitLabels } from './hooks';
 import { ThemeButton, LangButton } from './Start';
 import { t, tn, getLang } from './i18n';
+import { ai, aiAvailable, aiAllowed, aiErrorText, ensureAi, setConsentAsker, setAiOn, onAiChange, answerLang } from './ai/client';
+import { pageLines, docText, pageJpeg, type Line } from './ai/doctext';
+import { AiConsent, AiRewrite, AiSheet, AiFillReview, AiFieldsResult, type AiCache, type AiDoc, type FillItem, type FillQuestion, type FoundField } from './ai/Assistant';
+import type { NewField } from './ai/makeFields';
+import { findText } from './search';
+import { toIcs } from './deadlines';
+import { convertFile } from './convert';
 
 /** a copied line: its text and how it looks (pasted as a text box) */
 interface Clip { text: string; size: number; color: string; font: DocFont | null; family: FontFamily; bold: boolean; italic: boolean }
@@ -91,7 +98,7 @@ const ZOOM_STEPS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const MIN_Z = 0.25, MAX_Z = 4;
 const clampZ = (z: number) => Math.max(MIN_Z, Math.min(MAX_Z, z));
 
-type RailT = Tool | 'shapes' | 'markup' | 'pages';
+type RailT = Tool | 'shapes' | 'markup' | 'pages' | 'ai';
 type RailItem = { t: RailT; label: string; icon: string; key: string; opts?: boolean };
 /** Tools grouped by intent (rail, mobile "All tools" sheet). `opts`: the tool has a flyout with options. */
 const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
@@ -113,7 +120,8 @@ const GROUPS: { name: string; tint: string; items: RailItem[] }[] = [
     { t: 'shapes', label: 'Shapes', icon: 'shapes', key: 'R', opts: true },
     { t: 'draw', label: 'Draw', icon: 'scribble', key: 'D', opts: true }] },
   { name: 'Document', tint: 'var(--tint-doc)', items: [
-    { t: 'pages', label: 'Pages', icon: 'squares-four', key: 'P' }] },
+    { t: 'pages', label: 'Pages', icon: 'squares-four', key: 'P' },
+    { t: 'ai', label: 'AI assistant', icon: 'sparkle', key: 'Q' }] },
 ];
 const RAIL: RailItem[] = GROUPS.flatMap((g) => g.items);
 const SHAPE_TOOLS: Tool[] = ['rect', 'ellipse', 'line', 'arrow'];
@@ -146,9 +154,11 @@ const useRecent = (r: Recent, t: RailT): Recent => {
 const SHAPES: [Tool, string, string][] = [['rect', 'Box', 'rect'], ['ellipse', 'Circle', 'ellipse'], ['line', 'Line', 'line'], ['arrow', 'Arrow', 'arrow-up-right']];
 
 /** What the editor opens with when started from the tools page. */
-export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages' | 'privacy';
+export type EditorStart = 'edit' | 'fill' | 'sign' | 'pages' | 'privacy' | 'ai' | 'aifill';
 
-export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onSaved, onAddPages }: {
+export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, onTheme, bp, toast, setBusy, start, onSaved, onAddPages, onAddFields }: {
+  /** write found places into the file as form fields; resolves to how many were added */
+  onAddFields?: (list: NewField[]) => Promise<number>;
   /** add pages to the document after this many pages; resolves to the first new page's source index */
   onAddPages?: (after: number, what: AddWhat) => Promise<number | null>;
   host: HostProps; file: { name: string; bytes: Uint8Array }; pdf: any; infos: PageInfo[];
@@ -1290,6 +1300,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     if (started.current || !fieldsReady) return;
     started.current = true;
     if (start === 'fill' || start === 'sign') { pickTool(start); return; }
+    if (start === 'ai') { openAi(); return; }
+    if (start === 'aifill') { pickTool('fill'); smartFill(); return; }
     // a form (fields that can be filled in): open in fill mode, unless something else was started already
     const formFields = fields.filter((f) => !f.readOnly);
     if (formFields.length && tool === 'edit' && !editing && !selected && !hist.canUndo) {
@@ -1307,6 +1319,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     setMoreOpen(false);
     haptic();
     if (mobile) setRecent((v) => useRecent(v, r.t));
+    if (r.t === 'ai') { setFlyout(null); openAi(); return; }
     if (r.t === 'pages') { setFlyout(null); setSelected(null); setEditing(null); setView((v) => (v === 'pages' ? 'doc' : 'pages')); return; }
     const same = railActive(r);
     if (r.t === 'shapes' || r.t === 'markup') {
@@ -1321,7 +1334,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     pickTool(r.t);
     if (r.opts && (!mobile || phoneOpts)) openFlyout(r.t);
   };
-  const railActive = (r: RailItem) => r.t === 'pages' ? view === 'pages'
+  const railActive = (r: RailItem) => r.t === 'ai' ? !!aiOpen
+    : r.t === 'pages' ? view === 'pages'
     : view === 'pages' ? false
     : r.t === 'shapes' ? SHAPE_TOOLS.includes(tool)
     : r.t === 'markup' ? MARK_TOOLS.includes(tool)
@@ -1451,8 +1465,15 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       if (Math.abs(b.angle) > 0.02) continue;
       const top = b.y - b.asc, bot = b.y + b.h * 0.25;
       let d = Infinity;
+      const row = bot > f.y && top < f.y + f.h;
+      // a line running into the field ("Name: ______" with the field over the blank): the words before it
+      if (row && b.x < f.x - 4 && b.x + b.w > f.x + 4) {
+        const n = [...str].length, cut = Math.round(n * (f.x - b.x) / b.w);
+        const words = [...str].slice(0, cut).join('').replace(/[\s:：._…]+$/, '').split(/\s{2,}|[_.…]{3,}/).pop()?.trim();
+        if (words && words.length >= 2) { best = { s: words, d: -1 }; continue; }
+      }
       // left of it on the same row
-      if (bot > f.y && top < f.y + f.h && b.x + b.w <= f.x + 4 && f.x - (b.x + b.w) < 220) d = f.x - (b.x + b.w);
+      if (row && b.x + b.w <= f.x + 4 && f.x - (b.x + b.w) < 220) d = f.x - (b.x + b.w);
       // above it, over its left part
       else if (bot <= f.y + 3 && f.y - bot < 22 && b.x < f.x + f.w * 0.6 && b.x + b.w > f.x - 10) d = (f.y - bot) * 2 + 10;
       if (d < (best?.d ?? Infinity)) best = { s: str, d };
@@ -1581,6 +1602,340 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       setReady((l) => (l ? l.filter((x) => x !== it) : l));
       toast({ msg: t('Date added'), action: { label: t('Undo'), run: hist.undo } });
     }
+  };
+  // ----- AI assistant -----
+  // Only on request: each action asks once to switch AI on (consent), then sends only what it needs.
+  const [aiOn, setAiOnState] = useState(aiAllowed);
+  useEffect(() => onAiChange(() => setAiOnState(aiAllowed())), []);
+  const [consent, setConsent] = useState<{ why: string; done: (yes: boolean) => void } | null>(null);
+  useEffect(() => {
+    setConsentAsker((why) => new Promise<boolean>((done) => setConsent({ why, done })));
+    return () => setConsentAsker(null);
+  }, []);
+  const [aiOpen, setAiOpen] = useState<null | { tab: 'overview' | 'ask' | 'reply' | 'privacy' }>(null);
+  const aiCache = useRef<AiCache>({});
+  const snapRef = useRef(snap);
+  snapRef.current = snap;
+  const pageNo = (src: number) => snap.pages.findIndex((q) => q.src === src) + 1;
+  const aiFail = (e: unknown) => toast({ msg: t(aiErrorText(e)), kind: 'err' });
+  const noAi = () => toast({ msg: t('The AI assistant is not available in this version'), kind: 'err' });
+  const openAi = async (tab: 'overview' | 'ask' | 'reply' | 'privacy' = 'overview') => {
+    if (!aiAvailable()) { noAi(); return; }
+    if (!(await ensureAi(t('The assistant reads this document to summarise it, answer your questions, write a reply or find personal data.')))) return;
+    setAiOpen({ tab });
+  };
+  /** the lines of a page as the AI reads them (edited text, removed lines left out) */
+  const linesOf = (src: number): Line[] => {
+    const d = pageDataRef.current[src], info = infos[src];
+    if (!d || !info) return [];
+    const s = snapRef.current;
+    return pageLines(src, d.runs.filter((r) => !erasedRuns.has(r.key)), info.vm, (r) => s.edits[r.key]?.text ?? r.str);
+  };
+  const readAllPages = async () => {
+    const order = snapRef.current.pages.map((x) => x.src);
+    if (order.some((s) => !pageDataRef.current[s] && !pictureSet.has(s))) {
+      setBusy({ title: t('Reading the pages…') });
+      try { await ensureData(order, (d, a) => setBusy({ title: t('Reading the pages…'), progress: d / a })); } finally { setBusy(null); }
+    }
+    return order;
+  };
+  const docMemo = useRef<{ snap: unknown; images: boolean; doc: AiDoc } | null>(null);
+  const getAiDoc = async ({ images }: { images: boolean }): Promise<AiDoc> => {
+    const m = docMemo.current;
+    if (m && m.snap === snapRef.current && (m.images || !images)) return m.doc;
+    const order = await readAllPages();
+    const pages = order.map((src, i) => ({ n: i + 1, src, lines: linesOf(src) }));
+    const text = docText(pages);
+    const imgs: AiDoc['images'] = [];
+    if (images) {
+      // pages without text (scans not read yet): the AI reads their pictures
+      for (const p of pages) {
+        if (p.lines.length || imgs.length >= 8) continue;
+        try { imgs.push({ page: p.n, jpeg: (await pageJpeg(pdf, p.src, 1400)).jpeg }); } catch { /* page not drawable */ }
+      }
+    }
+    const doc = { text, images: imgs, pages: order.length };
+    docMemo.current = { snap: snapRef.current, images, doc };
+    return doc;
+  };
+  const copyText = async (s: string) => {
+    try { await navigator.clipboard.writeText(s); toast({ msg: t('Copied') }); } catch { toast({ msg: t('Could not copy'), kind: 'err' }); }
+  };
+  const addCalendar = async (e: { title: string; date: string; time?: string; note: string }) => {
+    const [y, mo, d] = e.date.split('-').map(Number);
+    const tm = /^(\d{1,2})[:.](\d{2})/.exec(e.time ?? '');
+    const at = new Date(y, mo - 1, d, tm ? +tm[1] : 9, tm ? +tm[2] : 0);
+    if (host.addToCalendar) {
+      try { if (await host.addToCalendar({ title: e.title, begin: at.getTime(), allDay: !tm, note: e.note })) return; } catch { /* fall back to a file */ }
+    }
+    const ics = toIcs([{ title: e.title, date: at, time: tm ? `${tm[1].padStart(2, '0')}:${tm[2]}` : null, note: e.note, remindDays: 2 }]);
+    await saveFile(host, new TextEncoder().encode(ics), `${e.date} ${e.title}`.replace(/[\\/:*?"<>|]+/g, ' ').slice(0, 60) + '.ics', 'text/calendar', toast);
+  };
+  const redactTexts = async (texts: string[]): Promise<number> => {
+    const hits: Hit[] = [];
+    for (const s of texts) { try { hits.push(...(await findText(docRef(), s.trim(), 200))); } catch { /* skip */ } }
+    if (hits.length) redactHits(hits);
+    return hits.length;
+  };
+  const replyPdf = async (subject: string, body: string) => {
+    setBusy({ title: t('Preparing your PDF') });
+    try {
+      const f = new File([`${subject}\n\n${body}`], 'reply.txt', { type: 'text/plain' });
+      const r = await convertFile(f, { size: 'a4', orient: 'portrait', margin: 'normal' }, () => null);
+      setBusy(null);
+      const name = `${(docName ?? file.name.replace(/\.pdf$/i, '')).slice(0, 40)} – ${t('Reply')}.pdf`;
+      await saveFile(host, r.bytes, name, 'application/pdf', toast);
+    } catch { setBusy(null); toast({ msg: t('Could not make the PDF'), kind: 'err' }); }
+  };
+  const suggestName = async (): Promise<string | null> => {
+    if (!aiAvailable()) { noAi(); return null; }
+    if (!(await ensureAi(t('The AI reads the first page to suggest a name like “2026-10-15 Invoice Wien Energie”.')))) return null;
+    const first = snap.pages[0]?.src ?? 0;
+    try {
+      if (!pageDataRef.current[first] && !pictureSet.has(first)) await ensureData([first]);
+      const lines = linesOf(first);
+      const input: Record<string, unknown> = lines.length ? { text: lines.map((l) => l.text).join('\n').slice(0, 6000) } : { images: [{ page: 1, jpeg: (await pageJpeg(pdf, first, 1200)).jpeg }] };
+      const r = await ai<{ name: string }>('name', input);
+      return r.name.replace(/\.pdf$/i, '').replace(/[\\/:*?"<>|\n\r]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80) || null;
+    } catch (e) { aiFail(e); return null; }
+  };
+
+  // ----- AI: rewrite a line or a text box -----
+  const [rewrite, setRewrite] = useState<null | { kind: 'run' | 'obj'; key: string; text: string; context: string }>(null);
+  const startRewrite = (kind: 'run' | 'obj', key: string) => afterBlur(async () => {
+    if (!aiAvailable()) { noAi(); return; }
+    if (!(await ensureAi(t('The AI gets this text and the lines around it, and suggests new wording in the same font.')))) return;
+    const s = snapRef.current;
+    let text = '', context = '';
+    if (kind === 'run') {
+      const run = findRun(key);
+      if (!run) return;
+      text = s.edits[key]?.text ?? run.str;
+      const lines = linesOf(run.page);
+      const at = lines.findIndex((l) => l.keys.includes(key));
+      context = lines.slice(Math.max(0, at - 3), at + 4).map((l) => l.text).join('\n');
+    } else {
+      const o = s.objects.find((x) => x.id === key);
+      if (!o || o.type !== 'text') return;
+      text = o.text;
+    }
+    if (!text.trim()) { toast({ msg: t('Type some text first'), kind: 'err' }); return; }
+    setRewrite({ kind, key, text, context });
+  });
+  const applyRewrite = (v: string) => {
+    const r = rewrite;
+    setRewrite(null);
+    if (!r) return;
+    if (r.kind === 'run') {
+      const run = findRun(r.key);
+      if (!run) return;
+      const cur = snapRef.current.edits[r.key] ?? { text: run.str, sizeScale: 1, color: null };
+      const next: RunEdit = { ...cur, text: v };
+      delete next.scales; delete next.looks;
+      setRunEdit(r.key, next);
+    } else {
+      changeObject(r.key, { text: v, looks: undefined } as Partial<EditorObject>, false);
+    }
+    haptic();
+    toast({ msg: t('Text changed, in the same font'), action: { label: t('Undo'), run: hist.undo } });
+  };
+
+  // ----- AI: find the places to write on a flat form (on the device first, the AI reads the pictures) -----
+  const [foundFields, setFoundFields] = useState<null | { list: FoundField[]; by: 'device' | 'ai'; thenFill: boolean }>(null);
+  const flatPages = () => snap.pages.map((p) => p.src).filter((src) => !fields.some((f) => f.page === src));
+  const measureCtx = useRef<CanvasRenderingContext2D | null>(null);
+  const measure = (s: string) => {
+    if (!measureCtx.current) { measureCtx.current = document.createElement('canvas').getContext('2d'); if (measureCtx.current) measureCtx.current.font = '100px Arimo, Helvetica, Arial, sans-serif'; }
+    return measureCtx.current?.measureText(s).width ?? 0;
+  };
+  /** on the device: dotted / underlined blanks after a label, "Label:" with room after it, ☐ boxes, signature lines */
+  const localFields = (srcs: number[]): FoundField[] => {
+    const out: FoundField[] = [];
+    for (const src of srcs) {
+      const info = infos[src], d = pageDataRef.current[src];
+      if (!info || !d) continue;
+      const runs = d.runs.filter((r) => !erasedRuns.has(r.key));
+      const boxes = runs.map((r) => ({ r, b: runBox(r, info.vm), s: snap.edits[r.key]?.text ?? r.str }));
+      const n = pageNo(src);
+      for (const { b, s } of boxes) {
+        if (!s.trim() || Math.abs(b.angle) > 0.02 || b.h < 4) continue;
+        // where a letter starts: by measured widths (dots are much narrower than letters)
+        const full = measure(s), at = (i: number) => b.x + b.w * (full ? measure(s.slice(0, i)) / full : i / Math.max(1, s.length));
+        const len = Math.max(1, [...s].length);
+        // blanks: ……… or ____ (several on one line: "Name ____ Datum ____")
+        let last = 0;
+        for (const m of s.matchAll(/[._…]{4,}|_{3,}/g)) {
+          const label = s.slice(last, m.index).replace(/[:：\s]+$/, '').trim().split(/\s{2,}/).pop() ?? '';
+          last = m.index! + m[0].length;
+          const x0 = at(m.index!), x1 = at(last);
+          if (x1 - x0 < 24) continue;
+          const sign = /unterschrift|signature|unterzeichn/i.test(label);
+          out.push({ src, page: n, label: label || t('Field'), kind: sign ? 'sign' : /datum|date/i.test(label) ? 'date' : 'text', x: x0, y: b.top - b.h * 0.25, w: x1 - x0, h: b.h * 1.35 });
+        }
+        // "Label:" with nothing after it on the line
+        const lm = /^\s*([^:：]{2,40})[:：]\s*$/.exec(s);
+        if (lm && !/[._…]{4,}|_{3,}/.test(s)) {
+          const x0 = b.x + b.w + b.h * 0.6;
+          const next = boxes.filter((o) => o.s.trim() && Math.abs(o.b.y - b.y) < b.h * 0.6 && o.b.x > b.x + b.w).sort((a, c) => a.b.x - c.b.x)[0];
+          const x1 = Math.min(next ? next.b.x - 6 : info.w - 36, x0 + 320);
+          if (x1 - x0 >= 60) out.push({ src, page: n, label: lm[1].trim(), kind: /datum|date/i.test(lm[1]) ? 'date' : /unterschrift|signature/i.test(lm[1]) ? 'sign' : 'text', x: x0, y: b.top - b.h * 0.25, w: x1 - x0, h: b.h * 1.35 });
+        }
+        // printed check boxes
+        for (const m of s.matchAll(/[☐□▢○◯]/g)) {
+          const x0 = at(m.index!), cw = b.w / len;
+          const label = s.slice(m.index! + 1).split(/[☐□▢○◯]/)[0].trim().slice(0, 40);
+          out.push({ src, page: n, label: label || t('Checkbox'), kind: 'check', x: x0, y: b.top, w: Math.max(6, cw), h: Math.max(6, Math.min(b.h, cw * 1.2)) });
+        }
+      }
+    }
+    return out;
+  };
+  const overlap = (a: FoundField, b: FoundField) => {
+    if (a.src !== b.src) return 0;
+    const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
+    return w > 0 && h > 0 ? (w * h) / Math.min(a.w * a.h, b.w * b.h) : 0;
+  };
+  const aiFields = async (srcs: number[]): Promise<FoundField[]> => {
+    const out: FoundField[] = [];
+    const list = srcs.slice(0, 12);
+    const batch = async (part: number[]) => {
+      const pages = [];
+      const scales: Record<number, { s: number; src: number }> = {};
+      for (const src of part) {
+        const img = await pageJpeg(pdf, src, 1600, 0.75);
+        const n = pageNo(src);
+        scales[n] = { s: img.scale, src };
+        const lines = linesOf(src).map((l) => `${Math.round(l.x * img.scale)},${Math.round(l.y * img.scale)},${Math.round(l.w * img.scale)},${Math.round(l.h * img.scale)}: ${l.text}`).join('\n');
+        pages.push({ page: n, pw: img.w, ph: img.h, jpeg: img.jpeg, lines });
+      }
+      const r = await ai<{ fields: { page: number; label: string; kind: FoundField['kind']; x: number; y: number; w: number; h: number }[] }>('detect', { pages });
+      for (const f of r.fields ?? []) {
+        const sc = scales[f.page];
+        if (!sc || !(f.w > 0 && f.h > 0)) continue;
+        const info = infos[sc.src];
+        const x = Math.max(0, f.x / sc.s), y = Math.max(0, f.y / sc.s);
+        out.push({ src: sc.src, page: f.page, label: (f.label ?? '').trim().slice(0, 80), kind: f.kind, x, y, w: Math.min(info.w - x, f.w / sc.s), h: Math.min(info.h - y, f.h / sc.s) });
+      }
+    };
+    const parts: number[][] = [];
+    for (let i = 0; i < list.length; i += 2) parts.push(list.slice(i, i + 2));
+    let done = 0;
+    setBusy({ title: t('The AI is reading the form…'), progress: 0 });
+    try {
+      // two requests at a time
+      const queue = [...parts];
+      await Promise.all([0, 1].map(async () => {
+        while (queue.length) { await batch(queue.shift()!); done++; setBusy({ title: t('The AI is reading the form…'), progress: done / parts.length }); }
+      }));
+    } finally { setBusy(null); }
+    return out;
+  };
+  const findFields = async (o: { ai?: boolean; thenFill?: boolean } = {}) => {
+    await readAllPages();
+    const srcs = flatPages();
+    if (!srcs.length) { toast({ msg: t('This form already has fillable fields') }); if (o.thenFill) smartFill(); return; }
+    let list = localFields(srcs), by: 'device' | 'ai' = 'device';
+    const useAi = o.ai ?? aiAllowed();
+    if (useAi && aiAvailable() && (o.ai || await ensureAi(t('The AI looks at pictures of the pages to find every place to write, tick or sign.')))) {
+      try {
+        const got = await aiFields(srcs);
+        list = [...got, ...list.filter((l) => !got.some((g) => overlap(g, l) > 0.3))];
+        by = 'ai';
+      } catch (e) { aiFail(e); }
+    }
+    list.sort((a, b) => snap.pages.findIndex((p) => p.src === a.src) - snap.pages.findIndex((p) => p.src === b.src) || a.y - b.y || a.x - b.x);
+    setFoundFields({ list, by, thenFill: !!o.thenFill });
+  };
+  const makeFillable = async (list: FoundField[], thenFill: boolean) => {
+    setFoundFields(null);
+    if (!onAddFields) return;
+    const inv = (m: number[], x: number, y: number) => {
+      const det = m[0] * m[3] - m[1] * m[2] || 1;
+      const dx = x - m[4], dy = y - m[5];
+      return [(m[3] * dx - m[2] * dy) / det, (-m[1] * dx + m[0] * dy) / det];
+    };
+    const out: NewField[] = list.filter((f) => f.kind !== 'sign').map((f) => {
+      const vm = infos[f.src].vm;
+      const pts = [inv(vm, f.x, f.y), inv(vm, f.x + f.w, f.y), inv(vm, f.x, f.y + f.h), inv(vm, f.x + f.w, f.y + f.h)];
+      const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+      return { page: f.src, label: f.label, kind: f.kind as NewField['kind'], x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+    });
+    const n = await onAddFields(out);
+    if (!n) return;
+    pickTool('fill');
+    toast({ msg: tn(n, '{n} field is now fillable', '{n} fields are now fillable') });
+    if (thenFill) pendingFill.current = true;
+  };
+  // after new fields are read, Smart fill continues
+  const pendingFill = useRef(false);
+  useEffect(() => { if (pendingFill.current && fields.length) { pendingFill.current = false; setTimeout(() => smartFill(), 50); } }, [fields]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ----- AI: Smart fill -----
+  const [fillReview, setFillReview] = useState<null | { items: FillItem[] | null; questions: FillQuestion[]; busy: boolean; err: string | null }>(null);
+  const smartFill = async (notes = '') => {
+    if (!aiAvailable()) { autofill(); return; }
+    if (!(await ensureAi(t('Smart fill sends the form’s fields, the text of the pages and My details to the AI, and shows you every answer before it is filled in.')))) return;
+    const targets = fillable.filter((f) => f.type !== 'sig');
+    if (!targets.length) { findFields({ thenFill: true }); return; }
+    if (targets.every((f) => isFilled(f, snapRef.current.forms))) { toast({ msg: t('Every field is already filled in') }); return; }
+    await readAllPages();
+    setFillReview({ items: null, questions: [], busy: true, err: null });
+    const vals = snapRef.current.forms;
+    const meta = new Map<string, { f: FormField; options?: { v: string; label: string }[] }>();
+    const list = targets.filter((f) => f.type !== 'sig').map((f) => {
+      const cur = vals[f.name] ?? f.initial;
+      const options = f.type === 'radio'
+        ? fields.filter((g) => g.name === f.name && g.exportValue).map((g) => ({ v: g.exportValue!, label: g.exportValue! }))
+        : f.type === 'choice' ? f.options : undefined;
+      meta.set(f.name, { f, options });
+      // the printed words on the field's own row (or just above it): the label and hints like "(TT.MM.JJJJ)"
+      const rows = linesOf(f.page);
+      const same = rows.filter((l) => l.y < f.y + f.h && l.y + l.h > f.y && l.x < f.x + f.w + 40);
+      const near = (same.length ? same : rows.filter((l) => l.y + l.h <= f.y + 2 && l.y + l.h > f.y - 16)).map((l) => l.text).slice(0, 3).join(' | ');
+      return {
+        id: f.name, page: pageNo(f.page), label: printedLabel(f) ?? f.label ?? f.name, tooltip: f.label && f.label !== f.name ? f.label : undefined, near,
+        kind: f.type === 'check' ? 'check' : f.type === 'text' ? (f.multiline ? 'multiline' : 'text') : 'choice',
+        options: options?.map((o) => o.label), maxLen: f.maxLen, filled: typeof cur === 'string' ? cur : cur ? 'yes' : '',
+      };
+    });
+    try {
+      const d = await getAiDoc({ images: false });
+      const p = loadProfile();
+      const r = await ai<{ values?: { id: string; value: string; from?: string }[]; questions?: { id: string; question: string }[] }>('fill',
+        { fields: list.filter((x) => !x.filled), profile: p, notes, text: d.text.slice(0, 40000), lang: answerLang() });
+      const items: FillItem[] = [];
+      for (const v of r.values ?? []) {
+        const m = meta.get(v.id);
+        if (!m || typeof v.value !== 'string') continue;
+        const f = m.f;
+        const kind: FillItem['kind'] = f.type === 'check' ? 'check' : f.type === 'text' ? 'text' : 'choice';
+        let value = v.value.trim();
+        if (kind === 'check') value = /^(yes|ja|true|x|1|on)$/i.test(value) ? 'yes' : 'no';
+        if (kind === 'choice' && m.options && !m.options.some((o) => o.label === value)) continue;
+        if (f.maxLen && value.length > f.maxLen) value = value.slice(0, f.maxLen);
+        items.push({ id: f.name, label: printedLabel(f) ?? f.label ?? f.name, page: pageNo(f.page), kind, options: m.options?.map((o) => o.label), value, from: v.from, on: true });
+      }
+      items.sort((a, b) => a.page - b.page);
+      setFillReview({ items, questions: (r.questions ?? []).slice(0, 8).map((q) => ({ id: q.id, question: q.question, answer: '' })), busy: false, err: null });
+    } catch (e) {
+      setFillReview({ items: null, questions: [], busy: false, err: t(aiErrorText(e)) });
+    }
+  };
+  const applyFill = (items: FillItem[]) => {
+    setFillReview(null);
+    const forms: Record<string, string | boolean> = {};
+    for (const it of items) {
+      const f = fillable.find((x) => x.name === it.id);
+      if (!f) continue;
+      if (f.type === 'check') forms[f.name] = it.value === 'yes';
+      else if (f.type === 'radio') forms[f.name] = it.value;
+      else if (f.type === 'choice') forms[f.name] = f.options?.find((o) => o.label === it.value)?.v ?? it.value;
+      else forms[f.name] = it.value;
+    }
+    if (!Object.keys(forms).length) return;
+    commit((s) => ({ ...s, forms: { ...s.forms, ...forms } }));
+    haptic();
+    toast({ msg: tn(Object.keys(forms).length, '{n} field filled in', '{n} fields filled in'), action: { label: t('Undo'), run: hist.undo } });
   };
   const hitsByPage = useMemo(() => {
     const m: Record<number, { x: number; y: number; w: number; h: number; cur: boolean; priv: boolean }[]> = {};
@@ -1741,15 +2096,18 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       origColor={pageData[+selRun.key.split(':')[0]]?.colors[selRun.key]?.fg ?? '#000000'}
       onEdit={(e) => (e.text === '' ? afterBlur(() => { setRunEdit(selRun.key, e); if (mobile) setSelected(null); }) : setRunEdit(selRun.key, e))}
       onReset={() => afterBlur(() => setRunEdit(selRun.key, null))} onClose={() => setSelected(null)}
-      onCopy={() => copyRun(selRun)} onCut={() => copyRun(selRun, true)} onMove={() => startMove(selRun)} />
+      onCopy={() => copyRun(selRun)} onCut={() => copyRun(selRun, true)} onMove={() => startMove(selRun)}
+      onAi={aiAvailable() ? () => startRewrite('run', selRun.key) : undefined} />
   );
   const objProps = (compact: boolean, hideTools = false) => selObj && (
     <ObjProps o={selObj} hideTools={hideTools} compact={compact} docFonts={docFonts} order={snap.pages.map((p) => p.src)} onChange={(p) => changeObject(selObj.id, p, false)} onDelete={() => removeObject(selObj.id)}
-      onDuplicate={() => duplicateObject(selObj.id)} onClose={() => { setSelected(null); setSheetFor(null); }} />
+      onDuplicate={() => duplicateObject(selObj.id)} onClose={() => { setSelected(null); setSheetFor(null); }}
+      onAi={aiAvailable() && selObj.type === 'text' ? () => startRewrite('obj', selObj.id) : undefined} />
   );
   const fillPanel = (
     <FillPanel fields={fillable} values={snap.forms} index={fieldIndex} filled={filledCount} mark={fillMark} flatten={flatten}
       onAutofill={() => autofill()} onProfile={() => setShowProfile({ fill: false })} onCheck={readyCheck}
+      onSmartFill={aiAvailable() ? () => smartFill() : undefined} onFindFields={flatPages().length ? () => findFields() : undefined}
       onPick={(f) => focusField(f)} onMark={(m) => setFillMark((cur) => (cur === m ? null : m))} onFlatten={setFlatten} onDownload={download}
       onPrev={() => focusField(fillable[Math.max(0, fieldIndex - 1)])} onNext={() => focusField(fillable[Math.min(fillable.length - 1, fieldIndex + 1)])} />
   );
@@ -1798,6 +2156,11 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
               {editCount > 0 && <span className="chg">{tn(editCount, '{n} change', '{n} changes')}</span>}</div>
           </div>
         </div>
+        {desk && aiAvailable() && (
+          <button className={`aipill${aiOpen ? ' on' : ''}`} onClick={() => openAi()} aria-label={t('AI assistant')} title={`${t('AI assistant')} (Q)`}>
+            <Icon name="sparkle:fill" size={17} /><span>{t('AI')}</span>
+          </button>
+        )}
         <div className="group">
           {desk && <button className={`ibtn${keysOpen ? ' on' : ''}`} onClick={() => { setSelected(null); setKeysOpen((v) => !v); }} aria-label={t('Keyboard shortcuts')} title={t('Keyboard and mouse shortcuts (?)')}><Icon name="keyboard" size={19} /></button>}
           {!mobile && view === 'doc' && <button className={`ibtn${findOpen ? ' on' : ''}`} onClick={() => { setPrivOpen(false); setFindOpen((v) => !v); }} aria-label={t('Find in document')} title={t('Find (Ctrl+F)')}><Icon name="magnifying-glass" size={19} /></button>}
@@ -1825,7 +2188,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       {fileMenu && (
         <FileSheet name={docName ?? file.name.replace(/\.pdf$/i, '') + '-edited'} original={file.name} mobile={mobile} native={!!host.isNative}
           pages={snap.pages.length} changes={editCount}
-          onRename={(n) => setDocName(n)} onClose={() => setFileMenu(false)}
+          onRename={(n) => setDocName(n)} onClose={() => setFileMenu(false)} onSuggest={aiAvailable() ? suggestName : undefined}
           onAct={(a, n) => { setFileMenu(false); if (a === 'find') { setPrivOpen(false); setView('doc'); setFindOpen(true); } else download(a, n); }} />
       )}
 
@@ -1836,7 +2199,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           <nav className="rail" aria-label={t('Tools')}>
             {GROUPS.map((g) => (
               <div key={g.name} className="rgroup" role="group" aria-label={t(g.name)}>
-                {g.items.map((r) => {
+                {/* desktops: the AI assistant has its own button in the top bar */}
+                {g.items.filter((r) => r.t !== 'ai' || (!desk && aiAvailable())).map((r) => {
                   const on = railActive(r);
                   return (
                     <button key={r.t} ref={(el) => { railBtns.current[r.t] = el; }} className={`tool${on ? ' active' : ''}${r.opts ? ' opts' : ''}`}
@@ -2004,8 +2368,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           obj={selObj?.type === 'text' ? selObj : undefined} docFonts={docFonts.length > 0}
           onObj={(p) => selObj && changeObject(selObj.id, p, false)}
           tools={selRun && editing === selRun.key
-            ? <RunTextTools run={selRun} edit={snap.edits[selRun.key]} onEdit={(e) => setRunEdit(selRun.key, e)} />
-            : selObj?.type === 'text' ? <ObjTextTools o={selObj} docFonts={docFonts} onChange={(p) => changeObject(selObj.id, p, false)} /> : null}>
+            ? <><RunTextTools run={selRun} edit={snap.edits[selRun.key]} onEdit={(e) => setRunEdit(selRun.key, e)} />{aiAvailable() && <button className="ibtn ai-slim" onMouseDown={(e) => e.preventDefault()} onClick={() => startRewrite('run', selRun.key)} aria-label={t('Rewrite with AI')} title={t('Rewrite with AI')}><Icon name="sparkle:fill" size={19} /></button>}</>
+            : selObj?.type === 'text' ? <><ObjTextTools o={selObj} docFonts={docFonts} onChange={(p) => changeObject(selObj.id, p, false)} />{aiAvailable() && <button className="ibtn ai-slim" onMouseDown={(e) => e.preventDefault()} onClick={() => startRewrite('obj', selObj.id)} aria-label={t('Rewrite with AI')} title={t('Rewrite with AI')}><Icon name="sparkle:fill" size={19} /></button>}</> : null}>
           {selRun ? runProps(true, true) : objProps(true, true)}
         </SlimBar>
       )}
@@ -2041,7 +2405,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
             <label className="tsearch"><Icon name="magnifying-glass" size={18} />
               <input value={moreQ} onChange={(e) => setMoreQ(e.target.value)} placeholder={t('Search tools')} aria-label={t('Search tools')} autoComplete="off" spellCheck={false} />
               {moreQ && <button className="ibtn" onClick={() => setMoreQ('')} aria-label={t('Clear search')}><Icon name="x:bold" size={14} /></button>}</label>
-            {GROUPS.map((g) => ({ ...g, items: g.items.filter((r) => toolMatch(t(r.label) + ' ' + r.label + ' ' + r.t, moreQ)) })).filter((g) => g.items.length).map((g) => (
+            {GROUPS.map((g) => ({ ...g, items: g.items.filter((r) => (r.t !== 'ai' || aiAvailable()) && toolMatch(t(r.label) + ' ' + r.label + ' ' + r.t + (r.t === 'ai' ? ' ki summary zusammenfassung ask fragen reply antwort' : ''), moreQ)) })).filter((g) => g.items.length).map((g) => (
               <div key={g.name} className="tsg">
                 <span className="kicker">{t(g.name)}</span>
                 <div className="tiles">
@@ -2082,7 +2446,8 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       )}
       {mobile && tool === 'fill' && !activeField && !mobileEditing && (
         <MobileFillBar fields={fillable.length} filled={filledCount} mark={fillMark} onMark={(m) => setFillMark((cur) => (cur === m ? null : m))}
-          onStart={() => focusField(fillable[0])} onAutofill={() => autofill()} onCheck={readyCheck} />
+          onStart={() => focusField(fillable[0])} onAutofill={() => autofill()} onCheck={readyCheck}
+          onSmartFill={aiAvailable() ? () => smartFill() : undefined} onFindFields={flatPages().length ? () => findFields() : undefined} />
       )}
 
       <input ref={imgInput} type="file" accept="image/*" hidden onChange={(e) => { onImage(e.target.files?.[0]); e.target.value = ''; }} />
@@ -2102,6 +2467,19 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
           onAdd={(w) => { const at = addAfter; setAddAfter(null); onAddPages(at, w).then((first) => { if (first !== null && view === 'doc') setTimeout(() => goToPage(first), 400); }); }} />
       )}
       {keysOpen && <ShortcutsSheet onClose={() => setKeysOpen(false)} />}
+      {aiOpen && <AiSheet sheet={mobile} initial={aiOpen.tab} getDoc={getAiDoc} cache={aiCache.current} onClose={() => setAiOpen(null)}
+        onGoPage={(n) => { const src = snap.pages[n - 1]?.src; if (src !== undefined) goToPage(src); }}
+        onCalendar={addCalendar} onRedact={redactTexts} onReplyPdf={replyPdf} onCopy={copyText}
+        onSwitchOff={() => { setAiOn(false); setAiOpen(null); toast({ msg: t('AI is switched off. Nothing is sent anymore.') }); }} />}
+      {rewrite && <AiRewrite sheet={mobile} text={rewrite.text} oneLine={rewrite.kind === 'run'} maxChars={rewrite.kind === 'run' ? Math.round([...rewrite.text].length * 1.15) + 2 : undefined}
+        context={rewrite.context} onApply={applyRewrite} onClose={() => setRewrite(null)} />}
+      {fillReview && <AiFillReview sheet={mobile} items={fillReview.items} questions={fillReview.questions} busy={fillReview.busy} err={fillReview.err}
+        onAgain={(notes) => smartFill(notes)} onApply={applyFill} onClose={() => setFillReview(null)} />}
+      {foundFields && <AiFieldsResult sheet={mobile} found={foundFields.list} by={foundFields.by} pageLabel={pageNo}
+        onShow={(f) => { const keep = foundFields; setFoundFields(null); goToPage(f.src); setTimeout(() => setFoundFields(keep), 1600); }}
+        onMake={(l) => makeFillable(l, foundFields.thenFill)} onClose={() => setFoundFields(null)}
+        onAiBetter={aiAvailable() ? () => { const tf = foundFields.thenFill; setFoundFields(null); findFields({ ai: true, thenFill: tf }); } : undefined} />}
+      {consent && <AiConsent sheet={mobile} why={consent.why} onAnswer={(yes) => { const c = consent; setConsent(null); c.done(yes); }} />}
       {showProfile && <ProfileModal sheet={mobile} fillLabel={showProfile.fill ? t('Save and fill in') : undefined}
         onClose={() => setShowProfile(null)} onSaved={(p) => { const fill = showProfile.fill; setShowProfile(null); if (fill) autofill(p); else toast({ msg: t('Your details are saved on this device') }); }} />}
       {showStamp && <StampModal sheet={mobile} onClose={() => setShowStamp(false)} onPick={(s) => { setShowStamp(false); placeStamp(s, 'image'); }} />}
@@ -2119,11 +2497,13 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
 }
 
 // ---------------- the file: rename, share, print, save ----------------
-function FileSheet({ name, original, mobile, native, pages, changes, onRename, onClose, onAct }: {
+function FileSheet({ name, original, mobile, native, pages, changes, onRename, onClose, onAct, onSuggest }: {
   name: string; original: string; mobile: boolean; native: boolean; pages: number; changes: number;
+  /** a name suggested by the AI from the first page */ onSuggest?: () => Promise<string | null>;
   onRename: (n: string) => void; onClose: () => void; onAct: (a: 'save' | 'share' | 'print' | 'find', name?: string) => void;
 }) {
   const [v, setV] = useState(name);
+  const [naming, setNaming] = useState(false);
   const commit = () => { const t = v.replace(/\.pdf$/i, '').trim(); if (t && t !== name) { onRename(t); return t; } return undefined; };
   const close = () => { commit(); onClose(); };
   useEffect(() => {
@@ -2144,7 +2524,10 @@ function FileSheet({ name, original, mobile, native, pages, changes, onRename, o
         <label className="fs-name">
           <span className="kicker">{t('Name')}</span>
           <span className="sc-name"><input className="input" value={v} onChange={(e) => setV(e.target.value)} onKeyDown={(e) => { e.stopPropagation(); if (e.key === 'Enter') { commit(); onClose(); } }}
-            aria-label={t('File name')} autoComplete="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} /><em>.pdf</em></span>
+            aria-label={t('File name')} autoComplete="off" spellCheck={false} onFocus={(e) => e.currentTarget.select()} /><em>.pdf</em>
+            {onSuggest && <button type="button" className="ibtn fs-ai" disabled={naming} title={t('Suggest a name with AI')} aria-label={t('Suggest a name with AI')}
+              onClick={async (e) => { e.preventDefault(); setNaming(true); try { const n = await onSuggest(); if (n) setV(n); } finally { setNaming(false); } }}>
+              {naming ? <span className="spinner sm" /> : <Icon name="sparkle:fill" size={18} />}</button>}</span>
           <small>{t('Opened as {f}', { f: original })}</small>
         </label>
         <div className="fs-acts">
@@ -2254,7 +2637,7 @@ function SlimBar({ open, onOpen, onDone, run, obj, onObj, children, docFonts, to
   );
 }
 
-function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill, onCheck }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void; onAutofill: () => void; onCheck: () => void }) {
+function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill, onCheck, onSmartFill, onFindFields }: { fields: number; filled: number; mark: FillMark | null; onMark: (m: FillMark) => void; onStart: () => void; onAutofill: () => void; onCheck: () => void; onSmartFill?: () => void; onFindFields?: () => void }) {
   // two calm rows instead of one that scrolls sideways: fields first, the five marks one tap away
   const [marks, setMarks] = useState(false);
   const armed = MARKS.find(([m]) => m === mark);
@@ -2271,6 +2654,9 @@ function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill, onCh
         </div>
       ) : (
         <div className="row">
+          {onSmartFill && <button className="ibtn ai-mini" onClick={onSmartFill} aria-label={t('Smart fill with AI')} title={t('Smart fill with AI')}><Icon name="sparkle:fill" size={21} /></button>}
+          {/* (Smart fill on a printed form finds its fields first) */}
+          {onFindFields && !onSmartFill && fields === 0 && <button className="ibtn ff-mini" onClick={onFindFields} aria-label={t('Make this form fillable')} title={t('Make this form fillable')}><Icon name="textbox:duotone" size={21} /></button>}
           <button className="ibtn af-mini" onClick={onAutofill} aria-label={t('Fill in with my details')} title={t('Fill in with my details')}><Icon name="magic-wand:duotone" size={21} /></button>
           <button className="ibtn rc-mini" onClick={onCheck} aria-label={t('Ready to send?')} title={t('Ready to send?')}><Icon name="seal-check:duotone" size={21} /></button>
           {fields > 0 ? (
@@ -2288,15 +2674,19 @@ function MobileFillBar({ fields, filled, mark, onMark, onStart, onAutofill, onCh
 
 const MARKS: [FillMark, string, string][] = [['check', 'check', 'Tick'], ['cross', 'x:bold', 'Cross'], ['dot', 'circle:fill', 'Dot'], ['text', 'text', 'Text'], ['date', 'calendar-blank', 'Date']];
 
-function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMark, onFlatten, onDownload, onPrev, onNext, onAutofill, onProfile, onCheck }: {
+function FillPanel({ fields, values, index, filled, mark, flatten, onPick, onMark, onFlatten, onDownload, onPrev, onNext, onAutofill, onProfile, onCheck, onSmartFill, onFindFields }: {
   fields: FormField[]; values: Record<string, string | boolean>; index: number; filled: number; mark: FillMark | null; flatten: boolean;
-  onAutofill: () => void; onProfile: () => void; onCheck: () => void;
+  onAutofill: () => void; onProfile: () => void; onCheck: () => void; onSmartFill?: () => void; onFindFields?: () => void;
   onPick: (f: FormField) => void; onMark: (m: FillMark) => void; onFlatten: (v: boolean) => void; onDownload: () => void; onPrev: () => void; onNext: () => void;
 }) {
   const kind: Record<FormField['type'], string> = { text: 'Text', check: 'Checkbox', radio: 'Choice', choice: 'List', sig: 'Signature' };
   return (
     <div className="props" style={{ minHeight: '100%' }}>
       <div className="autofill">
+        {onSmartFill && <button className="af-go ai-go" onClick={onSmartFill}><span className="af-ic"><Icon name="sparkle:fill" size={22} /></span>
+          <span className="af-t"><b>{t('Smart fill with AI')}</b><small>{t('Understands every field; fills from your details and the letter')}</small></span></button>}
+        {onFindFields && <button className="af-go ff-go" onClick={onFindFields}><span className="af-ic"><Icon name="textbox:duotone" size={22} /></span>
+          <span className="af-t"><b>{t('Make this form fillable')}</b><small>{t('Finds the blanks, boxes and lines to write on')}</small></span></button>}
         <button className="af-go" onClick={onAutofill}><span className="af-ic"><Icon name="magic-wand:duotone" size={22} /></span>
           <span className="af-t"><b>{t('Fill in with my details')}</b><small>{t('Name, address, date of birth … in one tap')}</small></span></button>
         <button className="linkbtn" onClick={onProfile}>{t('Edit my details')}</button>

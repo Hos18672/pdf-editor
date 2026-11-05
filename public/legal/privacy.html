@@ -18,16 +18,16 @@
 <article lang="de">
   <span class="lang">Deutsch</span>
   <h1>Datenschutzerklärung</h1>
-  <p class="meta">für die Web-App (hos18672.github.io/pdf-editor) und die Android-App „Paginka“ · Stand: 30.10.2026</p>
+  <p class="meta">für die Web-App (hos18672.github.io/pdf-editor) und die Android-App „Paginka“ · Stand: 05.11.2026</p>
 
-  <div class="box"><b>Kurz gesagt:</b> Ihre Dokumente werden ausschließlich auf Ihrem Gerät verarbeitet. Sie werden nie hochgeladen, an uns oder Dritte gesendet oder von uns gespeichert. Es gibt kein Benutzerkonto, keine Werbung, keine Analyse- oder Tracking-Werkzeuge und keine Cookies.</div>
+  <div class="box"><b>Kurz gesagt:</b> Ihre Dokumente werden auf Ihrem Gerät verarbeitet und nicht von uns gespeichert. Nur wenn Sie den <b>KI-Assistenten</b> selbst einschalten und eine KI-Aktion antippen, wird der dafür nötige Inhalt verschlüsselt an den KI-Dienst Claude (Anthropic) gesendet (siehe Punkt 4). Es gibt kein Benutzerkonto, keine Werbung, keine Analyse- oder Tracking-Werkzeuge und keine Cookies.</div>
 
   <h2>1. Verantwortlicher</h2>
   <p>Reza Hossaini, Am langen Felde 43/67, 1220 Wien, Österreich<br>
   E-Mail: <a href="mailto:rezahosseiniafg@gmail.com">rezahosseiniafg@gmail.com</a> · Telefon: +43 670 4099219</p>
 
   <h2>2. Ihre Dokumente und Fotos</h2>
-  <p>Alles, was Sie mit Paginka öffnen, bearbeiten, scannen, unterschreiben oder umwandeln (PDFs, Bilder, Office- und Textdateien, Kamerafotos, Unterschriften), wird direkt in Ihrem Browser bzw. in der App auf Ihrem Gerät verarbeitet. Auch die Texterkennung (OCR) und die Bildverbesserung beim Scannen laufen auf dem Gerät. Wir erhalten diese Inhalte nicht.</p>
+  <p>Alles, was Sie mit Paginka öffnen, bearbeiten, scannen, unterschreiben oder umwandeln (PDFs, Bilder, Office- und Textdateien, Kamerafotos, Unterschriften), wird direkt in Ihrem Browser bzw. in der App auf Ihrem Gerät verarbeitet. Auch die Texterkennung (OCR) und die Bildverbesserung beim Scannen laufen auf dem Gerät. Wir erhalten diese Inhalte nicht. Ausnahme ist allein der freiwillige KI-Assistent (Punkt 4).</p>
   <p>Wenn Sie ein Ergebnis speichern, teilen, drucken oder an eine andere App (z. B. Kalender) übergeben, geschieht das über die Funktionen Ihres Geräts an das Ziel, das Sie selbst auswählen.</p>
 
   <h2>3. Speicherung auf Ihrem Gerät</h2>
@@ -36,19 +36,30 @@
     <li>Einstellungen: helles/dunkles Design, Seitenleiste, zuletzt benutzte Werkzeuge und Farben, Scan-Einstellungen;</li>
     <li>„Zuletzt verwendet“: Name, Seitenzahl, Vorschaubild und eine Kopie zuletzt geöffneter oder bearbeiteter Dokumente, damit Sie sie wieder öffnen können;</li>
     <li>Unterschriften, wenn Sie „Auf diesem Gerät speichern“ wählen;</li>
+    <li>„Meine Daten“ (Name, Adresse, Geburtsdatum usw.), wenn Sie sie zum Ausfüllen von Formularen eingeben;</li>
+    <li>ob der KI-Assistent eingeschaltet ist, die gewählte Antwortsprache und eine zufällige Geräte-Kennung für das Tageslimit der KI (Punkt 4);</li>
     <li>die Programmdateien der App (Offline-Cache), damit sie auch ohne Internet funktioniert.</li>
   </ul>
   <p>Diese Speicherung ist für die von Ihnen ausdrücklich gewünschten Funktionen technisch erforderlich (§ 165 Abs. 3 TKG 2021; Art. 6 Abs. 1 lit. b und f DSGVO). Es werden keine Cookies gesetzt. Sie können die Daten jederzeit löschen: einzelne Dokumente über das „×“ in der Liste „Zuletzt verwendet“, gespeicherte Unterschriften im Unterschriften-Dialog, oder alles über die Browser-Einstellungen („Websitedaten löschen“) bzw. in Android unter Einstellungen › Apps › Paginka › Speicher › „Daten löschen“.</p>
 
-  <h2>4. Bereitstellung der Website (Hosting)</h2>
+  <h2>4. KI-Assistent (freiwillig)</h2>
+  <p>Paginka bietet einen KI-Assistenten an: Zusammenfassung und Fristen eines Dokuments, Fragen zum Dokument, Antwortbriefe, Umschreiben und Übersetzen von Text, „Smart ausfüllen“ von Formularen, Erkennen von Formularfeldern, Suche nach persönlichen Daten und Vorschläge für Dateinamen. Der Assistent ist <b>ausgeschaltet</b>, bis Sie ihn in der App ausdrücklich einschalten. Vorher wird nichts gesendet.</p>
+  <p><b>Was gesendet wird:</b> Nur wenn Sie eine KI-Aktion antippen, und nur das, was diese Aktion braucht: der Text der Seiten (bei Seiten ohne Text ein Bild der Seite), beim Umschreiben die Zeile und die Zeilen rundherum, beim Erkennen von Feldern Bilder der Formularseiten, bei „Smart ausfüllen“ zusätzlich die Formularfelder, Ihre „Meine Daten“ und was Sie dazu schreiben, bei Antwortbriefen Ihr Name und Ihre Adresse als Absender, bei Fragen Ihre Frage und der bisherige Verlauf. Dokumente können besondere Kategorien personenbezogener Daten (z. B. Gesundheitsdaten) enthalten; senden Sie solche Dokumente nur, wenn Sie das wollen.</p>
+  <p><b>Wohin:</b> Die Anfrage geht verschlüsselt (HTTPS) an unsere Schnittstelle, die bei <b>Supabase</b> (Supabase, Inc., USA; Rechenzentrum in der EU) betrieben wird, und von dort an den KI-Dienst <b>Claude</b> der <b>Anthropic Ireland, Limited</b> (Dublin, Irland; Konzern Anthropic, PBC, USA) als unser Auftragsverarbeiter. Die Antwort wird an Ihr Gerät zurückgeschickt.</p>
+  <p><b>Speicherung:</b> Wir speichern weder die gesendeten Inhalte noch die Antworten. Für ein Tageslimit speichern wir je Tag einen Zähler zu einer verschlüsselten (gehashten) Form Ihrer zufälligen Geräte-Kennung und Ihrer IP-Adresse; diese Zähler werden nach spätestens drei Tagen gelöscht. Wenn Sie eine KI-Antwort über „Antwort melden“ melden, speichern wir nur diese Antwort, die betroffene Funktion und den Grund, um Missbrauch zu prüfen und die Qualität zu verbessern, und löschen sie nach spätestens 90 Tagen. Supabase verarbeitet technisch notwendige Verbindungsdaten (IP-Adresse, Zeitpunkt, Statuscode) und kann sie kurzzeitig protokollieren. Anthropic verwendet die Inhalte nicht zum Training seiner Modelle und löscht sie nach eigenen Angaben innerhalb von 30 Tagen, sofern sie nicht wegen eines Verstoßes gegen Nutzungsrichtlinien oder gesetzlich länger aufbewahrt werden müssen.</p>
+  <p><b>Rechtsgrundlage:</b> Ihre Einwilligung (Art. 6 Abs. 1 lit. a DSGVO; für besondere Kategorien von Daten, die Sie selbst senden, Art. 9 Abs. 2 lit. a DSGVO). Sie können sie jederzeit mit Wirkung für die Zukunft widerrufen: „KI ausschalten“ im Assistenten oder im Menü der Startseite. Danach wird nichts mehr gesendet.</p>
+  <p><b>Übermittlung in Drittländer:</b> Anthropic und Supabase können Daten in den USA verarbeiten. Grundlage sind die EU-Standardvertragsklauseln bzw. das EU-US Data Privacy Framework in den Auftragsverarbeitungsverträgen der Anbieter. Mehr: <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener">Anthropic-Datenschutz</a>, <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase-Datenschutz</a>.</p>
+  <p><b>Hinweis:</b> KI-Antworten können falsch oder unvollständig sein. Prüfen Sie sie, bevor Sie etwas senden oder unterschreiben. Die KI trifft keine Entscheidungen über Sie.</p>
+
+  <h2>5. Bereitstellung der Website (Hosting)</h2>
   <p>Die Web-App wird über <b>GitHub Pages</b> der GitHub, Inc. (88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, USA; ein Unternehmen von Microsoft) ausgeliefert. Beim Aufruf der Website verarbeitet GitHub technisch notwendige Verbindungsdaten, insbesondere Ihre IP-Adresse, Datum und Uhrzeit, die aufgerufene Datei sowie Browser- und Systeminformationen, um die Seiten auszuliefern und die Sicherheit des Dienstes zu gewährleisten. Rechtsgrundlage ist unser berechtigtes Interesse an einer sicheren und verlässlichen Bereitstellung (Art. 6 Abs. 1 lit. f DSGVO). Dabei können Daten in die USA übermittelt werden; GitHub stützt solche Übermittlungen auf die in seiner Datenschutzerklärung beschriebenen Garantien (EU-US Data Privacy Framework bzw. EU-Standardvertragsklauseln). Wir selbst erhalten keine Zugriffsprotokolle mit Ihren Daten. Weitere Informationen: <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub-Datenschutzerklärung</a>.</p>
   <p>Ihre Dokumente werden dabei <b>nicht</b> übertragen: Die Website lädt nur die Programmdateien; die Verarbeitung findet danach auf Ihrem Gerät statt.</p>
 
-  <h2>5. Android-App</h2>
+  <h2>6. Android-App</h2>
   <h3>Berechtigungen</h3>
   <ul>
     <li><b>Kamera</b>: nur zum Scannen von Dokumenten, wenn Sie den Scanner öffnen. Die Fotos bleiben auf dem Gerät.</li>
-    <li><b>Internet</b>: wird für das Laden der App-Inhalte nicht benötigt (sie sind in der App enthalten); die App selbst sendet keine Ihrer Daten.</li>
+    <li><b>Internet</b>: wird für das Laden der App-Inhalte nicht benötigt (sie sind in der App enthalten); die App sendet Inhalte nur für den KI-Assistenten, wenn Sie ihn eingeschaltet haben und eine KI-Aktion antippen (Punkt 4).</li>
   </ul>
   <p>Dateien, die Sie mit „Öffnen mit“ oder „Teilen“ an Paginka übergeben, werden nur auf dem Gerät gelesen. Für Termine öffnet die App Ihre Kalender-App mit vorausgefülltem Eintrag; einen Zugriff auf Ihren Kalender hat Paginka nicht.</p>
   <h3>Google-Dokumentscanner (Google Play-Dienste)</h3>
@@ -56,58 +67,67 @@
   <h3>Bezug der App</h3>
   <p>Wenn Sie die App über Google Play oder GitHub herunterladen, verarbeiten diese Anbieter die dafür nötigen Daten in eigener Verantwortung nach ihren Datenschutzbestimmungen.</p>
 
-  <h2>6. Kontakt per E-Mail oder Telefon</h2>
+  <h2>7. Kontakt per E-Mail oder Telefon</h2>
   <p>Wenn Sie uns kontaktieren, verwenden wir Ihre Angaben nur zur Bearbeitung Ihrer Anfrage (Art. 6 Abs. 1 lit. b bzw. f DSGVO) und löschen sie, sobald sie dafür nicht mehr benötigt werden, sofern keine gesetzliche Aufbewahrungspflicht besteht.</p>
 
-  <h2>7. Keine Analyse, keine Werbung, keine Profile</h2>
+  <h2>8. Keine Analyse, keine Werbung, keine Profile</h2>
   <p>Paginka verwendet keine Analyse-, Tracking-, Werbe- oder Social-Media-Dienste und trifft keine automatisierten Entscheidungen über Sie.</p>
 
-  <h2>8. Ihre Rechte</h2>
-  <p>Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch (Art. 15–21 DSGVO). Da Ihre Inhalte nur auf Ihrem Gerät liegen, können Sie diese selbst jederzeit einsehen und löschen. Für Anfragen schreiben Sie an die oben genannte E-Mail-Adresse. Sie haben außerdem das Recht, sich bei der Aufsichtsbehörde zu beschweren: Österreichische Datenschutzbehörde, Barichgasse 40–42, 1030 Wien, <a href="https://www.dsb.gv.at" target="_blank" rel="noopener">www.dsb.gv.at</a>.</p>
+  <h2>9. Ihre Rechte</h2>
+  <p>Sie haben das Recht auf Auskunft, Berichtigung, Löschung, Einschränkung der Verarbeitung, Datenübertragbarkeit und Widerspruch (Art. 15–21 DSGVO). Da Ihre Inhalte nur auf Ihrem Gerät liegen, können Sie diese selbst jederzeit einsehen und löschen; an den KI-Assistenten gesendete Inhalte speichern wir nicht. Ihre Einwilligung zur KI können Sie jederzeit widerrufen (Punkt 4). Für Anfragen schreiben Sie an die oben genannte E-Mail-Adresse. Sie haben außerdem das Recht, sich bei der Aufsichtsbehörde zu beschweren: Österreichische Datenschutzbehörde, Barichgasse 40–42, 1030 Wien, <a href="https://www.dsb.gv.at" target="_blank" rel="noopener">www.dsb.gv.at</a>.</p>
 
-  <h2>9. Kinder</h2>
+  <h2>10. Kinder</h2>
   <p>Paginka richtet sich nicht speziell an Kinder und erhebt wissentlich keine Daten von Kindern.</p>
 
-  <h2>10. Änderungen</h2>
+  <h2>11. Änderungen</h2>
   <p>Wir passen diese Erklärung an, wenn sich die App oder die Rechtslage ändert. Es gilt die jeweils hier veröffentlichte Fassung.</p>
 </article>
 
 <article lang="en">
   <span class="lang">English</span>
   <h1>Privacy policy</h1>
-  <p class="meta">for the web app (hos18672.github.io/pdf-editor) and the Android app “Paginka” · Last updated: 30 Oct 2026</p>
-  <div class="box"><b>In short:</b> your documents are processed only on your device. They are never uploaded, sent to us or anyone else, or stored by us. There is no account, no advertising, no analytics or tracking, and no cookies.</div>
+  <p class="meta">for the web app (hos18672.github.io/pdf-editor) and the Android app “Paginka” · Last updated: 5 Nov 2026</p>
+  <div class="box"><b>In short:</b> your documents are processed on your device and never stored by us. Only if you switch on the <b>AI assistant</b> yourself and tap an AI action is the content that action needs sent, encrypted, to the AI service Claude (Anthropic) (see section 4). There is no account, no advertising, no analytics or tracking, and no cookies.</div>
 
   <h2>1. Controller</h2>
   <p>Reza Hossaini, Am langen Felde 43/67, 1220 Vienna, Austria · <a href="mailto:rezahosseiniafg@gmail.com">rezahosseiniafg@gmail.com</a> · +43 670 4099219</p>
 
   <h2>2. Your documents and photos</h2>
-  <p>Everything you open, edit, scan, sign or convert (PDFs, images, Office and text files, camera photos, signatures) is processed directly in your browser or in the app on your device, including text recognition (OCR) and scan clean-up. We never receive this content. When you save, share or print a result, or hand it to another app, your device does this to the destination you choose.</p>
+  <p>Everything you open, edit, scan, sign or convert (PDFs, images, Office and text files, camera photos, signatures) is processed directly in your browser or in the app on your device, including text recognition (OCR) and scan clean-up. We never receive this content. The only exception is the optional AI assistant (section 4). When you save, share or print a result, or hand it to another app, your device does this to the destination you choose.</p>
 
   <h2>3. Storage on your device</h2>
-  <p>To work as you ask, the app stores the following <b>only locally</b> (localStorage, IndexedDB, offline cache); it never leaves your device: settings (theme, panels, recent tools and colours, scan options); “Recent” documents (name, page count, thumbnail and a copy, so you can reopen them); signatures, if you choose “Save on this device”; and the app's own files for offline use. This storage is strictly necessary for functions you request (§ 165(3) Austrian Telecommunications Act 2021; Art. 6(1)(b) and (f) GDPR). No cookies are set. You can delete it at any time: single documents with the “×” in the Recent list, signatures in the signature dialog, or everything by clearing site data in your browser or, on Android, Settings › Apps › Paginka › Storage › Clear data.</p>
+  <p>To work as you ask, the app stores the following <b>only locally</b> (localStorage, IndexedDB, offline cache); it never leaves your device: settings (theme, panels, recent tools and colours, scan options); “Recent” documents (name, page count, thumbnail and a copy, so you can reopen them); signatures, if you choose “Save on this device”; “My details” (name, address, date of birth …) if you enter them to fill in forms; whether the AI assistant is switched on, the chosen answer language and a random device ID for the AI's daily limit (section 4); and the app's own files for offline use. This storage is strictly necessary for functions you request (§ 165(3) Austrian Telecommunications Act 2021; Art. 6(1)(b) and (f) GDPR). No cookies are set. You can delete it at any time: single documents with the “×” in the Recent list, signatures in the signature dialog, or everything by clearing site data in your browser or, on Android, Settings › Apps › Paginka › Storage › Clear data.</p>
 
-  <h2>4. Website hosting</h2>
+  <h2>4. AI assistant (optional)</h2>
+  <p>Paginka offers an AI assistant: a summary and the deadlines of a document, questions about it, reply letters, rewriting and translating text, “Smart fill” for forms, finding form fields, finding personal data and suggesting file names. The assistant is <b>off</b> until you explicitly switch it on in the app. Nothing is sent before that.</p>
+  <p><b>What is sent:</b> only when you tap an AI action, and only what that action needs: the text of the pages (a picture of the page for pages without text); for rewriting, the line and the lines around it; for finding fields, pictures of the form pages; for Smart fill, also the form fields, your “My details” and what you add; for reply letters, your name and address as the sender; for questions, your question and the conversation so far. Documents may contain special categories of personal data (e.g. health data); only send such documents if you want to.</p>
+  <p><b>Where it goes:</b> the request goes encrypted (HTTPS) to our interface, run on <b>Supabase</b> (Supabase, Inc., USA; data centre in the EU), and from there to the AI service <b>Claude</b> by <b>Anthropic Ireland, Limited</b> (Dublin, Ireland; part of Anthropic, PBC, USA) as our processor. The answer is sent back to your device.</p>
+  <p><b>Storage:</b> we store neither the content sent nor the answers. For a daily limit we keep a per-day counter for a hashed form of your random device ID and of your IP address; these counters are deleted after at most three days. If you report an AI answer with “Report this answer”, we keep only that answer, the feature and the reason, to check for abuse and improve quality, and delete it after at most 90 days. Supabase processes technically necessary connection data (IP address, time, status code) and may log it briefly. Anthropic does not use the content to train its models and, according to Anthropic, deletes it within 30 days unless it must be kept longer because of a usage-policy violation or by law.</p>
+  <p><b>Legal basis:</b> your consent (Art. 6(1)(a) GDPR; for special categories of data you send yourself, Art. 9(2)(a) GDPR). You can withdraw it at any time with effect for the future: “Switch off AI” in the assistant or in the home screen menu. After that nothing is sent.</p>
+  <p><b>Transfers outside the EU:</b> Anthropic and Supabase may process data in the USA, based on EU standard contractual clauses or the EU-U.S. Data Privacy Framework in the providers' data processing agreements. See the <a href="https://www.anthropic.com/legal/privacy" target="_blank" rel="noopener">Anthropic privacy policy</a> and the <a href="https://supabase.com/privacy" target="_blank" rel="noopener">Supabase privacy policy</a>.</p>
+  <p><b>Note:</b> AI answers can be wrong or incomplete. Check them before you send or sign anything. The AI makes no decisions about you.</p>
+
+  <h2>5. Website hosting</h2>
   <p>The web app is served by <b>GitHub Pages</b> (GitHub, Inc., 88 Colin P. Kelly Jr. Street, San Francisco, CA 94107, USA, a Microsoft company). When you open the website, GitHub processes technically necessary connection data, in particular your IP address, date and time, the requested file and browser/system information, to deliver the pages and keep the service secure. Legal basis: our legitimate interest in secure, reliable delivery (Art. 6(1)(f) GDPR). Data may be transferred to the USA; GitHub relies on the safeguards described in its privacy statement (EU-U.S. Data Privacy Framework or EU standard contractual clauses). We do not receive access logs. See the <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement" target="_blank" rel="noopener">GitHub privacy statement</a>. Your documents are <b>not</b> transferred: the website only loads the program files; processing then happens on your device.</p>
 
-  <h2>5. Android app</h2>
-  <p><b>Permissions:</b> Camera — only for scanning documents when you open the scanner; photos stay on the device. Internet — not needed to load the app's content (it is bundled); the app itself sends none of your data. Files you pass to Paginka with “Open with” or “Share” are read only on the device. For dates, the app opens your calendar app with a pre-filled event; Paginka has no access to your calendar.</p>
+  <h2>6. Android app</h2>
+  <p><b>Permissions:</b> Camera — only for scanning documents when you open the scanner; photos stay on the device. Internet — not needed to load the app's content (it is bundled); the app sends content only for the AI assistant, when you have switched it on and tap an AI action (section 4). Files you pass to Paginka with “Open with” or “Share” are read only on the device. For dates, the app opens your calendar app with a pre-filled event; Paginka has no access to your calendar.</p>
   <p><b>Google document scanner (Google Play services):</b> on Android devices with Google Play services, the scanner uses Google's document scanner (ML Kit), provided by Google Ireland Limited, Gordon House, Barrow Street, Dublin 4, Ireland. Detection and page processing happen on the device and the scanned images are not sent to Google. ML Kit does send technical diagnostic data to Google (such as device and app information, device identifiers, performance metrics, error codes, and the type and version of the feature used) to operate and improve the service; it is encrypted in transit and, according to Google, not shared with third parties. Legal basis: our legitimate interest in a reliable scan function (Art. 6(1)(f) GDPR). See <a href="https://developers.google.com/ml-kit/android-data-disclosure" target="_blank" rel="noopener">ML Kit data disclosure</a> and the <a href="https://policies.google.com/privacy" target="_blank" rel="noopener">Google privacy policy</a>. If Google's scanner is not available, the app uses its own scanner, which works without Google.</p>
   <p><b>Getting the app:</b> when you download the app from Google Play or GitHub, those providers process the data needed for this under their own privacy terms.</p>
 
-  <h2>6. Contacting us</h2>
+  <h2>7. Contacting us</h2>
   <p>If you contact us, we use your details only to handle your request (Art. 6(1)(b) or (f) GDPR) and delete them when no longer needed, unless the law requires us to keep them.</p>
 
-  <h2>7. No analytics, no ads, no profiling</h2>
+  <h2>8. No analytics, no ads, no profiling</h2>
   <p>Paginka uses no analytics, tracking, advertising or social-media services and makes no automated decisions about you.</p>
 
-  <h2>8. Your rights</h2>
-  <p>You have the right of access, rectification, erasure, restriction, data portability and objection (Art. 15–21 GDPR). As your content stays on your device, you can view and delete it yourself at any time. For requests, write to the e-mail address above. You may also lodge a complaint with the Austrian Data Protection Authority, Barichgasse 40–42, 1030 Vienna, <a href="https://www.dsb.gv.at" target="_blank" rel="noopener">www.dsb.gv.at</a>.</p>
+  <h2>9. Your rights</h2>
+  <p>You have the right of access, rectification, erasure, restriction, data portability and objection (Art. 15–21 GDPR). As your content stays on your device, you can view and delete it yourself at any time; we do not store content sent to the AI assistant. You can withdraw your consent to AI at any time (section 4). For requests, write to the e-mail address above. You may also lodge a complaint with the Austrian Data Protection Authority, Barichgasse 40–42, 1030 Vienna, <a href="https://www.dsb.gv.at" target="_blank" rel="noopener">www.dsb.gv.at</a>.</p>
 
-  <h2>9. Children</h2>
+  <h2>10. Children</h2>
   <p>Paginka is not directed at children and does not knowingly collect data from children.</p>
 
-  <h2>10. Changes</h2>
+  <h2>11. Changes</h2>
   <p>We update this policy when the app or the law changes. The version published here applies. If the versions differ, the German version prevails.</p>
 </article>
 <footer>Paginka · Reza Hossaini, Wien</footer>

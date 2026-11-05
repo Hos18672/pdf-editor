@@ -193,7 +193,8 @@ export function ObjTextTools({ o, docFonts, onChange }: { o: Extract<EditorObjec
 }
 
 /** Properties of an existing line of text */
-export function RunProps({ run, font, known, edit, line, origColor, onEdit, onReset, onClose, compact, onCopy, onCut, onMove, hideTools }: {
+export function RunProps({ run, font, known, edit, line, origColor, onEdit, onReset, onClose, compact, onCopy, onCut, onMove, hideTools, onAi }: {
+  /** rewrite the line with AI */ onAi?: () => void;
   run: TextRun; font?: FontInfo; known?: (c: string) => boolean; edit?: RunEdit; line: string; origColor: string;
   onEdit: (e: RunEdit) => void; onReset: () => void; onClose?: () => void; compact?: boolean;
   /** bold / italic / … are shown elsewhere (the phone's bar) */ hideTools?: boolean;
@@ -240,6 +241,7 @@ export function RunProps({ run, font, known, edit, line, origColor, onEdit, onRe
       <div className="field"><div className="label">{selLook ? t('Colour of the selected letters') : t('Colour')}</div>
         <Swatches value={selLook ? selLook.c ?? cur.color : cur.color} original={origColor} title={t('Text colour')} onPick={pickColor} />
       </div>
+      {onAi && <button className="btn outline ai-btn" onMouseDown={(e) => e.preventDefault()} onClick={onAi}><Icon name="sparkle:fill" size={17} />{t('Rewrite with AI')}</button>}
       {(onCopy || onCut || onMove) && (
         <div className="lineacts" role="group" aria-label={t('Text line')}>
           {onCopy && <button className="btn outline" onClick={onCopy}><Icon name="copy" size={17} />{t('Copy')}</button>}
@@ -298,7 +300,8 @@ const cutOf = (f: DocFont, docFonts: DocFont[], bold: boolean, italic: boolean) 
   return docFonts.find((d) => root(d.label) === r && styleOf(d).bold === bold && styleOf(d).italic === italic) ?? null;
 };
 
-export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact, order, docFonts = [], hideTools }: {
+export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact, order, docFonts = [], hideTools, onAi }: {
+  /** rewrite a text box with AI */ onAi?: () => void;
   o: EditorObject; onChange: (p: Partial<EditorObject>) => void; onDelete: () => void; onDuplicate: () => void; onClose?: () => void; compact?: boolean;
   /** the document's pages in order (original indices), for links to a page */
   order?: number[];
@@ -331,6 +334,7 @@ export function ObjProps({ o, onChange, onDelete, onDuplicate, onClose, compact,
               set({ color: color ?? '#000000', looks: dropLook(o.text, o.looks, 'c', { b: o.bold, i: o.italic, u: !!o.underline, s: !!o.strike }) });
             }} />
           </div>
+          {onAi && <button className="btn outline ai-btn" onMouseDown={(e) => e.preventDefault()} onClick={onAi}><Icon name="sparkle:fill" size={17} />{t('Rewrite with AI')}</button>}
           {!compact && <div className="hint">{t('Select words while typing to style just them.')}</div>}
         </>
       )}

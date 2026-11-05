@@ -195,6 +195,27 @@ export default function EditorApp(host: HostProps) {
 
   // Pages added in the editor are appended to the file (so the pages already there, and the edits on
   // them, keep their numbers) and placed in the page order where they were asked for.
+  // Places found on a flat form become real form fields: written into the file, the document is read again
+  // (same pages, edits stay) and the editor lists them as fields.
+  const addFields = async (list: import('./ai/makeFields').NewField[]): Promise<number> => {
+    if (!file || !pdf || !list.length) return 0;
+    setBusy({ title: t('Making the form fillable'), detail: t('On this device. Your edits stay.') });
+    try {
+      const { addFormFields } = await loadScreens();
+      const r = await addFormFields(file.bytes, list);
+      if (!r.added) return 0;
+      const next = await openPdf(r.bytes);
+      const old = pdf;
+      setPdf(next);
+      setFile({ name: file.name, bytes: r.bytes });
+      setTimeout(() => old.destroy?.(), 15000);
+      return r.added;
+    } catch (e) {
+      console.warn('add fields failed', e);
+      setToastMsg({ msg: t('The fields could not be added to this file'), kind: 'err' });
+      return 0;
+    } finally { setBusy(null); }
+  };
   const addPages = async (after: number, what: AddWhat): Promise<number | null> => {
     if (!file || !pdf) return null;
     setBusy({ title: t('Adding pages'), detail: t('On this device. Your edits stay.') });
@@ -344,7 +365,7 @@ export default function EditorApp(host: HostProps) {
       <style>{fontFaces() + css}</style>
       <Suspense fallback={<div className="lazy-wait" role="status" aria-label={t('Loading')}><span className="spinner" /></div>}>
       {route.name === 'editor' && file && pdf ? (
-        <Editor key={docId} onAddPages={addPages} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
+        <Editor key={docId} onAddPages={addPages} onAddFields={addFields} start={route.start} host={host} file={file} pdf={pdf} infos={infos} hist={hist}
           onClose={close} onTools={() => openTools('editor')} theme={theme} onTheme={toggleTheme} bp={bp}
           onSaved={(bytes, name) => { saveRecent({ id: recentId.current ?? undefined, name, kind: 'edited', bytes }).then((i) => { if (i) recentId.current = i; }); }}
           toast={setToastMsg} setBusy={setBusy} />

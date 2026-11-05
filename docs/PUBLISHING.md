@@ -27,7 +27,16 @@ Status as of 30 Oct 2026. The app processes documents only on the device, has no
 - Data types collected:
   - **App info and performance → Diagnostics** (and **Crash logs** if the form asks): collected, **not shared**, processed **ephemerally: no**, **required**, purpose **Analytics / App functionality** (ML Kit diagnostics).
   - **Device or other IDs**: collected, not shared, required, purpose **Analytics / App functionality** (ML Kit).
-- Do **not** declare files, photos or documents: they are processed only on the device and never leave it (Google's definition of "collected" means sent off the device).
+- **With the AI assistant (from v1.3)** — only if the build has `EXPO_PUBLIC_AI_URL` set. AI is off until the user switches it on, and content is sent only when they tap an AI action, so these types are **optional**:
+  - **Files and docs**: collected, **not shared** (Anthropic and Supabase are service providers processing on your behalf), processed **ephemerally: no** (Anthropic keeps API data up to 30 days), **optional**, purpose **App functionality**.
+  - **Photos and videos → Photos** only if page pictures count for your app (scans sent for field detection / reading): same answers as files.
+  - **Personal info → Name, Address, Phone number, Email address, Other info** (from "My details" for Smart fill and reply letters): collected, not shared, not ephemeral, optional, purpose **App functionality**.
+  - **App activity → Other user-generated content** (questions typed into the assistant; answers the user reports): collected, not shared, optional, App functionality.
+  - **Device or other IDs**: also used for the AI daily limit (random ID, hashed on the server).
+  - Encryption in transit: **Yes** (HTTPS). Deletion request: users can ask by e-mail; content is not stored by you, reports are deleted after 90 days.
+  - Store listing must not claim "files never leave your phone" any more. Use e.g. "Edit, sign and scan PDFs. Private: AI only when you switch it on."
+- Without AI, do **not** declare files, photos or documents: they are processed only on the device and never leave it (Google's definition of "collected" means sent off the device).
+- **AI-Generated Content policy**: answers, rewrites, overviews and reply letters have a "Report this answer" flag (stored in `ai_reports`). Review the table now and then.
 - Re-check against https://developers.google.com/ml-kit/android-data-disclosure before submitting.
 
 **App content → other declarations**
@@ -39,7 +48,7 @@ Status as of 30 Oct 2026. The app processes documents only on the device, has no
 - Permissions declaration: CAMERA is used in the foreground for document scanning only (no special declaration form needed).
 
 **Store listing**
-- App name: Paginka (≤ 30 characters). Short description (≤ 80): e.g. "Edit, sign and scan PDFs. Files never leave your phone."
+- App name: Paginka (≤ 30 characters). Short description (≤ 80): e.g. "Edit, sign and scan PDFs. Files never leave your phone." (without AI) or "Edit, sign, fill and scan PDFs. AI help only when you switch it on." (with AI)
 - Developer contact (shown publicly): e-mail rezahosseiniafg@gmail.com; website https://hos18672.github.io/pdf-editor/
 - Graphics: 512×512 icon, 1024×500 feature graphic, at least 2 phone screenshots.
 

@@ -7,6 +7,8 @@ import { useFitLabels, type Theme } from './hooks';
 import { ago, listRecent, onRecentChange, removeRecent, type RecentDoc } from './recent';
 import { t, tn, useLang } from './i18n';
 import { useBack } from './back';
+import { aiAllowed, aiAvailable, setAiOn, useAiOn } from './ai/client';
+import { AiConsent } from './ai/Consent';
 
 export type OpenState =
   | { kind: 'idle' }
@@ -62,6 +64,7 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
   /** phones: which tab of the bottom bar is shown */
   tab?: HomeTab; onTab?: (t: HomeTab) => void;
 }) {
+  useAiOn(); // the privacy lines change with the AI switch
   const [recent, setRecent] = useState<RecentDoc[]>([]);
   useEffect(() => {
     let alive = true;
@@ -209,7 +212,7 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
             <div className="h3-copy">
               <h1>{t('Edit any PDF.')}<br /><span className="mk">{t('Right here.')}</span></h1>
               {!mobile && <p className="h3-lead">{isNative ? t('Retype existing text in its original font, sign, fill forms, scan, merge and convert. Offline, on this device.') : t('Retype existing text in its original font, sign, fill forms, scan, merge and convert. All in your browser, all offline.')}</p>}
-              {!mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>{t('Files stay on this device.')}</b> {t('Nothing is uploaded, ever.')}</span></div>}
+              {!mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>{t('Files stay on this device.')}</b> {t(aiAllowed() ? 'Nothing is uploaded unless you use AI.' : 'Nothing is uploaded, ever.')}</span></div>}
             </div>
             {over ? card : (
               <div className="h3-card" onClick={onPick}>
@@ -255,7 +258,7 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
               </div>
             </section>
           )}
-          {mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>{t('Files stay on this phone.')}</b> {t('Nothing is uploaded, ever.')}</span></div>}
+          {mobile && <div className="h3-priv"><span><Icon name="lock-simple:fill" size={17} /></span><span><b>{t('Files stay on this phone.')}</b> {t(aiAllowed() ? 'Nothing is uploaded unless you use AI.' : 'Nothing is uploaded, ever.')}</span></div>}
           <footer className="h3-foot"><LegalLinks onOpen={setLegal} /></footer>
         </div>
         {sheetEl}
@@ -280,7 +283,7 @@ export function Start({ state, onFile, onImport, onPick, onPassword, onTools, on
       </header>
       <main className="s2-hero">
         <div className="s2-copy">
-          <div className="s2-pill"><span className="lk"><Icon name="lock" size={13} /></span>{t('Files never leave your device')}</div>
+          <div className="s2-pill"><span className="lk"><Icon name="lock" size={13} /></span>{t(aiAllowed() ? 'Files stay on your device unless you use AI' : 'Files never leave your device')}</div>
           <h1>{t('Edit any PDF.')}<br /><span className="mk">{t('Right here.')}</span></h1>
           <p className="s2-lead">{mobile ? t('Change text in its own font, sign, fill, scan and merge. Offline, on your phone.') : t('Retype existing text in its original font, sign, fill forms, scan, merge and convert. All in your browser, all offline.')}</p>
           {card}
@@ -451,7 +454,7 @@ function PhoneHome({ state, recent, over, drop, card, onPick, onQuick, onRecent,
                 <div className="hx-list">{rest.slice(0, 2).map(row)}</div>
               </section>
             )}
-            {!over && <p className="hx-priv"><Icon name="lock-simple:fill" size={14} /><span><b>{t('Files stay on this phone.')}</b> {t('Nothing is uploaded, ever.')}</span></p>}
+            {!over && <p className="hx-priv"><Icon name="lock-simple:fill" size={14} /><span><b>{t('Files stay on this phone.')}</b> {t(aiAllowed() ? 'Nothing is uploaded unless you use AI.' : 'Nothing is uploaded, ever.')}</span></p>}
           </>
         )}
       </div>
@@ -468,6 +471,8 @@ function HomeMenu({ lang, setLang, theme, onTheme, onLegal, onClose }: {
 }) {
   useBack(onClose);
   const LI: Record<LegalPage, string> = { impressum: 'identification-card', privacy: 'shield-check', terms: 'file-text', licenses: 'code' };
+  const aiOn = useAiOn();
+  const [ask, setAsk] = useState(false);
   return (
     <div className="scrim sheet" onPointerDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="modal hx-msheet" role="dialog" aria-modal="true" aria-label={t('Menu')}>
@@ -479,6 +484,11 @@ function HomeMenu({ lang, setLang, theme, onTheme, onLegal, onClose }: {
               <button role="radio" aria-checked={lang === 'de'} className={lang === 'de' ? 'on' : ''} onClick={() => setLang('de')}>Deutsch</button>
               <button role="radio" aria-checked={lang !== 'de'} className={lang !== 'de' ? 'on' : ''} onClick={() => setLang('en')}>English</button>
             </span></div>
+          {aiAvailable() && <div className="hx-mrow"><span className="ic"><Icon name="sparkle" size={19} /></span><b>{t('AI assistant')}</b>
+            <span className="hx-seg" role="radiogroup" aria-label={t('AI assistant')}>
+              <button role="radio" aria-checked={!aiOn} className={!aiOn ? 'on' : ''} onClick={() => setAiOn(false)}>{t('Off|ai')}</button>
+              <button role="radio" aria-checked={aiOn} className={aiOn ? 'on' : ''} onClick={() => !aiOn && setAsk(true)}>{t('On|ai')}</button>
+            </span></div>}
           <div className="hx-mrow"><span className="ic"><Icon name={theme === 'dark' ? 'moon' : 'sun'} size={19} /></span><b>{t('Appearance')}</b>
             <span className="hx-seg" role="radiogroup" aria-label={t('Appearance')}>
               <button role="radio" aria-checked={theme !== 'dark'} className={theme !== 'dark' ? 'on' : ''} onClick={() => theme === 'dark' && onTheme()}>{t('Light|theme')}</button>
@@ -493,7 +503,8 @@ function HomeMenu({ lang, setLang, theme, onTheme, onLegal, onClose }: {
             </a>
           ))}
         </nav>
-        <p className="hx-mnote"><Icon name="lock-simple:fill" size={14} />{t('Files stay on this phone.')} {t('Nothing is uploaded, ever.')}</p>
+        {ask && <AiConsent sheet why="" onAnswer={() => setAsk(false)} />}
+        <p className="hx-mnote"><Icon name="lock-simple:fill" size={14} />{t('Files stay on this phone.')} {t(aiAllowed() ? 'Nothing is uploaded unless you use AI.' : 'Nothing is uploaded, ever.')}</p>
       </div>
     </div>
   );
