@@ -496,7 +496,7 @@ async function readPages(src: Src, ocr: boolean, prog: (f: number) => void): Pro
       const x = c.getContext('2d')!;
       x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
       await page.render({ canvasContext: x, viewport: vp }).promise;
-      t = ((await worker.recognize(c)).data.text ?? '').trim();
+      t = (((await worker.recognize(c)).data.text ?? '').replace(/[\u200e\u200f\u202a-\u202e]/g, '')).trim();
       c.width = c.height = 0;
       scanned++;
     }

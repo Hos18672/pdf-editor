@@ -45,7 +45,7 @@ async function readDoc(src: Src, ocr: boolean, prog: (f: number) => void): Promi
       const x = c.getContext('2d')!;
       x.fillStyle = '#fff'; x.fillRect(0, 0, c.width, c.height);
       await page.render({ canvasContext: x, viewport: vp }).promise;
-      text.push(((await worker.recognize(c)).data.text ?? '').trim());
+      text.push((((await worker.recognize(c)).data.text ?? '').replace(/[\u200e\u200f\u202a-\u202e]/g, '')).trim());
       pts.push(null);
       c.width = c.height = 0;
       scanned++;

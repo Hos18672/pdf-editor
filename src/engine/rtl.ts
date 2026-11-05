@@ -83,6 +83,24 @@ const MIRROR: Record<string, string> = { '(': ')', ')': '(', '[': ']', ']': '[',
  */
 export function visualToLogical(visual: string): string {
   if (!ARABIC.test(visual)) return visual;
+  // a left-to-right line with Persian inside ("Name ( نام )", Latin at its left end): only the Persian parts turn
+  if (ltrBase(visual)) return visual.replace(AR_SEG, (seg) => rtlToLogical(seg));
+  return rtlToLogical(visual);
+}
+
+const AR_SEG = /[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff](?:[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff\s\u200c\u200d]*[\u0600-\u06ff\u0750-\u077f\ufb50-\ufdff\ufe70-\ufeff])?/g;
+/** drawn order starting with a Latin word, and clearly more Latin than Persian / Arabic */
+function ltrBase(visual: string): boolean {
+  let first = '', ar = 0, la = 0;
+  for (const c of visual) {
+    const r = ARABIC_LETTER.test(c) || PRESENTATION.test(c), l = /[A-Za-zÀ-ɏ]/.test(c);
+    if (!first && (r || l)) first = r ? 'R' : 'L';
+    if (r) ar++; else if (l) la++;
+  }
+  return first === 'L' && ar <= la * 2;
+}
+
+function rtlToLogical(visual: string): string {
   // joined shapes → plain letters; a ligature (lam-alef) spelled in drawn order, so it reads right after turning
   const plain = [...visual].map((c) => (PRESENTATION.test(c) ? [...c.normalize('NFKC')].reverse().join('') : c)).join('');
   const turned = [...plain].reverse().map((c) => MIRROR[c] ?? c).join('');

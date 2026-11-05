@@ -168,7 +168,7 @@ async function htmlToPdf(doc: PDFDocument, html: string, css: string, opt: Conve
       await addTextLayer(doc, page, onPage.map((l) => ({
         text: l.text, size: l.size / PX,
         x0: m + l.x0 / PX, x1: m + l.x1 / PX, y0: ph - m - (l.base - y0) / PX, y1: ph - m - (l.base - y0) / PX,
-      })), helv);
+      })), helv, (await import('./textFonts')).matchFontBytes);
       progress(0.3 + 0.65 * ((i + 1) / n));
     }
   } finally {

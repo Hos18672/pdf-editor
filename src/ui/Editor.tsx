@@ -40,6 +40,7 @@ import type { Bp, Theme } from './hooks';
 import { setSoftKeyboard, safeTop, useFitLabels } from './hooks';
 import { ThemeButton, LangButton } from './Start';
 import { t, tn, getLang } from './i18n';
+import { hasArabic } from '../engine/rtl';
 import { ai, aiAvailable, aiAllowed, aiErrorText, ensureAi, setConsentAsker, setAiOn, onAiChange, answerLang } from './ai/client';
 import { pageLines, docText, pageJpeg, type Line } from './ai/doctext';
 import { AiConsent, AiRewrite, AiSheet, AiFillReview, AiFieldsResult, type AiCache, type AiDoc, type FillItem, type FillQuestion, type FoundField } from './ai/Assistant';
@@ -1372,7 +1373,9 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     ocrRuns: (src) => pageData[src]?.runs.filter((r) => r.fontName === 'ocr') ?? [],
     edited: (src) => {
       const d = pageDataRef.current[src];
-      if (!d || !d.runs.some((r) => snap.edits[r.key])) return null;
+      // changed lines, and Persian / Arabic pages: the editor's own reading (right order, plain letters;
+      // the raw text of such PDFs is drawn order and joined letter shapes)
+      if (!d || !d.runs.some((r) => snap.edits[r.key] || hasArabic(r.str))) return null;
       return { runs: d.runs, text: (r) => snap.edits[r.key]?.text ?? r.str };
     },
   });
@@ -1648,9 +1651,10 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
     const text = docText(pages);
     const imgs: AiDoc['images'] = [];
     if (images) {
-      // pages without text (scans not read yet): the AI reads their pictures
+      // pages without text, and scans (their recognised text can have mistakes, mostly in Persian):
+      // the AI reads their pictures itself
       for (const p of pages) {
-        if (p.lines.length || imgs.length >= 8) continue;
+        if ((p.lines.length && !pictureSet.has(p.src)) || imgs.length >= 8) continue;
         try { imgs.push({ page: p.n, jpeg: (await pageJpeg(pdf, p.src, 1400)).jpeg }); } catch { /* page not drawable */ }
       }
     }

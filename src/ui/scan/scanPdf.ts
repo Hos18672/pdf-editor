@@ -118,7 +118,7 @@ export async function buildScanPdf(pages: ScanPage[], opts: PdfOpts): Promise<Ui
         const sx = w / c.width, sy = h / c.height;
         try {
           const lines = await ocr.recognizeCanvas(ocrWorker as any, c, (px, py) => [x + px * sx, y + h - py * sy], sx);
-          await layer.addTextLayer(doc, page, lines, helv);
+          await layer.addTextLayer(doc, page, lines, helv, (await import('../textFonts')).matchFontBytes);
         } catch (e) { console.warn('ocr failed on a scanned page', e); }
         c.width = c.height = 0;
       }

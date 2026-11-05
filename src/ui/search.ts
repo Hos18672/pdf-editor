@@ -2,6 +2,7 @@
 // check: IBANs, social security numbers, ID and passport numbers, birth dates, phone numbers, e-mails.
 import type { TextRun } from '../engine/pdfText';
 import type { M } from '../engine/types';
+import { isRtl } from '../engine/rtl';
 
 export interface Rect { x: number; y: number; w: number; h: number } // viewport units (scale 1)
 export interface Hit { page: number; rects: Rect[]; text: string; kind?: string }
@@ -86,7 +87,9 @@ function rectsOf(pt: PageText, s: number, e: number): Rect[] {
   for (const g of pt.segs) {
     if (g.end <= s || g.start >= e) continue;
     const str = pt.text.slice(g.start, g.end);
-    const a = share(str, Math.max(0, s - g.start)), b = share(str, Math.min(g.len, e - g.start));
+    let a = share(str, Math.max(0, s - g.start)), b = share(str, Math.min(g.len, e - g.start));
+    // right-to-left text (Persian, Arabic): the first letters sit at the right end
+    if (isRtl(str)) [a, b] = [1 - b, 1 - a];
     const [p0, p1, p2, p3] = g.quad;
     const lerp = (u: [number, number], v: [number, number], t: number): [number, number] => [u[0] + (v[0] - u[0]) * t, u[1] + (v[1] - u[1]) * t];
     const pts = [lerp(p0, p1, a), lerp(p0, p1, b), lerp(p3, p2, b), lerp(p3, p2, a)];
@@ -104,7 +107,27 @@ export const userPageText = (pdf: any, src: number) => pageText(pdf, src, [1, 0,
 export const userRects = (pt: PageText, s: number, e: number) => rectsOf(pt, s, e);
 export type { PageText };
 
-const fold = (s: string) => s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+const fold = (s: string) => foldMap(s).t;
+/**
+ * Text as searched: case and accents ignored; Persian / Arabic letter variants made one (ي ی, ك ک, ة ه,
+ * أ إ آ ا), vowel marks, tatweel and zero-width joiners left out. `map[i]` = index in the original.
+ */
+function foldMap(s: string): { t: string; map: number[] } {
+  let t = '';
+  const map: number[] = [];
+  for (let i = 0; i < s.length; i++) {
+    let c = s[i];
+    if (/[\u064b-\u065f\u0670\u0640\u200c\u200d\u200e\u200f]/.test(c)) continue;
+    c = AR_FOLD[c] ?? c;
+    const f = c.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+    for (const ch of f) { t += ch; map.push(i); }
+  }
+  map.push(s.length);
+  return { t, map };
+}
+const AR_FOLD: Record<string, string> = { 'ي': 'ی', 'ى': 'ی', 'ئ': 'ی', 'ك': 'ک', 'ة': 'ه', 'أ': 'ا', 'إ': 'ا', 'آ': 'ا', 'ٱ': 'ا', 'ؤ': 'و',
+  '٠': '0', '١': '1', '٢': '2', '٣': '3', '٤': '4', '٥': '5', '٦': '6', '٧': '7', '٨': '8', '٩': '9',
+  '۰': '0', '۱': '1', '۲': '2', '۳': '3', '۴': '4', '۵': '5', '۶': '6', '۷': '7', '۸': '8', '۹': '9' };
 
 type Edited = { runs: TextRun[]; text: (r: TextRun) => string };
 export interface DocRef {
@@ -120,14 +143,13 @@ export async function findText(d: DocRef, query: string, limit = 500): Promise<H
   const out: Hit[] = [];
   for (const src of d.pages) {
     const pt = await pageText(d.pdf, src, d.vm(src), d.ocrRuns(src), d.edited?.(src));
-    const t = fold(pt.text);
-    // folding can change lengths only for rare characters; keep indexes aligned by folding per character
-    const aligned = t.length === pt.text.length;
+    // folded text with each letter's place in the original (for the boxes)
+    const { t, map } = foldMap(pt.text);
     let i = 0;
     while ((i = t.indexOf(q, i)) >= 0 && out.length < limit) {
-      const s = i, e = i + q.length;
-      out.push({ page: src, rects: aligned ? rectsOf(pt, s, e) : [], text: pt.text.slice(s, e) });
-      i = e;
+      const s = map[i], e = map[i + q.length - 1] + 1;
+      out.push({ page: src, rects: rectsOf(pt, s, e), text: pt.text.slice(s, e) });
+      i += q.length;
     }
   }
   return out;

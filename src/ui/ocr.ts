@@ -2,6 +2,8 @@
 // the app (public/tesseract) and is loaded only when needed; nothing is sent anywhere.
 import { appBase } from './assets';
 import type { LayerLine } from '../engine/textLayer';
+import { readingOrder, BIDI_MARKS, AR_LETTER } from './bidiWords';
+export { readingOrder };
 
 /** Reads a file next to the app. XHR, because fetch() can't read file:// pages (Android app). */
 function loadBytes(url: string): Promise<Uint8Array> {
@@ -34,14 +36,16 @@ function loadAssets(progress?: (p: number) => void) {
       const base = appBase() + 'tesseract/';
       const core = hasSimd() ? 'tesseract-core-simd-lstm.wasm.js' : 'tesseract-core-lstm.wasm.js';
       let done = 0;
-      const step = <T,>(p: Promise<T>) => p.then((v) => { done++; progress?.(done / 4); return v; });
-      const [coreJs, workerJs, deu, eng] = await Promise.all([
+      const step = <T,>(p: Promise<T>) => p.then((v) => { done++; progress?.(done / 5); return v; });
+      const [coreJs, workerJs, deu, eng, fas] = await Promise.all([
         step(loadBytes(base + core)), step(loadBytes(base + 'worker.min.js')),
         // gzip data under a neutral name: Android's build unpacks *.gz assets and renames them
         step(loadBytes(base + 'deu-fast.bin')), step(loadBytes(base + 'eng-fast.bin')),
+        // Persian (Arabic script): tessdata best_int, LSTM only (@tesseract.js-data/fas 4.0.0_best_int)
+        step(loadBytes(base + 'fas-fast.bin')),
       ]);
       const langUrl = (b: Uint8Array) => URL.createObjectURL(new Blob([b as BlobPart], { type: 'application/gzip' }));
-      const shim = `(function(){var L=${JSON.stringify({ deu: langUrl(deu), eng: langUrl(eng) })};var f=self.fetch.bind(self);` +
+      const shim = `(function(){var L=${JSON.stringify({ deu: langUrl(deu), eng: langUrl(eng), fas: langUrl(fas) })};var f=self.fetch.bind(self);` +
         `self.fetch=function(u,o){var s=String(u&&u.url||u);for(var k in L){var n='/'+k+'.traineddata.gz';if(s.slice(-n.length)===n)return f(L[k]);}return f(u,o);};})();\n`;
       const blob = new Blob([shim, coreJs as BlobPart, '\n;\n', workerJs as BlobPart], { type: 'application/javascript' });
       return { workerPath: URL.createObjectURL(blob), corePath: base + core };
@@ -50,14 +54,17 @@ function loadAssets(progress?: (p: number) => void) {
   return assets;
 }
 
+/** German, English and Persian: Latin and Arabic-script pages, also mixed on one line */
+export const OCR_LANGS = 'deu+eng+fas';
+
 /** Starts one recognition worker (a few hundred ms once the files are loaded). */
-export async function newOcrWorker(progress?: (p: number) => void): Promise<OcrWorker> {
+export async function newOcrWorker(progress?: (p: number) => void, langs = OCR_LANGS): Promise<OcrWorker> {
   const { workerPath, corePath } = await loadAssets(progress);
   const { createWorker } = await import('tesseract.js');
   // createWorker never settles when the worker fails: turn its errors into a rejection
   let fail: (e: any) => void = () => {};
   const failed = new Promise<never>((_, rej) => { fail = rej; });
-  const w = await Promise.race([createWorker('deu+eng', 1 /* LSTM only */, {
+  const w = await Promise.race([createWorker(langs, 1 /* LSTM only */, {
     workerPath, workerBlobURL: false, corePath, langPath: 'https://local.invalid/tessdata',
     cacheMethod: 'none', gzip: true, errorHandler: (e: any) => { console.warn('ocr', e); fail(e); },
   } as any), failed]);
@@ -74,8 +81,9 @@ export function loadOcr(progress?: (p: number) => void): Promise<OcrWorker> {
 }
 
 export async function stopOcr() {
-  const e = shared;
-  shared = null;
+  const e = shared, f = fasOnly;
+  shared = null; fasOnly = null;
+  if (f) (await f.catch(() => null))?.terminate().catch(() => null);
   if (e) (await e.catch(() => null))?.terminate().catch(() => null);
 }
 
@@ -179,6 +187,57 @@ export async function secondLook(worker: OcrWorker, gray: Uint8Array, w: number,
       if (conf < 60) continue;
       x.text = got.sort((p2, q) => p2.bbox.x0 - q.bbox.x0).map((v) => v.text.trim()).join(' ');
       x.confidence = conf;
+    } catch { /* keep the first reading */ }
+  }
+}
+
+let fasOnly: Promise<OcrWorker> | null = null;
+/** a Persian-only reader, started the first time a page has Persian lines */
+const persianWorker = () => (fasOnly ??= newOcrWorker(undefined, 'fas').catch((e) => { fasOnly = null; throw e; }));
+
+/**
+ * Lines that are mostly Persian / Arabic but came back with Latin-looking pieces or weak words (the
+ * German and English models guess at Persian letters): read again with the Persian model alone, and
+ * keep that reading when it is surer.
+ */
+export async function persianLook(gray: Uint8Array, w: number, h: number, yOff: number, data: any) {
+  const todo: any[] = [];
+  for (const b of data.blocks ?? []) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) {
+    const ws = (l.words ?? []).filter((x: any) => x.text?.trim());
+    if (!ws.length) continue;
+    let ar = 0, la = 0;
+    for (const x of ws) for (const c of x.text) { if (AR_LETTER.test(c)) ar++; else if (/[A-Za-zÀ-ɏ]/.test(c)) la++; }
+    if (ar < 3 || ar <= la * 2) continue;
+    const junk = ws.some((x: any) => (/^[^؀-ۿ]*[A-Za-z][^؀-ۿ]*$/.test(x.text) && x.text.length <= 4) || x.confidence < 70);
+    if (junk) todo.push(l);
+  }
+  if (!todo.length) return;
+  let fw: OcrWorker;
+  try { fw = await persianWorker(); } catch { return; }
+  for (const l of todo.slice(0, 30)) {
+    const lh = l.bbox.y1 - l.bbox.y0;
+    if (lh < 6) continue;
+    const X0 = Math.floor(l.bbox.x0 - lh), X1 = Math.ceil(l.bbox.x1 + lh);
+    const Y0 = Math.floor(yOff + l.bbox.y0 - lh * 0.5), Y1 = Math.ceil(yOff + l.bbox.y1 + lh * 0.5);
+    const cw = X1 - X0, ch = Y1 - Y0;
+    const g = new Uint8Array(cw * ch).fill(255);
+    for (let y = Math.max(0, Y0); y < Math.min(h, Y1); y++) {
+      const a0 = Math.max(0, X0), a1 = Math.min(w, X1);
+      if (a1 > a0) g.set(gray.subarray(y * w + a0, y * w + a1), (y - Y0) * cw + (a0 - X0));
+    }
+    try {
+      const { data: d2 } = await fw.recognize(toPgm(g, cw, ch), {}, { blocks: true, text: false, hocr: false, tsv: false });
+      const got: any[] = [];
+      for (const bl of d2.blocks ?? []) for (const p of bl.paragraphs ?? []) for (const l2 of p.lines ?? []) for (const v of l2.words ?? []) {
+        if (!v.text?.trim()) continue;
+        // back to the page picture's (band's) pixels
+        got.push({ ...v, bbox: { x0: v.bbox.x0 + X0, x1: v.bbox.x1 + X0, y0: v.bbox.y0 + Y0 - yOff, y1: v.bbox.y1 + Y0 - yOff } });
+      }
+      if (!got.length) continue;
+      const mean = (a: any[]) => a.reduce((s2, v) => s2 + v.confidence, 0) / a.length;
+      const old = (l.words ?? []).filter((x: any) => x.text?.trim());
+      if (mean(got) + 3 < mean(old)) continue;
+      l.words = got;
     } catch { /* keep the first reading */ }
   }
 }
@@ -306,11 +365,32 @@ function measureInk(ink: Ink, x0: number, x1: number, y0: number, y1: number, ta
 export function linesOf(data: any, toPdf: (x: number, y: number) => [number, number], ptPerPx: number,
   cut?: (xa: number, xb: number, ya: number, yb: number) => boolean, ink?: Ink): OcrLine[] {
   const out: OcrLine[] = [];
+  // the page's main script (for bilingual cells)
+  let arAll = 0, laAll = 0;
+  for (const block of data.blocks ?? []) for (const para of block.paragraphs ?? []) for (const line of para.lines ?? []) for (const w of line.words ?? []) {
+    if (!w.text || w.confidence < 50) continue;
+    for (const c of w.text) { if (AR_LETTER.test(c)) arAll++; else if (/[A-Za-zÀ-ɏ]/.test(c)) laAll++; }
+  }
+  // clearly a Persian / Arabic page (a band of a mostly Latin form can be all Persian rows: not enough)
+  const pageRtl = arAll > laAll * 4 && arAll > 40;
+  // the usual capital height of Latin lines here (Persian lines are sized near it)
+  const latinCaps: number[] = [];
+  for (const block of data.blocks ?? []) for (const para of block.paragraphs ?? []) for (const line of para.lines ?? []) {
+    const ws = (line.words ?? []).filter((w: any) => w.confidence > 70 && /^[A-Za-z0-9ÄÖÜäöüß.,:()/-]{2,}$/.test(w.text ?? '') && /[A-Z0-9]/.test(w.text));
+    for (const w of ws) { const bl = line.baseline && line.baseline.x1 > line.baseline.x0 ? line.baseline.y0 : line.bbox.y1; latinCaps.push(Math.max(1, Math.min(bl, w.bbox.y1) - w.bbox.y0)); }
+  }
+  latinCaps.sort((a, b) => a - b);
+  const latinCap = latinCaps.length >= 3 ? latinCaps[latinCaps.length >> 1] : 0;
   for (const block of data.blocks ?? []) for (const para of block.paragraphs ?? []) for (const line of para.lines ?? []) {
     const words = (line.words ?? [])
+      .map((w: any) => (w.text ? { ...w, text: w.text.replace(BIDI_MARKS, '') } : w))
       .filter((w: any) => w.text?.trim() && w.confidence > 25 && !/^[|¦│]+$/.test(w.text.trim()))
       .sort((a: any, b: any) => a.bbox.x0 - b.bbox.x0);
     if (!words.length) continue;
+    // the line's main script (a bilingual label takes the direction of the line it is in)
+    let arL = 0, laL = 0;
+    for (const w of words) for (const c of w.text) { if (AR_LETTER.test(c)) arL++; else if (/[A-Za-zÀ-ɏ]/.test(c)) laL++; }
+    const lineRtl = arL > laL * 2 ? true : undefined;
     // baseline (image px): tesseract's line baseline, else the bottom of letters without descenders
     const bl = line.baseline && line.baseline.x1 > line.baseline.x0 ? line.baseline : null;
     const blAt = (x: number) => (bl ? bl.y0 + ((bl.y1 - bl.y0) * (x - bl.x0)) / (bl.x1 - bl.x0) : line.bbox.y1);
@@ -323,7 +403,14 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
       const l = Math.min(...ws.map((w: any) => w.bbox.x0)), r = Math.max(...ws.map((w: any) => w.bbox.x1));
       return Math.max(4, yAt((l + r) / 2) - tops[Math.floor(tops.length / 2)]);
     };
-    const lineCap = capOf(words)!;
+    const arCap = (ws: any[]) => {
+      // the taller words (alef, lam, kaf reach up; many letters reach down): ascender to descender ≈ 1.33 em
+      const hs = ws.map((w: any) => w.bbox.y1 - w.bbox.y0).sort((a: number, b: number) => a - b);
+      const est = hs[Math.min(hs.length - 1, Math.floor(hs.length * 0.75))] * 0.72;
+      // next to Latin text of the same document the sizes are usually alike: stay near it
+      return Math.max(4, latinCap ? Math.min(latinCap * 1.2, Math.max(latinCap * 0.8, est)) : est);
+    };
+    const lineCap = words.some((w: any) => /[A-Za-zÀ-ɏ0-9]/.test(w.text)) || !words.some((w: any) => AR_LETTER.test(w.text)) ? capOf(words)! : arCap(words);
     const em = lineCap / 0.72;
     // cells: split where a border runs between two words, or where the gap is far wider than a space
     const parts: any[][] = [[words[0]]];
@@ -339,14 +426,18 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
       else parts[parts.length - 1].push(b);
     }
     for (const ws of parts) {
-      const text = ws.map((w: any) => w.text.trim()).join(' ');
+      const text = readingOrder(ws, lineRtl ?? pageRtl).map((w: any) => w.text.trim()).join(' ');
+      // Persian / Arabic only: no capitals to measure; the word boxes (ascenders to descenders) are about one em
+      let arN = 0, laN = 0;
+      for (const w of ws) for (const c of w.text) { if (AR_LETTER.test(c)) arN++; else if (/[A-Za-zÀ-ɏ0-9]/.test(c)) laN++; }
+      const arOnly = arN > laN * 2;
       const left = Math.min(...ws.map((w: any) => w.bbox.x0)), right = Math.max(...ws.map((w: any) => w.bbox.x1));
-      let capPx = parts.length > 1 ? capOf(ws) ?? lineCap : lineCap;
+      let capPx = arOnly ? arCap(ws) : parts.length > 1 ? capOf(ws) ?? lineCap : lineCap;
       let at = yAt;
       // tesseract's boxes and baseline can be several pixels off (most in short lines such as table
       // cells, where that made the text far too big): the printed letters themselves decide
       const top0 = Math.min(...ws.map((w: any) => w.bbox.y0)), bot0 = Math.max(...ws.map((w: any) => w.bbox.y1));
-      const m = ink ? measureInk(ink, left, right, top0, bot0, /[A-ZÄÖÜ0-9bdfhklß]/.test(ws.map((w: any) => w.text).join(''))) : null;
+      const m = ink && !arOnly ? measureInk(ink, left, right, top0, bot0, /[A-ZÄÖÜ0-9bdfhklß]/.test(ws.map((w: any) => w.text).join(''))) : null;
       if (m && Math.abs(m.base - yAt((left + right) / 2)) < (bot0 - top0) * 0.6) {
         const d = m.base - yAt((left + right) / 2);
         at = (x: number) => yAt(x) + d;
@@ -373,6 +464,7 @@ export async function recognizeCanvas(worker: OcrWorker, canvas: HTMLCanvasEleme
   const rules = findRules(gray, canvas.width, canvas.height, grayThreshold(gray), 1 / ptPerPx);
   const { data } = await worker.recognize(toPgm(rules.clean, canvas.width, canvas.height), {}, { blocks: true, text: false, hocr: false, tsv: false });
   await secondLook(worker, rules.clean, canvas.width, canvas.height, 0, data);
+  await persianLook(rules.clean, canvas.width, canvas.height, 0, data);
   return linesOf(data, toPdf, ptPerPx, rules.cut, inkOf(rules.clean, canvas.width, canvas.height, grayThreshold(gray)));
 }
 

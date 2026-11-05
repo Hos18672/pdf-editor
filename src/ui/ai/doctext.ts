@@ -3,6 +3,7 @@
 import type { TextRun } from '../../engine/pdfText';
 import type { M } from '../../engine/types';
 import { runBox } from '../geometry';
+import { readingOrder } from '../bidiWords';
 
 export interface Line { page: number; text: string; x: number; y: number; w: number; h: number; keys: string[] }
 
@@ -17,12 +18,14 @@ export function pageLines(page: number, runs: TextRun[], vm: M, textOf: (r: Text
   }
   return lines.map((l) => {
     l.items.sort((a, b) => a.b.x - b.b.x);
-    let text = '', end = -Infinity;
+    // pieces far apart are separate cells (columns); each cell in reading order (Persian right to left)
+    const cells: (typeof l.items)[] = [];
+    let end = -Infinity;
     for (const it of l.items) {
-      if (text) text += it.b.x - end > it.b.h * 1.5 ? '   ' : ' ';
-      text += it.s.trim();
-      end = it.b.x + it.b.w;
+      if (!cells.length || it.b.x - end > it.b.h * 1.5) cells.push([it]); else cells[cells.length - 1].push(it);
+      end = Math.max(end, it.b.x + it.b.w);
     }
+    const text = cells.map((c) => readingOrder(c.map((it) => ({ text: it.s.trim(), it }))).map((w) => w.text).join(' ')).join('   ');
     const x = Math.min(...l.items.map((i) => i.b.x)), top = Math.min(...l.items.map((i) => i.b.top));
     const right = Math.max(...l.items.map((i) => i.b.x + i.b.w)), bot = Math.max(...l.items.map((i) => i.b.y + i.b.h * 0.25));
     return { page, text, x, y: top, w: right - x, h: bot - top, keys: l.items.map((i) => i.r.key) };

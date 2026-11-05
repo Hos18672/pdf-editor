@@ -603,7 +603,7 @@ export async function exportPdf(input: ExportInput): Promise<Uint8Array> {
   // recognised text of picture pages: searchable and selectable in the saved file
   if (input.ocrLayer) {
     const helv = await doc.embedFont(StandardFonts.Helvetica);
-    for (const [pi, lines] of Object.entries(input.ocrLayer)) if (pages[+pi] && lines.length) await addTextLayer(doc, pages[+pi], lines, helv);
+    for (const [pi, lines] of Object.entries(input.ocrLayer)) if (pages[+pi] && lines.length) await addTextLayer(doc, pages[+pi], lines, helv, input.matchFont);
   }
 
   if (input.forms && Object.keys(input.forms).length) await fillForm(doc, input.forms, !!input.flatten);
