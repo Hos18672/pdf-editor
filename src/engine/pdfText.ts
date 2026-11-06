@@ -24,6 +24,11 @@ export interface FontInfo {
   unreadable?: boolean;
   /** a font of drawn glyphs (Type 3): its letter information is often made up */
   type3?: boolean;
+  /** composite font with letter information: every letter it gives (other characters in its text are
+   * glyph numbers of glyphs it says nothing about) */
+  known?: string;
+  /** letter information that can't be right (one glyph = several words) */
+  bogus?: string[];
 }
 
 export interface TextRun {
@@ -41,9 +46,9 @@ export interface TextRun {
   /** text still being read from the drawn glyphs */
   pending?: boolean;
   /** while building: the pieces as drawn (position along the line), for right-to-left text */
-  pieces?: { at: number; str: string; w: number; font?: string; raw?: string }[];
-  /** lines set in several fonts: the pieces per font (offset along the line in PDF units, text as given) */
-  parts?: { at: number; w: number; font: string; str: string }[];
+  pieces?: { at: number; str: string; w: number; font?: string; raw?: string; rtl?: boolean }[];
+  /** the pieces as given by the PDF (offset along the line in PDF units, font, text) */
+  parts?: { at: number; w: number; font: string; str: string; rtl?: boolean }[];
 }
 
 type PdfjsFont = {
@@ -98,6 +103,21 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
     return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids, unreadable: true };
   }
 
+  // composite font whose letter information leaves glyphs out or gives one glyph several words (seen in
+  // PDFs made by WeasyPrint with Persian): its text is checked line by line
+  let known: string | undefined, bogus: string[] | undefined;
+  if ((font as any).composite && font.toUnicode?._map) {
+    const ks = new Set<string>(), bs = new Set<string>();
+    for (const [, v] of toUnicodeEntries(font.toUnicode)) {
+      if (!v) continue;
+      // (as pdf.js and the editor may hand it on: ligatures and Arabic letter forms taken apart)
+      for (const c of v + v.normalize('NFKC') + v.normalize('NFC')) ks.add(c);
+      if ([...v].length > 3 || ([...v].length > 1 && /\s/.test(v))) bs.add(v);
+    }
+    known = [...ks].join('');
+    bogus = [...bs];
+  }
+
   let fk: any = null;
   if (font.data && !font.missingFile) {
     try { fk = fontkit.create(font.data as any); } catch { fk = null; }
@@ -129,7 +149,18 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
       if (gid) gids[uni] = gid;
     }
   }
-  return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids };
+  return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids, known, bogus };
+}
+
+/** text a font gives that is not letters: glyph numbers of glyphs it has no letter information for, or
+ * letter information that can't be right */
+export function badText(str: string, f: FontInfo | undefined): boolean {
+  if (!f) return false;
+  if (f.unreadable) return true;
+  if (f.known === undefined) return false;
+  for (const c of str) if (!/\s/.test(c) && !f.known.includes(c)) return true;
+  // (pdf.js may hand such text on turned round, as it reads right to left)
+  return !!f.bogus?.some((b) => { const t = b.trim(); return t.length > 1 && (str.includes(t) || str.includes([...t].reverse().join(''))); });
 }
 
 /** Join runs that sit next to each other on the same baseline but came out of the PDF in separate pieces. */
@@ -210,7 +241,7 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       if (sameLine && gap > -r.height * 0.3 && gap < r.height * maxGap) {
         if (gap > r.height * 0.12 && !cur.str.endsWith(' ') && !it.str.startsWith(' ')) cur.str += ' ';
         cur.str += it.str;
-        cur.pieces!.push({ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w, font: it.fontName, raw: it.str });
+        cur.pieces!.push({ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w, font: it.fontName, raw: it.str, rtl: it.dir === 'rtl' });
         r.width = Math.max(r.width, t + w);
         const fc = (cur.fontChars ??= { [cur.fontName]: [...cur.str].length - [...it.str].length });
         fc[it.fontName] = (fc[it.fontName] ?? 0) + [...it.str].length;
@@ -218,7 +249,7 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       }
       runs.push(cur);
     }
-    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: w, height }, pieces: [{ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w, font: it.fontName, raw: it.str }] };
+    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: w, height }, pieces: [{ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w, font: it.fontName, raw: it.str, rtl: it.dir === 'rtl' }] };
   }
   if (cur) runs.push(cur);
   mergeNeighbours(runs);
@@ -234,9 +265,9 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       }
       r.str = visualToLogical(vis.trim());
     }
-    if (r.pieces && r.fontChars && Object.keys(r.fontChars).length > 1) {
+    if (r.pieces) {
       const start = r.region.o[0] * r.region.u[0] + r.region.o[1] * r.region.u[1];
-      r.parts = r.pieces.filter((p) => p.font && p.raw).sort((a, b) => a.at - b.at).map((p) => ({ at: p.at - start, w: p.w, font: p.font!, str: p.raw! }));
+      r.parts = r.pieces.filter((p) => p.font && p.raw).sort((a, b) => a.at - b.at).map((p) => ({ at: p.at - start, w: p.w, font: p.font!, str: p.raw!, ...(p.rtl ? { rtl: true } : {}) }));
     }
     delete r.pieces;
     r.str = r.str.replace(/\s+$/, '').normalize('NFC');

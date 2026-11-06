@@ -97,6 +97,8 @@ function ltrBase(visual: string): boolean {
     if (!first && (r || l)) first = r ? 'R' : 'L';
     if (r) ar++; else if (l) la++;
   }
+  // no letters at all (dates, numbers): numbers are drawn left to right in either script
+  if (!first) return true;
   return first === 'L' && ar <= la * 2;
 }
 

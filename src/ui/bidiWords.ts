@@ -51,5 +51,13 @@ const balanced = (s: string) => {
 export function fixBrackets(s: string): string {
   if (!/[()[\]{}«»]/.test(s) || balanced(s)) return s;
   const m = [...s].map((c) => MIRROR[c] ?? c).join('');
-  return balanced(m) ? m : s;
+  if (balanced(m)) return m;
+  // one pair of round brackets facing the wrong way at one end: "Date ) تاریخ )"
+  const at = [...s].flatMap((c, i) => ('()'.includes(c) ? [i] : []));
+  if (at.length === 2 && !/[[\]{}«»]/.test(s)) {
+    const cs = [...s];
+    cs[at[0]] = '('; cs[at[1]] = ')';
+    return cs.join('');
+  }
+  return s;
 }

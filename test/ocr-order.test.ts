@@ -23,4 +23,6 @@ console.log(cases.length - f, 'passed', f, 'failed');
   eq(fixBrackets('Name ) نام ('), 'Name ( نام )');
   eq(fixBrackets('Name ( نام )'), 'Name ( نام )');
   eq(fixBrackets('a ) b'), 'a ) b');
+  eq(fixBrackets('Visa Issue Date ) تاریخ )'), 'Visa Issue Date ( تاریخ )');
+  eq(fixBrackets('Track Code ( کد ('), 'Track Code ( کد )');
 }
