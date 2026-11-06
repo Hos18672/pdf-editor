@@ -40,3 +40,16 @@ export function readingOrder<W extends { text: string }>(ws: W[], pageRtl?: bool
   }
   return order.map((i) => ws[i]);
 }
+
+const MIRROR: Record<string, string> = { '(': ')', ')': '(', '[': ']', ']': '[', '{': '}', '}': '{', '«': '»', '»': '«' };
+const balanced = (s: string) => {
+  let d = 0;
+  for (const c of s) { if ('([{«'.includes(c)) d++; else if (')]}»'.includes(c) && --d < 0) return false; }
+  return d === 0;
+};
+/** Brackets next to Persian words come out of the reader as seen right to left (")نام(" for "(نام)"): turn them round when only that makes them pair up. */
+export function fixBrackets(s: string): string {
+  if (!/[()[\]{}«»]/.test(s) || balanced(s)) return s;
+  const m = [...s].map((c) => MIRROR[c] ?? c).join('');
+  return balanced(m) ? m : s;
+}

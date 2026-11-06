@@ -1375,7 +1375,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       const d = pageDataRef.current[src];
       // changed lines, and Persian / Arabic pages: the editor's own reading (right order, plain letters;
       // the raw text of such PDFs is drawn order and joined letter shapes)
-      if (!d || !d.runs.some((r) => snap.edits[r.key] || hasArabic(r.str))) return null;
+      if (!d || !d.runs.some((r) => snap.edits[r.key] || r.read || hasArabic(r.str))) return null;
       return { runs: d.runs, text: (r) => snap.edits[r.key]?.text ?? r.str };
     },
   });

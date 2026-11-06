@@ -1,4 +1,5 @@
 import { readingOrder } from '../src/ui/ocr';
+import { fixBrackets } from '../src/ui/bidiWords';
 const W = (s: string) => s.split(' ').map((text) => ({ text }));   // words as printed, left to right
 const j = (ws: { text: string }[], r?: boolean) => readingOrder(ws, r).map((w) => w.text).join(' ');
 const cases: [string, string, boolean | undefined][] = [
@@ -15,3 +16,11 @@ const cases: [string, string, boolean | undefined][] = [
 let f = 0;
 for (const [vis, want, r] of cases) { const got = j(W(vis), r); if (got !== want) { f++; console.log('FAIL', vis, '→', got, '| want', want); } }
 console.log(cases.length - f, 'passed', f, 'failed');
+
+// brackets next to Persian words come back from the reader mirrored
+{
+  const eq = (a: string, b: string) => { if (a !== b) { console.error('FAIL', JSON.stringify(a), '!=', JSON.stringify(b)); process.exit(1); } else console.log('ok', b); };
+  eq(fixBrackets('Name ) نام ('), 'Name ( نام )');
+  eq(fixBrackets('Name ( نام )'), 'Name ( نام )');
+  eq(fixBrackets('a ) b'), 'a ) b');
+}

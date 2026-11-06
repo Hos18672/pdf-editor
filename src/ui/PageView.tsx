@@ -2,6 +2,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 're
 import { createPortal } from 'react-dom';
 import type { CharLook, ClonedText, EditorObject, FormValues, M } from '../engine/types';
 import { buildRuns, analyseFont, FontInfo, TextRun } from '../engine/pdfText';
+import { readGlyphRuns, unreadableRun } from './readGlyphs';
 import { runBox, toLocal, sampleColors, applyM } from './geometry';
 import type { RunEdit, Tool, ToolStyle } from './store';
 import { uid, cleanScales, cleanLooks, sameLooks, NOTE_COLORS } from './store';
@@ -196,7 +197,20 @@ export function PageView(p: Props) {
             .map(([dx, dy]) => [(b.x + dx * c - dy * s) * k, (b.y + dx * s + dy * c) * k]);
           colors[r.key] = sampleColors(ctx, corners);
         }
+        // lines in a font without letter information: read from the drawn glyphs (taps wait for it)
+        const all = { ...p.fonts, ...fonts };
+        const bad = runs.filter((r) => unreadableRun(r, all));
+        bad.forEach((r) => { r.pending = true; });
         p.onData(p.src, { runs, colors }, fonts);
+        if (bad.length) {
+          const read = await readGlyphRuns(p.pdf, p.src, info.vm, bad, all);
+          p.onData(p.src, { runs: runs.map((r) => {
+            if (!r.pending) return r;
+            const { pending: _, ...rest } = r;
+            const t = read.get(r.key);
+            return t ? { ...rest, str: t, read: true } : rest;
+          }), colors }, {});
+        }
       }
     }, rendered && renderedKey.current === sourceKey ? 160 : 0);
     return () => { cancelled = true; clearTimeout(t); };
@@ -496,6 +510,7 @@ export function PageView(p: Props) {
               clone={p.edits[r.key] ? p.cloneFor?.(r.key) : undefined}
               local={local} onNext={() => p.onNextRun(r.key)}
               onStart={() => {
+                if (r.pending) return;
                 const at = downAt.current;
                 if (at && p.onRunTap?.(r, at.x, at.y)) return;
                 p.onSelect(r.key); p.onEditing(r.key);
@@ -710,7 +725,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
   const bg = color?.bg ?? '#fff';
   // Best: the embedded font re-registered with a Unicode cmap (exact glyphs while typing).
   // Otherwise the pdf.js font when its codes are plain Unicode, else a similar system font.
-  const identity = font ? Object.entries(font.display).every(([k, v]) => k === v) : false;
+  const identity = font && !font.unreadable ? Object.entries(font.display).every(([k, v]) => k === v) : false;
   // Arabic or Persian typed in: the shipped Arabic font (as in the saved file), lines that read right to
   // left keep the original line's right end
   const arText = hasArabic(editing ? value : edit?.text ?? '');
@@ -719,7 +734,7 @@ function RunView({ run, vm, zoom, font, color, edit, shown, editing, selected, m
   const fontCss = arText ? `${ARABIC_CSS}, ${font?.cssFallback ?? 'sans-serif'}` : font?.editFamily
     ? `"${font.editFamily}", ${font.cssFallback}`
     : font && identity ? `"${font.loadedName}", ${font.cssFallback}` : font?.cssFallback ?? 'Arial, sans-serif';
-  const mapped = !arText && !!font && !font.editFamily && !identity;
+  const mapped = !arText && !!font && !font.unreadable && !font.editFamily && !identity;
   // put the baseline of the first line exactly on the original baseline
   const lineTop = b.asc * zoom - baselineInLine(fontCss, size, lineH);
 

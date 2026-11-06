@@ -19,6 +19,11 @@ export interface FontInfo {
   gids: Record<string, number>;
   /** CSS family of the same font re-registered with a Unicode cmap (set by the UI once loaded) */
   editFamily?: string;
+  /** the PDF does not say which letters the font's codes are (no ToUnicode): pdf.js reports glyph numbers,
+   * so the text has to be read from the drawn glyphs and the font can't be used for typed letters */
+  unreadable?: boolean;
+  /** a font of drawn glyphs (Type 3): its letter information is often made up */
+  type3?: boolean;
 }
 
 export interface TextRun {
@@ -31,8 +36,14 @@ export interface TextRun {
   fontChars?: Record<string, number>;
   /** PDF user space */
   region: { o: [number, number]; u: [number, number]; width: number; height: number };
+  /** text read from the drawn glyphs (font without letter information) */
+  read?: boolean;
+  /** text still being read from the drawn glyphs */
+  pending?: boolean;
   /** while building: the pieces as drawn (position along the line), for right-to-left text */
-  pieces?: { at: number; str: string; w: number }[];
+  pieces?: { at: number; str: string; w: number; font?: string; raw?: string }[];
+  /** lines set in several fonts: the pieces per font (offset along the line in PDF units, text as given) */
+  parts?: { at: number; w: number; font: string; str: string }[];
 }
 
 type PdfjsFont = {
@@ -78,7 +89,13 @@ export function analyseFont(font: PdfjsFont, loadedName: string): FontInfo {
       const uni = raw?.normalize('NFC');
       if (uni && [...uni].length === 1 && charMap[uni] === undefined) charMap[uni] = code;
     }
-    return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids };
+    return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids, type3: true };
+  }
+
+  // composite font (Identity encoding: codes are glyph numbers) without a ToUnicode map: pdf.js passes the
+  // glyph numbers on as "letters" (Persian set in a font like that comes out as Canadian syllabics)
+  if ((font as any).composite && font.toUnicode && !font.toUnicode._map && typeof font.toUnicode.firstChar === 'number') {
+    return { loadedName, name, charMap, display, fallback: { family, bold, italic }, cssFallback, gids, unreadable: true };
   }
 
   let fk: any = null;
@@ -193,7 +210,7 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       if (sameLine && gap > -r.height * 0.3 && gap < r.height * maxGap) {
         if (gap > r.height * 0.12 && !cur.str.endsWith(' ') && !it.str.startsWith(' ')) cur.str += ' ';
         cur.str += it.str;
-        cur.pieces!.push({ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w });
+        cur.pieces!.push({ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w, font: it.fontName, raw: it.str });
         r.width = Math.max(r.width, t + w);
         const fc = (cur.fontChars ??= { [cur.fontName]: [...cur.str].length - [...it.str].length });
         fc[it.fontName] = (fc[it.fontName] ?? 0) + [...it.str].length;
@@ -201,7 +218,7 @@ export function buildRuns(items: any[], page: number): TextRun[] {
       }
       runs.push(cur);
     }
-    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: w, height }, pieces: [{ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w }] };
+    cur = { key: `${page}:${runs.length}`, page, str: it.str, fontName: it.fontName, region: { o, u, width: w, height }, pieces: [{ at: o[0] * u[0] + o[1] * u[1], str: drawnOrder(it.str, it.dir), w, font: it.fontName, raw: it.str }] };
   }
   if (cur) runs.push(cur);
   mergeNeighbours(runs);
@@ -216,6 +233,10 @@ export function buildRuns(items: any[], page: number): TextRun[] {
         vis += p.str; end = Math.max(end, p.at + p.w);
       }
       r.str = visualToLogical(vis.trim());
+    }
+    if (r.pieces && r.fontChars && Object.keys(r.fontChars).length > 1) {
+      const start = r.region.o[0] * r.region.u[0] + r.region.o[1] * r.region.u[1];
+      r.parts = r.pieces.filter((p) => p.font && p.raw).sort((a, b) => a.at - b.at).map((p) => ({ at: p.at - start, w: p.w, font: p.font!, str: p.raw! }));
     }
     delete r.pieces;
     r.str = r.str.replace(/\s+$/, '').normalize('NFC');

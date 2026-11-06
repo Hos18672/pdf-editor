@@ -2,7 +2,7 @@
 // the app (public/tesseract) and is loaded only when needed; nothing is sent anywhere.
 import { appBase } from './assets';
 import type { LayerLine } from '../engine/textLayer';
-import { readingOrder, BIDI_MARKS, AR_LETTER } from './bidiWords';
+import { readingOrder, BIDI_MARKS, AR_LETTER, fixBrackets } from './bidiWords';
 export { readingOrder };
 
 /** Reads a file next to the app. XHR, because fetch() can't read file:// pages (Android app). */
@@ -193,21 +193,23 @@ export async function secondLook(worker: OcrWorker, gray: Uint8Array, w: number,
 
 let fasOnly: Promise<OcrWorker> | null = null;
 /** a Persian-only reader, started the first time a page has Persian lines */
-const persianWorker = () => (fasOnly ??= newOcrWorker(undefined, 'fas').catch((e) => { fasOnly = null; throw e; }));
+export const persianWorker = (): Promise<OcrWorker> => (fasOnly ??= newOcrWorker(undefined, 'fas').catch((e) => { fasOnly = null; throw e; }));
 
 /**
  * Lines that are mostly Persian / Arabic but came back with Latin-looking pieces or weak words (the
  * German and English models guess at Persian letters): read again with the Persian model alone, and
  * keep that reading when it is surer.
  */
-export async function persianLook(gray: Uint8Array, w: number, h: number, yOff: number, data: any) {
+export async function persianLook(gray: Uint8Array, w: number, h: number, yOff: number, data: any, persianPage = false) {
   const todo: any[] = [];
   for (const b of data.blocks ?? []) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) {
     const ws = (l.words ?? []).filter((x: any) => x.text?.trim());
     if (!ws.length) continue;
     let ar = 0, la = 0;
     for (const x of ws) for (const c of x.text) { if (AR_LETTER.test(c)) ar++; else if (/[A-Za-zÀ-ɏ]/.test(c)) la++; }
-    if (ar < 3 || ar <= la * 2) continue;
+    // (on a Persian page also lines that came back as short Latin-looking pieces or digits)
+    const latin = ws.some((x: any) => /[A-Za-zÀ-ɏ]{5}/.test(x.text) && x.confidence >= 80);
+    if (persianPage ? latin || ar > 0 && ar <= la * 2 : ar < 3 || ar <= la * 2) continue;
     const junk = ws.some((x: any) => (/^[^؀-ۿ]*[A-Za-z][^؀-ۿ]*$/.test(x.text) && x.text.length <= 4) || x.confidence < 70);
     if (junk) todo.push(l);
   }
@@ -426,7 +428,7 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
       else parts[parts.length - 1].push(b);
     }
     for (const ws of parts) {
-      const text = readingOrder(ws, lineRtl ?? pageRtl).map((w: any) => w.text.trim()).join(' ');
+      const text = fixBrackets(readingOrder(ws, lineRtl ?? pageRtl).map((w: any) => w.text.trim()).join(' '));
       // Persian / Arabic only: no capitals to measure; the word boxes (ascenders to descenders) are about one em
       let arN = 0, laN = 0;
       for (const w of ws) for (const c of w.text) { if (AR_LETTER.test(c)) arN++; else if (/[A-Za-zÀ-ɏ0-9]/.test(c)) laN++; }
@@ -457,14 +459,20 @@ export function linesOf(data: any, toPdf: (x: number, y: number) => [number, num
  * Recognises the text on a canvas. `toPdf` maps canvas pixels to PDF user space and `ptPerPx` is the
  * scale between them; lines come back ready for an invisible text layer.
  */
-export async function recognizeCanvas(worker: OcrWorker, canvas: HTMLCanvasElement, toPdf: (x: number, y: number) => [number, number], ptPerPx: number): Promise<LayerLine[]> {
+export async function recognizeCanvas(worker: OcrWorker, canvas: HTMLCanvasElement, toPdf: (x: number, y: number) => [number, number], ptPerPx: number, persianAuto = false): Promise<LayerLine[]> {
   const ctx = canvas.getContext('2d', { willReadFrequently: true })!;
   const raw = grayOf(ctx.getImageData(0, 0, canvas.width, canvas.height).data);
   const gray = flattenBackground(raw, canvas.width, canvas.height) ?? raw;
   const rules = findRules(gray, canvas.width, canvas.height, grayThreshold(gray), 1 / ptPerPx);
   const { data } = await worker.recognize(toPgm(rules.clean, canvas.width, canvas.height), {}, { blocks: true, text: false, hocr: false, tsv: false });
   await secondLook(worker, rules.clean, canvas.width, canvas.height, 0, data);
-  await persianLook(rules.clean, canvas.width, canvas.height, 0, data);
+  let persianPage = false;
+  if (persianAuto) {
+    let ar = 0, la = 0;
+    for (const b of data.blocks ?? []) for (const p of b.paragraphs ?? []) for (const l of p.lines ?? []) for (const x of l.words ?? []) for (const c of x.text ?? '') { if (AR_LETTER.test(c)) ar++; else if (/[A-Za-zÀ-ɏ]/.test(c)) la++; }
+    persianPage = ar > la;
+  }
+  await persianLook(rules.clean, canvas.width, canvas.height, 0, data, persianPage);
   return linesOf(data, toPdf, ptPerPx, rules.cut, inkOf(rules.clean, canvas.width, canvas.height, grayThreshold(gray)));
 }
 
