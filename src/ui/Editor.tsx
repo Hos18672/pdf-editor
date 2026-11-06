@@ -41,7 +41,7 @@ import { setSoftKeyboard, safeTop, useFitLabels } from './hooks';
 import { ThemeButton, LangButton } from './Start';
 import { t, tn, getLang } from './i18n';
 import { hasArabic } from '../engine/rtl';
-import { ai, aiAvailable, aiAllowed, aiErrorText, ensureAi, setConsentAsker, setAiOn, onAiChange, answerLang } from './ai/client';
+import { ai, aiAvailable, aiAllowed, aiErrorText, aiErrorMsg, ensureAi, setConsentAsker, setAiOn, onAiChange, answerLang } from './ai/client';
 import { pageLines, docText, pageJpeg, type Line } from './ai/doctext';
 import { AiConsent, AiRewrite, AiSheet, AiFillReview, AiFieldsResult, type AiCache, type AiDoc, type FillItem, type FillQuestion, type FoundField } from './ai/Assistant';
 import type { NewField } from './ai/makeFields';
@@ -1620,7 +1620,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
   const snapRef = useRef(snap);
   snapRef.current = snap;
   const pageNo = (src: number) => snap.pages.findIndex((q) => q.src === src) + 1;
-  const aiFail = (e: unknown) => toast({ msg: t(aiErrorText(e)), kind: 'err' });
+  const aiFail = (e: unknown) => toast({ msg: aiErrorMsg(e, t), kind: 'err' });
   const noAi = () => toast({ msg: t('The AI assistant is not available in this version'), kind: 'err' });
   const openAi = async (tab: 'overview' | 'ask' | 'reply' | 'privacy' = 'overview') => {
     if (!aiAvailable()) { noAi(); return; }
@@ -1922,7 +1922,7 @@ export function Editor({ host, file, pdf, infos, hist, onClose, onTools, theme, 
       items.sort((a, b) => a.page - b.page);
       setFillReview({ items, questions: (r.questions ?? []).slice(0, 8).map((q) => ({ id: q.id, question: q.question, answer: '' })), busy: false, err: null });
     } catch (e) {
-      setFillReview({ items: null, questions: [], busy: false, err: t(aiErrorText(e)) });
+      setFillReview({ items: null, questions: [], busy: false, err: aiErrorMsg(e, t) });
     }
   };
   const applyFill = (items: FillItem[]) => {

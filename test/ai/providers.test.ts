@@ -1,6 +1,6 @@
 // Request shapes and answer parsing for Claude, OpenAI and Gemini (supabase/functions/_shared/providers.ts).
 // Run: npx tsx test/ai/providers.test.ts
-import { callModel, ProviderError } from '../../supabase/functions/_shared/providers';
+import { callModel, ProviderError, errorMessage } from '../../supabase/functions/_shared/providers';
 import { buildSpec } from '../../supabase/functions/_shared/prompts';
 
 let fails = 0, passes = 0;
@@ -49,7 +49,38 @@ const reply = (j: any, status = 200) => new Response(JSON.stringify(j), { status
   catch (e) { ok(e instanceof ProviderError && e.status === 401, 'error status kept'); }
   f = (async () => reply({ choices: [{ message: { content: 'no tool' } }] })) as typeof fetch;
   try { await callModel({ provider: 'openai', key: 'k', model: 'm', fetch: f }, spec); ok(false, 'should throw'); }
-  catch (e) { ok(e instanceof ProviderError && e.status === 502, 'no tool answer'); }
+  catch (e) { ok(e instanceof ProviderError && e.status === 0 && /no tool answer/.test(e.detail), 'no tool answer'); }
+  // overloaded: tried again (twice), then the error is kept
+  const waited: number[] = []; const wait = async (ms: number) => { waited.push(ms); };
+  let n = 0;
+  f = (async () => ++n < 3 ? reply({ error: { code: 503, message: 'The model is overloaded. Please try again later.', status: 'UNAVAILABLE' } }, 503)
+    : reply({ candidates: [{ content: { parts: [{ functionCall: { name: 'overview', args: { title: 'E' } } }] } }] })) as typeof fetch;
+  r = await callModel({ provider: 'gemini', key: 'k', model: 'g', fetch: f, wait }, spec);
+  ok(r.title === 'E' && n === 3 && waited.length === 2, 'gemini overloaded → retried');
+  n = 0; waited.length = 0;
+  f = (async () => { n++; return reply({ type: 'error', error: { type: 'overloaded_error', message: 'Overloaded' } }, 529); }) as typeof fetch;
+  try { await callModel({ provider: 'anthropic', key: 'k', model: 'm', fetch: f, wait }, spec); ok(false, 'should throw'); }
+  catch (e) { ok(e instanceof ProviderError && e.status === 529 && n === 3 && errorMessage(e.detail) === 'Overloaded', 'anthropic 529 → 3 tries, message kept'); }
+  n = 0;
+  f = (async () => { n++; return reply({ error: { message: 'invalid x-api-key' } }, 401); }) as typeof fetch;
+  try { await callModel({ provider: 'anthropic', key: 'k', model: 'm', fetch: f, wait }, spec); } catch { /* expected */ }
+  ok(n === 1, 'no retry for a bad key');
+  // thinking used up the tokens: asked again with a larger budget
+  const budgets: number[] = [];
+  f = (async (_u: any, init: any) => { const b = JSON.parse(init.body); budgets.push(b.generationConfig.maxOutputTokens);
+    return budgets.length === 1 ? reply({ candidates: [{ finishReason: 'MAX_TOKENS', content: { parts: [{ text: 'thinking', thought: true }] } }] })
+      : reply({ candidates: [{ content: { parts: [{ functionCall: { name: 'overview', args: { title: 'F' } } }] } }] }); }) as typeof fetch;
+  r = await callModel({ provider: 'gemini', key: 'k', model: 'g', fetch: f, wait }, spec);
+  ok(r.title === 'F' && budgets[1] === 16000 && budgets[0] < 16000, 'gemini MAX_TOKENS → bigger budget');
+  // JSON written as text instead of a function call
+  f = (async () => reply({ candidates: [{ content: { parts: [{ text: 'Here:\n```json\n{"title":"G","summary":["y"]}\n```' }] } }] })) as typeof fetch;
+  r = await callModel({ provider: 'gemini', key: 'k', model: 'g', fetch: f, wait }, spec);
+  ok(r.title === 'G' && r.summary[0] === 'y', 'gemini JSON as text');
+  f = (async () => reply({ candidates: [{ finishReason: 'SAFETY', content: { parts: [] } }] })) as typeof fetch;
+  try { await callModel({ provider: 'gemini', key: 'k', model: 'g', fetch: f, wait }, spec); ok(false, 'should throw'); }
+  catch (e) { ok(e instanceof ProviderError && e.status === 0 && /SAFETY/.test(e.detail), 'gemini no answer: reason kept'); }
+  ok(errorMessage('{"error":{"code":400,"message":"API key not valid. Please pass a valid API key."}}') === 'API key not valid. Please pass a valid API key.', 'errorMessage gemini');
+  ok(errorMessage('upstream connect error') === 'upstream connect error', 'errorMessage plain text');
   console.log(`${passes} passed, ${fails} failed`);
   process.exit(fails ? 1 : 0);
 })();

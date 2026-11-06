@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import { useBack } from '../back';
 import { Icon } from '../icons';
 import { t } from '../i18n';
-import { AiError, PROVIDERS, aiErrorText, aiSettings, forgetKey, hostedAi, providerInfo, saveAi, setAiOn, testKey, type AiProvider } from './client';
+import { AiError, PROVIDERS, aiErrorText, aiErrorMsg, aiSettings, forgetKey, hostedAi, providerInfo, saveAi, setAiOn, testKey, type AiProvider } from './client';
 
 /** Switching AI on (or changing its settings when `settings` is set). */
 export function AiConsent({ sheet, why, onAnswer, settings }: { sheet: boolean; why: string; onAnswer: (yes: boolean) => void; settings?: boolean }) {
@@ -27,9 +27,9 @@ export function AiConsent({ sheet, why, onAnswer, settings }: { sheet: boolean; 
     setCheck('busy');
     const err = await testKey(prov, key, model);
     if (!err) { setCheck('ok'); return true; }
-    setCheck(t(aiErrorText(new AiError(err))));
+    setCheck(aiErrorMsg(err, t));
     // offline or busy: the key may still be right
-    return !(err === 'bad_key' || err === 'bad_model');
+    return !(err.code === 'bad_key' || err.code === 'bad_model');
   };
   const go = async () => {
     if (own && !key.trim()) return;

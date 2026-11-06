@@ -4,7 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useBack } from '../back';
 import { Icon } from '../icons';
 import { t, tn } from '../i18n';
-import { ai, aiErrorText, aiReport, aiTarget, answerLang, AiError, type AiLang } from './client';
+import { ai, aiErrorText, aiErrorMsg, aiReport, aiTarget, answerLang, AiError, type AiLang } from './client';
 export { AiConsent } from './Consent';
 
 const LANGS: [AiLang, string][] = [['en', 'English'], ['de', 'Deutsch'], ['fa', 'فارسی']];
@@ -84,7 +84,7 @@ export function AiRewrite({ sheet, text, oneLine, maxChars, context, onApply, on
       const r = await ai<{ text: string }>('rewrite', { text: out ?? text, action, oneLine, maxChars, context, ...extra }, c.signal);
       const v = oneLine ? r.text.replace(/\s*\n\s*/g, ' ').trim() : r.text.trim();
       setOut(v);
-    } catch (e) { if (!(e instanceof AiError && e.code === 'aborted')) setErr(t(aiErrorText(e))); } finally { if (ctl.current === c) setBusy(null); }
+    } catch (e) { if (!(e instanceof AiError && e.code === 'aborted')) setErr(aiErrorMsg(e, t)); } finally { if (ctl.current === c) setBusy(null); }
   };
   return (
     <Sheet sheet={sheet} cls="ai-rewrite" label={t('Rewrite with AI')} icon="sparkle:fill" onClose={onClose}
@@ -163,7 +163,7 @@ export function AiSheet({ sheet, initial = 'overview', getDoc, cache, onGoPage, 
     ctl.current = c;
     setBusy(what); setErr(null);
     try { return await fn(c.signal); } catch (e) {
-      if (!(e instanceof AiError && e.code === 'aborted')) setErr(t(aiErrorText(e)));
+      if (!(e instanceof AiError && e.code === 'aborted')) setErr(aiErrorMsg(e, t));
       return null;
     } finally { if (ctl.current === c) setBusy(null); }
   };

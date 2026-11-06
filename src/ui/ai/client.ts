@@ -100,7 +100,8 @@ function deviceId(): string {
 }
 
 export class AiError extends Error {
-  constructor(public code: 'off' | 'offline' | 'limit' | 'busy' | 'too_big' | 'not_configured' | 'failed' | 'aborted' | 'bad_key' | 'quota' | 'bad_model') { super(code); }
+  /** detail: the provider's own message (own key), shown under ours so the cause is visible */
+  constructor(public code: 'off' | 'offline' | 'limit' | 'busy' | 'too_big' | 'not_configured' | 'failed' | 'aborted' | 'bad_key' | 'quota' | 'bad_model', public detail = '') { super(code); }
 }
 
 /** the answer language: the app's language unless the user picked another */
@@ -137,35 +138,57 @@ export async function ai<T = any>(task: AiTask, input: Record<string, unknown>, 
 /** test address for a provider (end-to-end tests only) */
 const baseFor = (p: Provider) => { try { return localStorage.getItem(`pe.ai.base.${p}`) || undefined; } catch { return undefined; } };
 
+/** other models to try with the user's key when the default one is overloaded or unknown */
+const FALLBACK: Record<Provider, string[]> = {
+  anthropic: ['claude-haiku-5-5', 'claude-sonnet-5-5', 'claude-haiku-4-5'],
+  openai: ['gpt-5.4-mini', 'gpt-5-mini'],
+  gemini: ['gemini-2.5-flash', 'gemini-flash-lite-latest'],
+};
+
+/** a provider error → our error code (with the provider's own message) */
+function mapError(e: any, name: string, errorMessage: (d: string) => string): AiError {
+  const d = (e.detail ?? '').toLowerCase();
+  const said = e.status ? `${name}: ${errorMessage(e.detail ?? '') || `HTTP ${e.status}`}` : `${name}: ${e.detail}`;
+  if (e.status === 0) return new AiError('failed', said);
+  if (e.status === 401 || e.status === 403 || e.status === 400 && /api key|api_key|invalid.*key|x-api-key|permission/.test(d)) return new AiError('bad_key', said);
+  if (e.status === 404 || /model.*(not found|does not exist|not supported)|unknown model|not_found_error/.test(d)) return new AiError('bad_model', said);
+  if (e.status === 429 || e.status === 402 || /quota|credit|billing|insufficient|resource_exhausted/.test(d)) return new AiError('quota', said);
+  if (e.status === 413 || e.status === 400 && /too long|too large|maximum context|context length|token/.test(d)) return new AiError('too_big', said);
+  if (e.status >= 500) return new AiError('busy', said);
+  return new AiError('failed', said);
+}
+
 /** the user's own key: the app calls the provider itself (same prompts and answer formats as the proxy) */
 async function direct<T>(p: Provider, key: string, model: string | undefined, task: AiTask, input: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   let mods;
   try { mods = await loadDirect(); } catch { throw new AiError('offline'); }
-  const [{ buildSpec }, { callModel, ProviderError }] = mods;
+  const [{ buildSpec }, { callModel, ProviderError, errorMessage }] = mods;
   let spec;
   try { spec = buildSpec(task, { today: new Date().toISOString().slice(0, 10), ...input }); } catch { throw new AiError('failed'); }
   const info = providerInfo(p);
-  try {
-    return await callModel({ provider: p, key, model: model || (spec.model === 'fast' ? info.fast : info.smart), browser: true, signal, base: baseFor(p) }, spec) as T;
-  } catch (e: any) {
-    if (e?.name === 'AbortError') throw new AiError('aborted');
-    if (e instanceof ProviderError) {
-      const d = e.detail.toLowerCase();
-      if (e.status === 401 || e.status === 403 || /api key|api_key|invalid.*key|permission/.test(d) && e.status === 400) throw new AiError('bad_key');
-      if (e.status === 404 || /model.*(not found|does not exist|not supported)|unknown model/.test(d)) throw new AiError('bad_model');
-      if (e.status === 429 || e.status === 402 || /quota|credit|billing|insufficient/.test(d)) throw new AiError('quota');
-      if (e.status === 413 || /too long|too large|maximum context|context length|token/.test(d) && e.status === 400) throw new AiError('too_big');
-      if (e.status >= 500) throw new AiError('busy');
-      throw new AiError('failed');
+  const first = model || (spec.model === 'fast' ? info.fast : info.smart);
+  // a model the user typed is used alone; the default may fall back to others when it is busy, unknown or gives no answer
+  const models = model ? [model] : [first, ...FALLBACK[p].filter((m) => m !== first)];
+  let err: AiError | undefined;
+  for (const m of models) {
+    try {
+      return await callModel({ provider: p, key, model: m, browser: true, signal, base: baseFor(p) }, spec) as T;
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new AiError('aborted');
+      if (!(e instanceof ProviderError)) throw new AiError('offline', `${info.name}: ${e?.message ?? e}`);
+      const mapped = mapError(e, info.name, errorMessage);
+      // the first error is the one to show (a fallback model's "not found" would hide the real cause)
+      err ??= mapped;
+      if (!['busy', 'bad_model', 'failed'].includes(mapped.code)) throw err;
     }
-    throw new AiError('offline');
   }
+  throw err!;
 }
 
-/** check a key with a tiny request; null when it works, else the error code */
-export async function testKey(p: Provider, key: string, model?: string): Promise<AiError['code'] | null> {
+/** check a key with a tiny request; null when it works, else the error */
+export async function testKey(p: Provider, key: string, model?: string): Promise<AiError | null> {
   try { await direct(p, key.trim(), model?.trim() || undefined, 'name', { text: 'Wien, 15.10.2026\nRechnung Nr. 1\nMuster GmbH' }); return null; }
-  catch (e) { return e instanceof AiError ? e.code : 'failed'; }
+  catch (e) { return e instanceof AiError ? e : new AiError('failed'); }
 }
 
 /** report an answer as offensive or wrong (sent to the developer; only this answer) */
@@ -198,6 +221,13 @@ export function aiErrorText(e: unknown): string {
     case 'aborted': return 'Stopped';
     default: return 'The AI could not answer. Try again.';
   }
+}
+
+/** our message (translated) plus the provider's own words, when there are any */
+export function aiErrorMsg(e: unknown, tr: (s: string) => string): string {
+  const m = tr(aiErrorText(e));
+  const d = e instanceof AiError ? e.detail : '';
+  return d ? `${m} (${d})` : m;
 }
 
 /** re-renders when AI is switched on or off */
